@@ -209,6 +209,12 @@
   <button class="rail-btn" data-target="sec-watchlist" data-tip="Watchlist">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 6.5 7 1-5 5 1.5 7L12 18l-6.5 3.5L7 14.5l-5-5 7-1z"/></svg>
   </button>
+  <button class="rail-btn" data-target="sec-heatmap" data-tip="Sector heatmap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="5"/><rect x="10" y="3" width="5" height="5"/><rect x="17" y="3" width="4" height="5"/><rect x="3" y="10" width="5" height="5"/><rect x="10" y="10" width="5" height="5"/><rect x="3" y="17" width="5" height="4"/></svg>
+  </button>
+  <button class="rail-btn" data-target="sec-alerts" data-tip="Price alerts">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+  </button>
   <div class="rail-spacer"></div>
   <button class="rail-btn" id="collapseBtn" data-tip="Collapse">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
@@ -291,6 +297,7 @@
     <div class="panel-head"><h3>Multi-stock screener</h3><span class="metric-sub" id="screenerCount"></span></div>
     <div class="filters">
       <button class="btn scan-btn" id="screenerScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan now</button>
+      <button class="btn" id="exportScreenerBtn">Export CSV</button>
       <label class="toggle-mini"><input type="checkbox" id="autoScanToggle" checked> Auto-scan every 60s</label>
       <input id="screenerSearch" placeholder="Search stock or sector...">
       <select id="screenerFilter">
@@ -355,8 +362,34 @@
   </section>
 
   <section id="sec-watchlist" class="panel">
-    <div class="panel-head"><h3>Watchlist</h3><span class="metric-sub">Click the &#9734; next to any stock's price to add it here</span></div>
+    <div class="panel-head"><h3>Watchlist</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="metric-sub">Click the &#9734; next to any stock's price to add it here</span>
+        <button class="btn" id="exportWatchlistBtn">Export CSV</button>
+      </div>
+    </div>
     <div id="watchlistBody" class="metric-sub">No stocks watched yet.</div>
+  </section>
+
+  <section id="sec-heatmap" class="panel">
+    <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
+    <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
+  </section>
+
+  <section id="sec-alerts" class="panel">
+    <div class="panel-head"><h3>Price alerts</h3><span class="metric-sub">Simpler than a paper position &mdash; just get notified when a price level is crossed, no target/SL required</span></div>
+    <div class="order-form" style="margin-top:0;">
+      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr auto;">
+        <div><label>Stock</label><select id="alertStock"></select></div>
+        <div><label>Condition</label><select id="alertCondition"><option value="above">Price goes above</option><option value="below">Price goes below</option></select></div>
+        <div><label>Price (&#8377;)</label><input id="alertPrice" type="number" step="0.01" placeholder="e.g. 1500"></div>
+        <div style="display:flex;align-items:end;"><button class="btn" id="addAlertBtn" style="width:100%;">Add alert</button></div>
+      </div>
+    </div>
+    <table style="margin-top:14px;">
+      <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
+      <tbody id="alertsBody"></tbody>
+    </table>
   </section>
 
   <div class="grid cols-2b">
@@ -409,7 +442,9 @@
     </div>
     <div class="strategy-desc" id="btStrategyDesc"></div>
     <div class="bt-results" id="btResults" style="display:none;"></div>
-    <div style="overflow-x:auto;"><table id="btCompareTable" style="display:none;margin-bottom:14px;">
+    <div style="overflow-x:auto;">
+    <button class="btn" id="exportBtBtn" style="margin-bottom:8px;display:none;">Export CSV</button>
+    <table id="btCompareTable" style="display:none;margin-bottom:14px;">
       <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
       <tbody id="btCompareBody"></tbody>
     </table></div>
@@ -492,7 +527,165 @@ const STOCKS = [
 ["OBEROIRLTY","Oberoi Realty","Real Estate",1864.70],
 ["SUZLON","Suzlon Energy","Power",57.67],
 ["IDEA","Vodafone Idea Ltd","Telecom",8.45],
-["YESBANK","Yes Bank Ltd","Banking",19.80]
+["YESBANK","Yes Bank Ltd","Banking",19.80],
+["PNB","Punjab National Bank","Banking",98.50],
+["BANKBARODA","Bank of Baroda","Banking",235.00],
+["CANBK","Canara Bank","Banking",98.20],
+["UNIONBANK","Union Bank of India","Banking",118.30],
+["IDFCFIRSTB","IDFC First Bank","Banking",68.40],
+["INDUSINDBK","IndusInd Bank","Banking",985.00],
+["FEDERALBNK","Federal Bank","Banking",195.00],
+["AUBANK","AU Small Finance Bank","Banking",625.00],
+["BANDHANBNK","Bandhan Bank","Banking",165.00],
+["PFC","Power Finance Corp","Finance",425.00],
+["RECLTD","REC Ltd","Finance",520.00],
+["SBILIFE","SBI Life Insurance","Finance",1550.00],
+["HDFCLIFE","HDFC Life Insurance","Finance",640.00],
+["ICICIPRULI","ICICI Prudential Life","Finance",620.00],
+["ICICIGI","ICICI Lombard General Insurance","Finance",1850.00],
+["MUTHOOTFIN","Muthoot Finance","Finance",1780.00],
+["CHOLAFIN","Cholamandalam Investment","Finance",1420.00],
+["LICHSGFIN","LIC Housing Finance","Finance",625.00],
+["SHRIRAMFIN","Shriram Finance","Finance",3050.00],
+["LTIM","LTIMindtree","IT",5450.00],
+["TECHM","Tech Mahindra","IT",1620.00],
+["MPHASIS","Mphasis Ltd","IT",2780.00],
+["PERSISTENT","Persistent Systems","IT",5650.00],
+["COFORGE","Coforge Ltd","IT",7850.00],
+["LTTS","L&T Technology Services","IT",4650.00],
+["ZOMATO","Eternal (Zomato)","Consumer",245.00],
+["NYKAA","FSN E-Commerce (Nykaa)","Consumer",175.00],
+["PAYTM","One97 Communications (Paytm)","Finance",680.00],
+["POLICYBZR","PB Fintech (Policybazaar)","Finance",1580.00],
+["DMART","Avenue Supermarts (DMart)","Consumer",3950.00],
+["TRENT","Trent Ltd","Consumer",5850.00],
+["PIDILITIND","Pidilite Industries","Chemicals",2950.00],
+["BERGEPAINT","Berger Paints","Consumer",520.00],
+["MARICO","Marico Ltd","FMCG",620.00],
+["DABUR","Dabur India","FMCG",545.00],
+["COLPAL","Colgate-Palmolive India","FMCG",2650.00],
+["TATACONSUM","Tata Consumer Products","FMCG",950.00],
+["VBL","Varun Beverages","FMCG",575.00],
+["UNITDSPR","United Spirits","FMCG",1580.00],
+["PGHH","Procter & Gamble Hygiene","FMCG",15800.00],
+["JUBLFOOD","Jubilant FoodWorks","Consumer",620.00],
+["PAGEIND","Page Industries","Consumer",41500.00],
+["HAVELLS","Havells India","Consumer",1650.00],
+["VOLTAS","Voltas Ltd","Consumer",1420.00],
+["CROMPTON","Crompton Greaves Consumer","Consumer",380.00],
+["WHIRLPOOL","Whirlpool of India","Consumer",1650.00],
+["BLUESTARCO","Blue Star Ltd","Consumer",1850.00],
+["POLYCAB","Polycab India","Electronics",6950.00],
+["KAYNES","Kaynes Technology","Electronics",5850.00],
+["AMBER","Amber Enterprises","Electronics",5650.00],
+["APOLLOHOSP","Apollo Hospitals","Pharma",7250.00],
+["LUPIN","Lupin Ltd","Pharma",2150.00],
+["AUROPHARMA","Aurobindo Pharma","Pharma",1350.00],
+["ALKEM","Alkem Laboratories","Pharma",5450.00],
+["TORNTPHARM","Torrent Pharmaceuticals","Pharma",3450.00],
+["ZYDUSLIFE","Zydus Lifesciences","Pharma",1080.00],
+["BIOCON","Biocon Ltd","Pharma",385.00],
+["MANKIND","Mankind Pharma","Pharma",2650.00],
+["LAURUSLABS","Laurus Labs","Pharma",680.00],
+["GLAND","Gland Pharma","Pharma",1750.00],
+["ABBOTINDIA","Abbott India","Pharma",32500.00],
+["MAXHEALTH","Max Healthcare","Pharma",1180.00],
+["FORTIS","Fortis Healthcare","Pharma",850.00],
+["ASHOKLEY","Ashok Leyland","Auto",235.00],
+["BAJAJ-AUTO","Bajaj Auto","Auto",9250.00],
+["MOTHERSON","Samvardhana Motherson","Auto",165.00],
+["BOSCHLTD","Bosch Ltd","Auto",38500.00],
+["EXIDEIND","Exide Industries","Auto",485.00],
+["MRF","MRF Ltd","Auto",148500.00],
+["BALKRISIND","Balkrishna Industries","Auto",3150.00],
+["APOLLOTYRE","Apollo Tyres","Auto",520.00],
+["ESCORTS","Escorts Kubota","Auto",3650.00],
+["SONACOMS","Sona BLW Precision","Auto",650.00],
+["JSWENERGY","JSW Energy","Power",685.00],
+["TORNTPOWER","Torrent Power","Power",1650.00],
+["NHPC","NHPC Ltd","Power",98.50],
+["SJVN","SJVN Ltd","Power",125.00],
+["IEX","Indian Energy Exchange","Power",185.00],
+["JINDALSTEL","Jindal Steel & Power","Metals",985.00],
+["SAIL","Steel Authority of India","Metals",148.00],
+["NMDC","NMDC Ltd","Mining",235.00],
+["VEDL","Vedanta Ltd","Metals",485.00],
+["HINDALCO","Hindalco Industries","Metals",685.00],
+["HINDZINC","Hindustan Zinc","Metals",485.00],
+["NATIONALUM","National Aluminium","Metals",225.00],
+["APLAPOLLO","APL Apollo Tubes","Metals",1650.00],
+["AMBUJACEM","Ambuja Cements","Cement",625.00],
+["SHREECEM","Shree Cement","Cement",28500.00],
+["ACC","ACC Ltd","Cement",2250.00],
+["DALBHARAT","Dalmia Bharat","Cement",1980.00],
+["RAMCOCEM","Ramco Cements","Cement",1050.00],
+["SIEMENS","Siemens Ltd","Infra",7250.00],
+["ABB","ABB India","Infra",8650.00],
+["CUMMINSIND","Cummins India","Infra",4250.00],
+["THERMAX","Thermax Ltd","Infra",5850.00],
+["BEL","Bharat Electronics","Infra",325.00],
+["HAL","Hindustan Aeronautics","Infra",4850.00],
+["BEML","BEML Ltd","Infra",4250.00],
+["IRCTC","Indian Railway Catering (IRCTC)","Infra",985.00],
+["RVNL","Rail Vikas Nigam","Infra",485.00],
+["RITES","RITES Ltd","Infra",850.00],
+["CONCOR","Container Corp of India","Infra",1050.00],
+["GMRAIRPORT","GMR Airports","Infra",95.00],
+["IRFC","Indian Railway Finance Corp","Finance",165.00],
+["PIIND","PI Industries","Chemicals",3850.00],
+["UPL","UPL Ltd","Chemicals",625.00],
+["SRF","SRF Ltd","Chemicals",2450.00],
+["AARTIIND","Aarti Industries","Chemicals",485.00],
+["DEEPAKNTR","Deepak Nitrite","Chemicals",2350.00],
+["TATACHEM","Tata Chemicals","Chemicals",985.00],
+["GNFC","Gujarat Narmada Valley Fertilizers","Chemicals",625.00],
+["COROMANDEL","Coromandel International","Chemicals",1850.00],
+["GODREJPROP","Godrej Properties","Real Estate",2450.00],
+["DLF","DLF Ltd","Real Estate",785.00],
+["PRESTIGE","Prestige Estates","Real Estate",1650.00],
+["PHOENIXLTD","Phoenix Mills","Real Estate",1650.00],
+["LODHA","Macrotech Developers (Lodha)","Real Estate",1250.00],
+["BRIGADE","Brigade Enterprises","Real Estate",1150.00],
+["ZEEL","Zee Entertainment","Media",125.00],
+["SUNTV","Sun TV Network","Media",625.00],
+["PVRINOX","PVR INOX","Media",1350.00],
+["NAUKRI","Info Edge (Naukri)","IT",6850.00],
+["INDIGO","InterGlobe Aviation (IndiGo)","Infra",4250.00],
+["ADANIPOWER","Adani Power","Power",625.00],
+["ADANIENSOL","Adani Energy Solutions","Power",985.00],
+["ADANIWILMAR","Adani Wilmar","FMCG",325.00],
+["ATGL","Adani Total Gas","Energy",685.00],
+["GAIL","GAIL India","Energy",210.00],
+["PETRONET","Petronet LNG","Energy",325.00],
+["MGL","Mahanagar Gas","Energy",1450.00],
+["IGL","Indraprastha Gas","Energy",425.00],
+["HINDPETRO","Hindustan Petroleum","Energy",425.00],
+["OIL","Oil India","Energy",485.00],
+["LTF","L&T Finance","Finance",165.00],
+["BAJAJHLDNG","Bajaj Holdings","Finance",12500.00],
+["INDIANB","Indian Bank","Banking",585.00],
+["MFSL","Max Financial Services","Finance",1250.00],
+["360ONE","360 ONE WAM","Finance",1150.00],
+["ANGELONE","Angel One Ltd","Finance",2850.00],
+["CDSL","Central Depository Services","Finance",1650.00],
+["BSE","BSE Ltd","Finance",5850.00],
+["MCX","Multi Commodity Exchange","Finance",6850.00],
+["CAMS","Computer Age Management Services","Finance",4250.00],
+["KPITTECH","KPIT Technologies","IT",1450.00],
+["TATAELXSI","Tata Elxsi","IT",6850.00],
+["CYIENT","Cyient Ltd","IT",1650.00],
+["ZFCVINDIA","ZF Commercial Vehicle Control Systems","Auto",13500.00],
+["TIINDIA","Tube Investments of India","Auto",3250.00],
+["SCHAEFFLER","Schaeffler India","Auto",3850.00],
+["MINDACORP","Minda Corporation","Auto",485.00],
+["UNOMINDA","UNO Minda","Auto",1050.00],
+["JKCEMENT","JK Cement","Cement",4850.00],
+["INDIACEM","India Cements","Cement",325.00],
+["ASTRAL","Astral Ltd","Consumer",1650.00],
+["SUPREMEIND","Supreme Industries","Consumer",4250.00],
+["CERA","Cera Sanitaryware","Consumer",7850.00],
+["KAJARIACER","Kajaria Ceramics","Consumer",1250.00],
+["EIDPARRY","EID Parry","FMCG",825.00]
 ];
 
 const SEGMENTS_BY_SECTOR = {
@@ -814,6 +1007,8 @@ function selectStock(symbol){
   renderVolumeProfile(d);
   renderPositions();
   populateBacktestStockList();
+  populateAlertStockList();
+  renderPriceAlerts();
   setLiveStatus('connecting');
   tickLive();
 }
@@ -1407,6 +1602,20 @@ function showAlertBanner(pos, kind){
 }
 if(window.Notification && Notification.permission==='default'){ try{ Notification.requestPermission(); }catch(e){} }
 
+function showPriceAlertBanner(a){
+  const host=document.getElementById('alertHost');
+  const div=document.createElement('div');
+  div.className='alert-banner target';
+  div.innerHTML = `<span>&#128276; Price alert &mdash; ${a.symbol} ${a.condition==='above'?'crossed above':'crossed below'} &#8377;${fmt(a.price,2)} (now &#8377;${fmt(a.lastPrice,2)})</span>
+    <button>Dismiss</button>`;
+  div.querySelector('button').addEventListener('click',()=>div.remove());
+  host.appendChild(div);
+  playAlertTone('target');
+  if(window.Notification && Notification.permission==='granted'){
+    new Notification('Price alert', {body:`${a.symbol} ${a.condition} ₹${fmt(a.price,2)}`});
+  }
+}
+
 // Background monitor: checks every open position's live price regardless of
 // which tab/section is currently visible, so alerts aren't missed.
 window.ALERT_MONITOR_STARTED = false;
@@ -1415,31 +1624,45 @@ function ensureAlertMonitor(){
   window.ALERT_MONITOR_STARTED = true;
   setInterval(async ()=>{
     const openPos = window.POSITIONS.filter(p=>p.status==='open');
-    if(!openPos.length) return;
-    const uniqueSymbols=[...new Set(openPos.map(p=>p.symbol))];
-    for(const sym of uniqueSymbols){
-      let price=null;
+    const activeAlerts = window.PRICE_ALERTS.filter(a=>a.status==='active');
+    if(!openPos.length && !activeAlerts.length) return;
+
+    const allSymbols=[...new Set([...openPos.map(p=>p.symbol), ...activeAlerts.map(a=>a.symbol)])];
+    const priceCache={};
+    for(const sym of allSymbols){
       try{
         const q = await fetchYahooChart(sym);
-        price = q.price;
+        priceCache[sym] = q.price;
       }catch(e){
-        const ref = openPos.find(p=>p.symbol===sym);
-        const base = ref.lastPrice || ref.entryPrice;
-        price = base*(1+(Math.random()-0.5)*0.006);
+        const refPos = openPos.find(p=>p.symbol===sym);
+        const refAlert = activeAlerts.find(a=>a.symbol===sym);
+        const base = (refPos && (refPos.lastPrice||refPos.entryPrice)) || (refAlert && (refAlert.lastPrice||refAlert.price)) || 100;
+        priceCache[sym] = base*(1+(Math.random()-0.5)*0.006);
       }
-      openPos.filter(p=>p.symbol===sym).forEach(p=>{
-        p.lastPrice=price;
-        if(p.side==='buy'){
-          if(price>=p.target){ p.status='target'; showAlertBanner(p,'target'); }
-          else if(price<=p.stopLoss){ p.status='stoploss'; showAlertBanner(p,'stoploss'); }
-        } else {
-          if(price<=p.target){ p.status='target'; showAlertBanner(p,'target'); }
-          else if(price>=p.stopLoss){ p.status='stoploss'; showAlertBanner(p,'stoploss'); }
-        }
-      });
     }
+
+    openPos.forEach(p=>{
+      const price = priceCache[p.symbol];
+      p.lastPrice=price;
+      if(p.side==='buy'){
+        if(price>=p.target){ p.status='target'; showAlertBanner(p,'target'); }
+        else if(price<=p.stopLoss){ p.status='stoploss'; showAlertBanner(p,'stoploss'); }
+      } else {
+        if(price<=p.target){ p.status='target'; showAlertBanner(p,'target'); }
+        else if(price>=p.stopLoss){ p.status='stoploss'; showAlertBanner(p,'stoploss'); }
+      }
+    });
+    activeAlerts.forEach(a=>{
+      const price = priceCache[a.symbol];
+      a.lastPrice=price;
+      if(a.condition==='above' && price>=a.price){ a.status='triggered'; showPriceAlertBanner(a); }
+      else if(a.condition==='below' && price<=a.price){ a.status='triggered'; showPriceAlertBanner(a); }
+    });
+
     persistPositions();
     renderPositions();
+    persistPriceAlerts();
+    renderPriceAlerts();
   }, 8000);
 }
 if(window.POSITIONS.some(p=>p.status==='open')) ensureAlertMonitor();
@@ -1484,6 +1707,106 @@ async function renderFnoIndices(){
   }));
 }
 document.getElementById('fnoScanBtn')?.addEventListener('click', renderFnoIndices);
+
+/* ============================================================
+   CSV EXPORT
+   ============================================================ */
+function downloadCSV(filename, headers, rows){
+  const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+  const csv = [headers.map(esc).join(','), ...rows.map(r=>r.map(esc).join(','))].join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+document.getElementById('exportScreenerBtn')?.addEventListener('click', ()=>{
+  const rows = [...document.querySelectorAll('#screenerBody tr')].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+  if(!rows.length){ alert('No screener rows to export — run a scan first.'); return; }
+  downloadCSV('screener.csv', ['Stock','Sector','Price','Change','RSI','Signal','Volume'], rows);
+});
+document.getElementById('exportWatchlistBtn')?.addEventListener('click', ()=>{
+  if(!window.WATCHLIST.length){ alert('Watchlist is empty.'); return; }
+  const rows = window.WATCHLIST.map(sym=>{const r=STOCKS.find(s=>s[0]===sym); if(!r) return null; const d=generateStockData(r[0],r[1],r[2],r[3]); return [d.symbol,d.sector,d.price.toFixed(2),d.changePct.toFixed(2)+'%',d.signalLabel];}).filter(Boolean);
+  downloadCSV('watchlist.csv', ['Stock','Sector','Price','Change','Signal'], rows);
+});
+document.getElementById('exportBtBtn')?.addEventListener('click', ()=>{
+  const rows = [...document.querySelectorAll('#btCompareBody tr')].map(tr=>[...tr.children].map(td=>td.textContent.trim()));
+  if(!rows.length){ alert('Run a comparison backtest first.'); return; }
+  downloadCSV('backtest-comparison.csv', ['Strategy','Trades','Win rate','Total return','Profit factor','Max drawdown'], rows);
+});
+
+/* ============================================================
+   SECTOR HEATMAP
+   ============================================================ */
+function renderHeatmap(){
+  const grid=document.getElementById('heatmapGrid');
+  if(!grid) return;
+  const all = signalCounts();
+  const bySector={};
+  all.forEach(d=>{ (bySector[d.sector]=bySector[d.sector]||[]).push(d); });
+  const tiles = Object.entries(bySector).map(([sector,stocks])=>{
+    const avgChg = stocks.reduce((a,d)=>a+d.changePct,0)/stocks.length;
+    return {sector, count:stocks.length, avgChg};
+  }).sort((a,b)=>b.avgChg-a.avgChg);
+  grid.innerHTML = tiles.map(t=>{
+    const intensity = Math.min(1, Math.abs(t.avgChg)/3);
+    const bg = t.avgChg>=0 ? `rgba(38,194,129,${0.12+intensity*0.35})` : `rgba(239,83,80,${0.12+intensity*0.35})`;
+    const border = t.avgChg>=0 ? 'var(--green)' : 'var(--red)';
+    return `<div class="row-click" data-sector="${t.sector}" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${t.sector}</div>
+      <div style="font-size:18px;font-weight:700;" class="${t.avgChg>=0?'up':'down'}">${t.avgChg>=0?'+':''}${t.avgChg.toFixed(2)}%</div>
+      <div class="metric-sub">${t.count} stocks</div>
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('[data-sector]').forEach(el=>el.addEventListener('click',()=>{
+    document.getElementById('sec-screener').scrollIntoView({behavior:'smooth'});
+    const sel=document.getElementById('screenerSector');
+    sel.value = el.dataset.sector;
+    renderScreener();
+  }));
+}
+
+/* ============================================================
+   PRICE ALERTS (simpler than a paper position — just a level cross)
+   ============================================================ */
+window.PRICE_ALERTS = (function(){ try{ return JSON.parse(localStorage.getItem('priceAlerts')||'[]'); }catch(e){ return []; } })();
+function persistPriceAlerts(){ try{ localStorage.setItem('priceAlerts', JSON.stringify(window.PRICE_ALERTS)); }catch(e){} }
+function populateAlertStockList(){
+  const sel=document.getElementById('alertStock');
+  if(!sel || sel.options.length) return;
+  sel.innerHTML = STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+}
+document.getElementById('addAlertBtn')?.addEventListener('click', ()=>{
+  const symbol = document.getElementById('alertStock').value;
+  const condition = document.getElementById('alertCondition').value;
+  const price = parseFloat(document.getElementById('alertPrice').value);
+  if(!price || price<=0){ alert('Enter a valid price level.'); return; }
+  window.PRICE_ALERTS.push({id:Date.now()+'-'+symbol, symbol, condition, price, status:'active', createdAt:new Date().toISOString()});
+  persistPriceAlerts();
+  document.getElementById('alertPrice').value='';
+  renderPriceAlerts();
+  ensureAlertMonitor();
+});
+function renderPriceAlerts(){
+  const body=document.getElementById('alertsBody');
+  if(!body) return;
+  if(!window.PRICE_ALERTS.length){ body.innerHTML='<tr><td colspan="6" class="lbl">No alerts set.</td></tr>'; return; }
+  body.innerHTML = window.PRICE_ALERTS.slice().reverse().map(a=>{
+    const current = (window.CURRENT && window.CURRENT.symbol===a.symbol) ? window.CURRENT.price : (a.lastPrice||null);
+    return `<tr><td>${a.symbol}</td><td class="lbl">${a.condition==='above'?'Goes above':'Goes below'}</td><td>&#8377;${fmt(a.price,2)}</td>
+      <td>${current!=null?'&#8377;'+fmt(current,2):'&ndash;'}</td>
+      <td><span class="signal-chip ${a.status==='active'?'sig-hold':'sig-strongbuy'}">${a.status.toUpperCase()}</span></td>
+      <td>${a.status==='active'?`<button class="btn" data-remove-alert="${a.id}">Remove</button>`:''}</td></tr>`;
+  }).join('');
+  body.querySelectorAll('[data-remove-alert]').forEach(b=>b.addEventListener('click',()=>{
+    window.PRICE_ALERTS = window.PRICE_ALERTS.filter(a=>a.id!==b.dataset.removeAlert);
+    persistPriceAlerts(); renderPriceAlerts();
+  }));
+}
+if(window.PRICE_ALERTS.some(a=>a.status==='active')) ensureAlertMonitor();
+
 
 /* ============================================================
    BACKTEST TAB
@@ -1694,6 +2017,7 @@ document.getElementById('btRun')?.addEventListener('click', async ()=>{
     // Compare each checked strategy independently, side by side
     btResults.style.display='none';
     btCompareTable.style.display='table';
+    document.getElementById('exportBtBtn').style.display='inline-block';
     const rows=[]; const datasets=[];
     checked.forEach((k,idx)=>{
       const posSeries = STRATEGY_FN[k](closes);
@@ -1845,6 +2169,8 @@ renderTicker();
 renderTabBar();
 renderPositions();
 renderFnoIndices();
+renderHeatmap();
+renderScreener(); // populate the sector dropdown up front, so a heatmap-tile click works even before any stock is opened
 setupAutoScan();
 updateStrategyDesc();
 (function(){

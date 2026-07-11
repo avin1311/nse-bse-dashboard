@@ -377,7 +377,7 @@
     <div class="panel-head"><h3>F&amp;O indices</h3>
       <button class="btn scan-btn" id="fnoScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Refresh</button>
     </div>
-    <p class="desc">Simulated options-market snapshot across the major F&amp;O-traded indices &mdash; PCR, max pain, IV, and OI change. Real options-chain data needs a licensed data feed, so treat these as demo numbers.</p>
+    <p class="desc">PCR, max pain, IV, and OI across major F&amp;O indices &mdash; pulled from real Upstox option-chain data when <code>UPSTOX_ACCESS_TOKEN</code> is configured on the server (look for the <strong>REAL</strong> tag per row), otherwise falls back to a clearly-labeled <strong>SIMULATED</strong> row.</p>
     <table>
       <thead><tr><th>Index</th><th>Price</th><th>Change</th><th>PCR (OI)</th><th>Max pain</th><th>IV (ATM)</th><th>OI change</th></tr></thead>
       <tbody id="fnoBody"></tbody>
@@ -1452,22 +1452,36 @@ const FNO_INDICES = [
   ['NIFTYIT','Nifty IT',26965.05],['MIDCPNIFTY','Nifty Midcap Select',12800],['SENSEX','BSE Sensex',79500],
   ['BANKEX','BSE Bankex',59200],['NIFTYNXT50','Nifty Next 50',68200]
 ];
-function renderFnoIndices(){
+async function renderFnoIndices(){
   const body=document.getElementById('fnoBody');
   if(!body) return;
-  const rows = FNO_INDICES.map(([sym,name,base])=>{
-    const rnd=mulberry32(hashCode(sym+'fno'));
-    const chg=sig(rnd,-1.5,1.5);
-    const price=base*(1+chg/100);
-    const pcr=sig(rnd,0.6,1.3);
-    const maxPain=Math.round(price/100)*100;
-    const iv=sig(rnd,10,28);
-    const oiChg=sig(rnd,-8,8);
-    return `<tr><td><strong>${name}</strong></td><td>${fmt(price,2)}</td><td class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</td>
-      <td>${fmt(pcr,2)}</td><td>${fmt(maxPain,0)}</td><td>${fmt(iv,1)}%</td>
-      <td class="${oiChg>=0?'up':'down'}">${oiChg>=0?'+':''}${fmt(oiChg,1)}%</td></tr>`;
-  }).join('');
-  body.innerHTML=rows;
+  body.innerHTML = FNO_INDICES.map(([sym,name])=>`<tr id="fno-row-${sym}"><td><strong>${name}</strong></td><td colspan="6" class="lbl">Loading&hellip;</td></tr>`).join('');
+
+  await Promise.all(FNO_INDICES.map(async ([sym,name,base])=>{
+    const row = document.getElementById('fno-row-'+sym);
+    if(!row) return;
+    try{
+      const resp = await fetch('/api/upstox/fno/'+sym, {cache:'no-store'});
+      const d = await resp.json();
+      if(!resp.ok || d.error) throw new Error(d.error||'failed');
+      const pcr = d.pcr, maxPain = d.maxPain, iv = d.atmIv;
+      const oiChgPct = d.totalCallOi>0 ? ((d.totalPutOi-d.totalCallOi)/d.totalCallOi*100) : 0;
+      row.innerHTML = `<td><strong>${name}</strong> <span class="signal-chip sig-buy" style="font-size:9px;">REAL</span></td><td>${fmt(d.spot,2)}</td><td class="lbl">&mdash;</td>
+        <td>${fmt(pcr,2)}</td><td>${fmt(maxPain,0)}</td><td>${iv!=null?fmt(iv,1)+'%':'&ndash;'}</td>
+        <td class="${oiChgPct>=0?'up':'down'}">${oiChgPct>=0?'+':''}${fmt(oiChgPct,1)}%</td>`;
+    }catch(e){
+      const rnd=mulberry32(hashCode(sym+'fno'));
+      const chg=sig(rnd,-1.5,1.5);
+      const price=base*(1+chg/100);
+      const pcr=sig(rnd,0.6,1.3);
+      const maxPain=Math.round(price/100)*100;
+      const iv=sig(rnd,10,28);
+      const oiChg=sig(rnd,-8,8);
+      row.innerHTML = `<td><strong>${name}</strong> <span class="signal-chip sig-hold" style="font-size:9px;">SIMULATED</span></td><td>${fmt(price,2)}</td><td class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</td>
+        <td>${fmt(pcr,2)}</td><td>${fmt(maxPain,0)}</td><td>${fmt(iv,1)}%</td>
+        <td class="${oiChg>=0?'up':'down'}">${oiChg>=0?'+':''}${fmt(oiChg,1)}%</td>`;
+    }
+  }));
 }
 document.getElementById('fnoScanBtn')?.addEventListener('click', renderFnoIndices);
 

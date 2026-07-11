@@ -28,6 +28,20 @@ When there's an update, go to the file on your GitHub repo page → click the pe
 push and redeploys automatically within a minute or two — no downloads, no Command
 Prompt, no restarting anything yourself.
 
+## Real F&O data (Open Interest, Max Pain, PCR) via Upstox
+1. Log into Upstox → `account.upstox.com/developer/apps` → **Create new app**
+2. Open the app → **Analytics** tab → generate an **Analytics Token** (read-only, 1-year validity, no daily regeneration)
+3. On Render: your service → **Environment** tab → **Add Environment Variable** →
+   Key: `UPSTOX_ACCESS_TOKEN`, Value: your token → Save
+4. The F&O indices tab will show a **REAL** tag per row once it's working, or
+   **SIMULATED** if the token's missing/invalid/Upstox errors — it never breaks
+   the page either way.
+
+Note: a few Upstox developers have reported intermittent issues generating or
+using the Analytics Token (per their own community forum) — if a specific
+index keeps showing SIMULATED, check the Render logs for the actual error
+message from Upstox.
+
 ## Run it locally instead
 ```
 npm install

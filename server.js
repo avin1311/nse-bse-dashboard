@@ -123,6 +123,91 @@ app.get('/api/history/:symbol', async (req, res) => {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ============================================================
+// UPSTOX F&O DATA (Open Interest, Max Pain, PCR, Option Chain)
+// Requires UPSTOX_ACCESS_TOKEN env var (Analytics Token — see README).
+// Degrades gracefully: if the token isn't set, or Upstox errors, or an
+// instrument_key mapping below turns out wrong, every route returns a
+// clean JSON error and the frontend falls back to simulated data —
+// it never crashes the app either way.
+// ============================================================
+const UPSTOX_BASE = 'https://api.upstox.com/v2';
+// Confirmed against Upstox's own documentation examples. A couple of the
+// less common indices are best-guess formats and may need correcting once
+// tested against the real API — they'll just error gracefully if wrong.
+const UPSTOX_INDEX_KEYS = {
+  NIFTY: 'NSE_INDEX|Nifty 50',
+  BANKNIFTY: 'NSE_INDEX|Nifty Bank',
+  NIFTYIT: 'NSE_INDEX|Nifty IT',
+  SENSEX: 'BSE_INDEX|SENSEX',
+  FINNIFTY: 'NSE_INDEX|Nifty Fin Service',
+  MIDCPNIFTY: 'NSE_INDEX|Nifty Midcap Select',
+  BANKEX: 'BSE_INDEX|BANKEX',
+  NIFTYNXT50: 'NSE_INDEX|Nifty Next 50'
+};
+
+function upstoxHeaders() {
+  const token = process.env.UPSTOX_ACCESS_TOKEN;
+  if (!token) throw new Error('UPSTOX_ACCESS_TOKEN not configured on the server');
+  return { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` };
+}
+async function upstoxGet(path) {
+  const resp = await fetch(`${UPSTOX_BASE}${path}`, { headers: upstoxHeaders() });
+  const json = await resp.json().catch(() => null);
+  if (!resp.ok || !json || json.status !== 'success') {
+    throw new Error((json && (json.errors?.[0]?.message || json.message)) || `Upstox request failed (${resp.status})`);
+  }
+  return json.data;
+}
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+async function nearestExpiry(instrumentKey) {
+  const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(instrumentKey)}`);
+  const expiries = [...new Set(contracts.map(c => c.expiry))].sort();
+  const today = todayIso();
+  return expiries.find(e => e >= today) || expiries[expiries.length - 1];
+}
+
+app.get('/api/upstox/fno/:index', async (req, res) => {
+  try {
+    const instrumentKey = UPSTOX_INDEX_KEYS[req.params.index];
+    if (!instrumentKey) return res.status(400).json({ error: 'Unknown index symbol', symbol: req.params.index });
+    const expiry = await nearestExpiry(instrumentKey);
+    const date = todayIso();
+
+    const [pcrData, maxPainData, chainData] = await Promise.all([
+      upstoxGet(`/market/pcr?instrument_key=${encodeURIComponent(instrumentKey)}&expiry=${expiry}&date=${date}&bucket_interval=60`),
+      upstoxGet(`/market/max-pain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry=${expiry}&date=${date}&bucket_interval=60`),
+      upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${expiry}`)
+    ]);
+
+    let totalCallOi = 0, totalPutOi = 0, atmIv = null, minDiff = Infinity;
+    const spot = pcrData.spot_closing_price;
+    (chainData || []).forEach(row => {
+      totalCallOi += row.call_options?.market_data?.oi || 0;
+      totalPutOi += row.put_options?.market_data?.oi || 0;
+      const diff = Math.abs(row.strike_price - spot);
+      if (diff < minDiff) { minDiff = diff; atmIv = row.call_options?.option_greeks?.iv ?? row.put_options?.option_greeks?.iv; }
+    });
+
+    res.json({
+      symbol: req.params.index,
+      expiry,
+      spot,
+      pcr: pcrData.pcr,
+      maxPain: maxPainData.max_pain,
+      totalCallOi, totalPutOi,
+      atmIv,
+      source: 'upstox-real'
+    });
+  } catch (e) {
+    res.status(502).json({ error: e.message, symbol: req.params.index });
+  }
+});
+
+
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => {

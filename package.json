@@ -1,0 +1,16 @@
+{
+  "name": "nse-bse-dashboard",
+  "version": "1.0.0",
+  "description": "NSE + BSE analytics dashboard with a local live-data proxy for Yahoo Finance",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "license": "ISC"
+}

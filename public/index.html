@@ -302,6 +302,49 @@
         <option value="strongsell">Strong sell</option>
       </select>
       <select id="screenerSector"><option value="all">All sectors</option></select>
+      <button class="btn" id="moreFiltersBtn">More filters &#9662;</button>
+    </div>
+    <div id="moreFiltersPanel" style="display:none;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
+      <div class="grid cols-4" style="margin-bottom:0;">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Price range (&#8377;)</label>
+          <div style="display:flex;gap:6px;"><input id="fMinPrice" type="number" placeholder="Min" style="width:50%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;"><input id="fMaxPrice" type="number" placeholder="Max" style="width:50%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;"></div>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Market cap</label>
+          <select id="fMcap" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;">
+            <option value="all">All</option>
+            <option value="large">Large cap (&gt; &#8377;20,000 Cr)</option>
+            <option value="mid">Mid cap (&#8377;5,000&ndash;20,000 Cr)</option>
+            <option value="small">Small cap (&lt; &#8377;5,000 Cr)</option>
+            <option value="penny">Penny stock (price &lt; &#8377;50)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Min promoter holding (%)</label>
+          <input id="fPromoter" type="number" placeholder="e.g. 50" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Max P/E</label>
+          <input id="fMaxPE" type="number" placeholder="e.g. 30" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Min ROE (%)</label>
+          <input id="fMinROE" type="number" placeholder="e.g. 15" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Max D/E (low debt)</label>
+          <input id="fMaxDE" type="number" placeholder="e.g. 0.5" step="0.1" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:4px;">Min revenue growth (%)</label>
+          <input id="fMinRevGrowth" type="number" placeholder="e.g. 10" style="width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;">
+        </div>
+        <div style="display:flex;align-items:end;gap:10px;">
+          <label class="toggle-mini"><input type="checkbox" id="fDividendOnly"> Dividend-paying only</label>
+        </div>
+      </div>
+      <div style="margin-top:10px;"><button class="btn" id="clearFiltersBtn">Clear all filters</button></div>
     </div>
     <div style="max-height:360px;overflow-y:auto;">
       <table>
@@ -344,22 +387,34 @@
   <section id="sec-backtest" class="panel">
     <h3>Backtest a strategy</h3>
     <p class="desc">Runs against real daily closing prices via the local proxy when it's reachable (up to 2 years), otherwise a synthetic extended series. See the chat for a summary of what published backtests report for each strategy, and read the caveat about overfitting before trusting any win rate &mdash; including this tool's.</p>
-    <div class="bt-controls">
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr auto;">
       <div><label>Stock</label><select id="btStock"></select></div>
-      <div><label>Strategy</label><select id="btStrategy">
-        <option value="rsi">RSI Mean Reversion (14)</option>
-        <option value="macd">MACD Crossover (12/26/9)</option>
-        <option value="emarsi">EMA + RSI Combined</option>
-        <option value="supertrend">Supertrend Trend Following</option>
-        <option value="macross">Moving Average Crossover (50/200)</option>
-        <option value="bollinger">Bollinger Band Breakout (20,2)</option>
-      </select></div>
       <div><label>Lookback</label><select id="btRange"><option value="6mo">6 months</option><option value="1y" selected>1 year</option><option value="2y">2 years</option></select></div>
       <div><button class="btn" id="btRun" style="width:100%;padding:9px;">Run backtest</button></div>
     </div>
+    <div style="margin-bottom:14px;">
+      <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;">Strategies &mdash; check one or more to add them</label>
+      <div id="btStrategyList" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="rsi" checked> RSI Mean Reversion</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="macd"> MACD Crossover</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="emarsi"> EMA + RSI Combined</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="supertrend"> Supertrend Following</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="macross"> MA Crossover (50/200)</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="bollinger"> Bollinger Breakout</label>
+      </div>
+      <div style="display:flex;gap:16px;align-items:center;">
+        <label class="toggle-mini"><input type="radio" name="btMode" value="compare" checked> Compare separately</label>
+        <label class="toggle-mini"><input type="radio" name="btMode" value="combined"> Combined (only trade when all checked strategies agree)</label>
+      </div>
+    </div>
     <div class="strategy-desc" id="btStrategyDesc"></div>
     <div class="bt-results" id="btResults" style="display:none;"></div>
+    <div style="overflow-x:auto;"><table id="btCompareTable" style="display:none;margin-bottom:14px;">
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
+      <tbody id="btCompareBody"></tbody>
+    </table></div>
     <div class="chart-wrap" style="height:220px;display:none;" id="btChartWrap"><canvas id="btChart"></canvas></div>
+    <div class="legend" id="btChartLegend"></div>
     <div id="btStatus" class="metric-sub"></div>
   </section>
 
@@ -435,7 +490,9 @@ const STOCKS = [
 ["IOC","Indian Oil Corp","Energy",141.62],
 ["DIXON","Dixon Technologies","Electronics",12373],
 ["OBEROIRLTY","Oberoi Realty","Real Estate",1864.70],
-["SUZLON","Suzlon Energy","Power",57.67]
+["SUZLON","Suzlon Energy","Power",57.67],
+["IDEA","Vodafone Idea Ltd","Telecom",8.45],
+["YESBANK","Yes Bank Ltd","Banking",19.80]
 ];
 
 const SEGMENTS_BY_SECTOR = {
@@ -602,7 +659,7 @@ function generateStockData(symbol,name,sector,base){
   const pb = sig(rnd,0.6,7);
   const roe = sig(rnd,4,26);
   const roa = roe*sig(rnd,0.3,0.55);
-  const divYield = sig(rnd,0,3.2);
+  const divYield = rnd()<0.3 ? 0 : sig(rnd,0.2,3.2);
   const netMargin = sig(rnd,3,22);
   const opm = netMargin*sig(rnd,1.1,1.8);
   const revGrowth = sig(rnd,-4,28);
@@ -1061,6 +1118,11 @@ function setupAutoScan(){
   apply();
 }
 
+function marketCapCategory(d){
+  if(d.marketCapT >= 2) return 'large';   // marketCapT is in ₹ Trillion; 2T = ₹20,000 Cr
+  if(d.marketCapT >= 0.5) return 'mid';   // 0.5T = ₹5,000 Cr
+  return 'small';
+}
 function renderScreener(){
   const all = signalCounts();
   const sectorSel=document.getElementById('screenerSector');
@@ -1071,8 +1133,32 @@ function renderScreener(){
   const q=(document.getElementById('screenerSearch').value||'').toUpperCase();
   const filt=document.getElementById('screenerFilter').value;
   const sect=sectorSel.value;
-  let rows = all.filter(d=> (d.symbol.includes(q)||d.name.toUpperCase().includes(q)||d.sector.toUpperCase().includes(q))
-    && (filt==='all'||d.signal===filt) && (sect==='all'||d.sector===sect));
+  const minPrice=parseFloat(document.getElementById('fMinPrice').value);
+  const maxPrice=parseFloat(document.getElementById('fMaxPrice').value);
+  const mcap=document.getElementById('fMcap').value;
+  const minPromoter=parseFloat(document.getElementById('fPromoter').value);
+  const maxPE=parseFloat(document.getElementById('fMaxPE').value);
+  const minROE=parseFloat(document.getElementById('fMinROE').value);
+  const maxDE=parseFloat(document.getElementById('fMaxDE').value);
+  const minRevGrowth=parseFloat(document.getElementById('fMinRevGrowth').value);
+  const dividendOnly=document.getElementById('fDividendOnly').checked;
+
+  let rows = all.filter(d=>{
+    if(!(d.symbol.includes(q)||d.name.toUpperCase().includes(q)||d.sector.toUpperCase().includes(q))) return false;
+    if(filt!=='all' && d.signal!==filt) return false;
+    if(sect!=='all' && d.sector!==sect) return false;
+    if(!isNaN(minPrice) && d.price<minPrice) return false;
+    if(!isNaN(maxPrice) && d.price>maxPrice) return false;
+    if(mcap==='penny'){ if(d.price>=50) return false; }
+    else if(mcap!=='all'){ if(marketCapCategory(d)!==mcap) return false; }
+    if(!isNaN(minPromoter) && d.promoter<minPromoter) return false;
+    if(!isNaN(maxPE) && d.pe>maxPE) return false;
+    if(!isNaN(minROE) && d.roe<minROE) return false;
+    if(!isNaN(maxDE) && d.deRatio>maxDE) return false;
+    if(!isNaN(minRevGrowth) && d.revGrowth<minRevGrowth) return false;
+    if(dividendOnly && d.divYield<=0) return false;
+    return true;
+  });
   rows.sort((a,b)=>b.score-a.score);
   document.getElementById('screenerCount').textContent=`${rows.length} of ${all.length} stocks &mdash; click a row to open it`;
   const body=document.getElementById('screenerBody');
@@ -1083,6 +1169,20 @@ function renderScreener(){
       <td>${fmt(d.volumeCr,2)} Cr</td></tr>`).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
 }
+document.getElementById('moreFiltersBtn')?.addEventListener('click',()=>{
+  const panel=document.getElementById('moreFiltersPanel');
+  panel.style.display = panel.style.display==='none' ? 'block' : 'none';
+});
+document.getElementById('clearFiltersBtn')?.addEventListener('click',()=>{
+  ['fMinPrice','fMaxPrice','fPromoter','fMaxPE','fMinROE','fMaxDE','fMinRevGrowth'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('fMcap').value='all';
+  document.getElementById('fDividendOnly').checked=false;
+  renderScreener();
+});
+['fMinPrice','fMaxPrice','fMcap','fPromoter','fMaxPE','fMinROE','fMaxDE','fMinRevGrowth','fDividendOnly'].forEach(id=>{
+  document.getElementById(id)?.addEventListener('input', renderScreener);
+  document.getElementById(id)?.addEventListener('change', renderScreener);
+});
 
 function toggleInfo(id){document.getElementById(id).classList.toggle('open');}
 
@@ -1394,10 +1494,20 @@ function populateBacktestStockList(){
   sel.innerHTML = STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
   if(window.CURRENT) sel.value=window.CURRENT.symbol;
 }
-document.getElementById('btStrategy')?.addEventListener('change', updateStrategyDesc);
+document.querySelectorAll('.bt-strat-cb').forEach(cb=>cb.addEventListener('change', updateStrategyDesc));
+document.querySelectorAll('input[name="btMode"]').forEach(r=>r.addEventListener('change', updateStrategyDesc));
+function checkedStrategies(){
+  return [...document.querySelectorAll('.bt-strat-cb:checked')].map(cb=>cb.value);
+}
 function updateStrategyDesc(){
-  const sel=document.getElementById('btStrategy');
-  document.getElementById('btStrategyDesc').textContent = STRATEGY_INFO[sel.value];
+  const checked = checkedStrategies();
+  if(!checked.length){ document.getElementById('btStrategyDesc').textContent = 'Check at least one strategy above.'; return; }
+  const mode = document.querySelector('input[name="btMode"]:checked').value;
+  const lines = checked.map(k=>`\u2022 ${STRATEGY_INFO[k]}`);
+  const modeNote = mode==='combined' && checked.length>1
+    ? `\n\nCombined mode: a trade only opens on days where all ${checked.length} checked strategies agree simultaneously \u2014 fewer trades, but each one has multiple confirmations.`
+    : '';
+  document.getElementById('btStrategyDesc').textContent = lines.join('\n') + modeNote;
 }
 
 function maxDrawdown(equityCurve){
@@ -1405,61 +1515,61 @@ function maxDrawdown(equityCurve){
   for(const v of equityCurve){ if(v>peak) peak=v; const dd=(v-peak)/peak*100; if(dd<maxDd) maxDd=dd; }
   return maxDd;
 }
-// Each strategy returns an array of {enter:index, exit:index} trade windows over `closes`.
+
+// Each strategy returns a boolean array: true on days it would be long.
+// This shared shape is what makes "compare" (each run independently) and
+// "combined" (AND across all checked strategies) both possible from the
+// same functions.
 function strategyRSI(closes){
-  const trades=[]; let inPos=false, entryIdx=0;
+  const pos=new Array(closes.length).fill(false); let inPos=false;
   for(let i=15;i<closes.length;i++){
     const rsi = computeRSI(closes.slice(0,i+1), 14);
-    if(!inPos && rsi<30){ inPos=true; entryIdx=i; }
-    else if(inPos && rsi>55){ trades.push({enter:entryIdx, exit:i}); inPos=false; }
+    if(!inPos && rsi<30) inPos=true;
+    else if(inPos && rsi>55) inPos=false;
+    pos[i]=inPos;
   }
-  if(inPos) trades.push({enter:entryIdx, exit:closes.length-1});
-  return trades;
+  return pos;
 }
 function strategyMACD(closes){
-  const trades=[]; let inPos=false, entryIdx=0, prevHist=null;
+  const pos=new Array(closes.length).fill(false); let inPos=false, prevHist=null;
   for(let i=35;i<closes.length;i++){
-    const sub=closes.slice(0,i+1);
-    const {hist} = computeMACD(sub,12,26,9);
+    const {hist} = computeMACD(closes.slice(0,i+1),12,26,9);
     if(prevHist!=null){
-      if(!inPos && prevHist<=0 && hist>0){ inPos=true; entryIdx=i; }
-      else if(inPos && prevHist>=0 && hist<0){ trades.push({enter:entryIdx, exit:i}); inPos=false; }
+      if(!inPos && prevHist<=0 && hist>0) inPos=true;
+      else if(inPos && prevHist>=0 && hist<0) inPos=false;
     }
-    prevHist=hist;
+    pos[i]=inPos; prevHist=hist;
   }
-  if(inPos) trades.push({enter:entryIdx, exit:closes.length-1});
-  return trades;
+  return pos;
 }
 function strategyEmaRsi(closes){
-  const trades=[]; let inPos=false, entryIdx=0;
+  const pos=new Array(closes.length).fill(false); let inPos=false;
   const emaSeries = ema(closes, Math.min(50, Math.max(5,Math.floor(closes.length/4))));
   for(let i=20;i<closes.length;i++){
     const rsi = computeRSI(closes.slice(0,i+1), 14);
     const aboveEma = closes[i] > emaSeries[i];
-    if(!inPos && aboveEma && rsi<50){ inPos=true; entryIdx=i; }
-    else if(inPos && (!aboveEma || rsi>70)){ trades.push({enter:entryIdx, exit:i}); inPos=false; }
+    if(!inPos && aboveEma && rsi<50) inPos=true;
+    else if(inPos && (!aboveEma || rsi>70)) inPos=false;
+    pos[i]=inPos;
   }
-  if(inPos) trades.push({enter:entryIdx, exit:closes.length-1});
-  return trades;
+  return pos;
 }
 function strategySupertrend(closes){
-  const trades=[]; let inPos=false, entryIdx=0, prevTrend=null;
+  const pos=new Array(closes.length).fill(false); let inPos=false;
   let sma=closes[0], trend='up';
   for(let i=0;i<closes.length;i++){
     sma = sma*0.85+closes[i]*0.15;
+    const prevTrend=trend;
     if(trend==='up' && closes[i]<sma*0.985) trend='down';
     else if(trend==='down' && closes[i]>sma*1.015) trend='up';
-    if(prevTrend!=null){
-      if(!inPos && prevTrend==='down' && trend==='up'){ inPos=true; entryIdx=i; }
-      else if(inPos && prevTrend==='up' && trend==='down'){ trades.push({enter:entryIdx, exit:i}); inPos=false; }
-    }
-    prevTrend=trend;
+    if(prevTrend==='down' && trend==='up') inPos=true;
+    else if(prevTrend==='up' && trend==='down') inPos=false;
+    pos[i]=inPos;
   }
-  if(inPos) trades.push({enter:entryIdx, exit:closes.length-1});
-  return trades;
+  return pos;
 }
 function strategyMACross(closes){
-  const trades=[]; let inPos=false, entryIdx=0;
+  const pos=new Array(closes.length).fill(false); let inPos=false;
   const fastP=Math.min(50,Math.max(5,Math.floor(closes.length/6)));
   const slowP=Math.min(200,Math.max(fastP+5,Math.floor(closes.length/1.3)));
   const fast=ema(closes,fastP), slow=ema(closes,slowP);
@@ -1467,29 +1577,49 @@ function strategyMACross(closes){
   for(let i=0;i<closes.length;i++){
     const diff=fast[i]-slow[i];
     if(prevDiff!=null){
-      if(!inPos && prevDiff<=0 && diff>0){ inPos=true; entryIdx=i; }
-      else if(inPos && prevDiff>=0 && diff<0){ trades.push({enter:entryIdx, exit:i}); inPos=false; }
+      if(!inPos && prevDiff<=0 && diff>0) inPos=true;
+      else if(inPos && prevDiff>=0 && diff<0) inPos=false;
     }
-    prevDiff=diff;
+    pos[i]=inPos; prevDiff=diff;
   }
-  if(inPos) trades.push({enter:entryIdx, exit:closes.length-1});
-  return trades;
+  return pos;
 }
 function strategyBollinger(closes){
-  const trades=[]; let inPos=false, entryIdx=0; const period=20;
+  const pos=new Array(closes.length).fill(false); let inPos=false; const period=20;
   for(let i=period;i<closes.length;i++){
     const win=closes.slice(i-period,i);
     const mean=win.reduce((a,b)=>a+b,0)/period;
     const variance=win.reduce((a,b)=>a+(b-mean)*(b-mean),0)/period;
     const std=Math.sqrt(variance);
-    const upper=mean+2*std, middle=mean;
-    if(!inPos && closes[i]>upper){ inPos=true; entryIdx=i; }
-    else if(inPos && closes[i]<middle){ trades.push({enter:entryIdx, exit:i}); inPos=false; }
+    if(!inPos && closes[i]>mean+2*std) inPos=true;
+    else if(inPos && closes[i]<mean) inPos=false;
+    pos[i]=inPos;
   }
-  if(inPos) trades.push({enter:entryIdx, exit:closes.length-1});
-  return trades;
+  return pos;
 }
 const STRATEGY_FN = {rsi:strategyRSI, macd:strategyMACD, emarsi:strategyEmaRsi, supertrend:strategySupertrend, macross:strategyMACross, bollinger:strategyBollinger};
+const STRATEGY_LABEL = {rsi:'RSI Mean Reversion', macd:'MACD Crossover', emarsi:'EMA + RSI Combined', supertrend:'Supertrend Following', macross:'MA Crossover (50/200)', bollinger:'Bollinger Breakout'};
+
+// Converts a boolean in-position series into trade windows and summary stats.
+function statsFromBoolSeries(closes, posSeries){
+  const trades=[]; let entryIdx=null;
+  for(let i=0;i<posSeries.length;i++){
+    if(posSeries[i] && entryIdx===null) entryIdx=i;
+    else if(!posSeries[i] && entryIdx!==null){ trades.push({enter:entryIdx, exit:i}); entryIdx=null; }
+  }
+  if(entryIdx!==null) trades.push({enter:entryIdx, exit:closes.length-1});
+  const equity=[100]; const tradeReturns=[]; let eq=100;
+  trades.forEach(t=>{
+    const ret=(closes[t.exit]-closes[t.enter])/closes[t.enter];
+    tradeReturns.push(ret); eq=eq*(1+ret); equity.push(eq);
+  });
+  const wins=tradeReturns.filter(r=>r>0), losses=tradeReturns.filter(r=>r<=0);
+  const winRate = tradeReturns.length ? (wins.length/tradeReturns.length*100) : 0;
+  const totalReturn = eq-100;
+  const profitFactor = losses.length ? (wins.reduce((a,b)=>a+b,0)/Math.abs(losses.reduce((a,b)=>a+b,0)||1)) : (wins.length?99:0);
+  const dd = maxDrawdown(equity);
+  return {trades, equity, tradeReturns, winRate, totalReturn, profitFactor, dd};
+}
 
 async function getBacktestSeries(symbol, range){
   try{
@@ -1508,49 +1638,74 @@ async function getBacktestSeries(symbol, range){
   }
 }
 
+const BT_COLORS=['#3d8bfd','#26c281','#f0a93a','#8b7cf6','#ef5350','#5b6472'];
 document.getElementById('btRun')?.addEventListener('click', async ()=>{
   const symbol = document.getElementById('btStock').value;
-  const strat = document.getElementById('btStrategy').value;
+  const checked = checkedStrategies();
+  const mode = document.querySelector('input[name="btMode"]:checked').value;
   const range = document.getElementById('btRange').value;
   const statusEl = document.getElementById('btStatus');
+  if(!checked.length){ statusEl.textContent = 'Check at least one strategy first.'; return; }
   statusEl.textContent = 'Running backtest\u2026';
   const {closes, real} = await getBacktestSeries(symbol, range);
-  const trades = STRATEGY_FN[strat](closes);
-  const equity=[100]; const tradeReturns=[];
-  let eq=100;
-  trades.forEach(t=>{
-    const ret = (closes[t.exit]-closes[t.enter])/closes[t.enter];
-    tradeReturns.push(ret);
-    eq = eq*(1+ret);
-    equity.push(eq);
-  });
-  const wins = tradeReturns.filter(r=>r>0);
-  const losses = tradeReturns.filter(r=>r<=0);
-  const winRate = tradeReturns.length ? (wins.length/tradeReturns.length*100) : 0;
-  const totalReturn = (eq-100);
-  const profitFactor = losses.length ? (wins.reduce((a,b)=>a+b,0) / Math.abs(losses.reduce((a,b)=>a+b,0)||1)) : (wins.length?99:0);
-  const dd = maxDrawdown(equity);
-
-  document.getElementById('btResults').style.display='grid';
-  document.getElementById('btResults').innerHTML = [
-    ['Trades', tradeReturns.length],
-    ['Win rate', winRate.toFixed(1)+'%'],
-    ['Total return', (totalReturn>=0?'+':'')+totalReturn.toFixed(1)+'%'],
-    ['Profit factor', profitFactor.toFixed(2)],
-    ['Max drawdown', dd.toFixed(1)+'%']
-  ].map(([l,v])=>`<div class="card"><div class="card-title">${l}</div><div class="metric-val" style="font-size:17px;">${v}</div></div>`).join('');
 
   document.getElementById('btChartWrap').style.display='block';
   if(charts.bt) charts.bt.destroy();
-  charts.bt = new Chart(document.getElementById('btChart'), {
-    type:'line',
-    data:{labels:equity.map((_,i)=>i), datasets:[{data:equity, borderColor:'#3d8bfd', borderWidth:2, pointRadius:0, tension:.2}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{x:{grid:{display:false},ticks:{color:'#5b6472'}},y:{grid:{color:'#1f2733'},ticks:{color:'#5b6472'}}}}
-  });
+  const btResults=document.getElementById('btResults');
+  const btCompareTable=document.getElementById('btCompareTable');
+  const btCompareBody=document.getElementById('btCompareBody');
+
+  if(mode==='combined' && checked.length>1){
+    // AND across all checked strategies' daily positions
+    const seriesList = checked.map(k=>STRATEGY_FN[k](closes));
+    const combined = closes.map((_,i)=> seriesList.every(s=>s[i]));
+    const r = statsFromBoolSeries(closes, combined);
+    btResults.style.display='grid';
+    btCompareTable.style.display='none';
+    btResults.innerHTML = [
+      ['Trades', r.tradeReturns.length],
+      ['Win rate', r.winRate.toFixed(1)+'%'],
+      ['Total return', (r.totalReturn>=0?'+':'')+r.totalReturn.toFixed(1)+'%'],
+      ['Profit factor', r.profitFactor.toFixed(2)],
+      ['Max drawdown', r.dd.toFixed(1)+'%']
+    ].map(([l,v])=>`<div class="card"><div class="card-title">${l}</div><div class="metric-val" style="font-size:17px;">${v}</div></div>`).join('');
+    charts.bt = new Chart(document.getElementById('btChart'), {
+      type:'line',
+      data:{labels:r.equity.map((_,i)=>i), datasets:[{label:'Combined ('+checked.map(k=>STRATEGY_LABEL[k]).join(' + ')+')', data:r.equity, borderColor:BT_COLORS[0], borderWidth:2, pointRadius:0, tension:.2}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{grid:{display:false},ticks:{color:'#5b6472'}},y:{grid:{color:'#1f2733'},ticks:{color:'#5b6472'}}}}
+    });
+    document.getElementById('btChartLegend').innerHTML = `<span><span class="dot" style="background:${BT_COLORS[0]}"></span>Combined equity curve</span>`;
+  } else {
+    // Compare each checked strategy independently, side by side
+    btResults.style.display='none';
+    btCompareTable.style.display='table';
+    const rows=[]; const datasets=[];
+    checked.forEach((k,idx)=>{
+      const posSeries = STRATEGY_FN[k](closes);
+      const r = statsFromBoolSeries(closes, posSeries);
+      rows.push({key:k, ...r});
+      datasets.push({label:STRATEGY_LABEL[k], data:r.equity, borderColor:BT_COLORS[idx%BT_COLORS.length], borderWidth:2, pointRadius:0, tension:.2});
+    });
+    rows.sort((a,b)=>b.totalReturn-a.totalReturn);
+    btCompareBody.innerHTML = rows.map(r=>`<tr><td><strong>${STRATEGY_LABEL[r.key]}</strong></td><td>${r.tradeReturns.length}</td>
+      <td>${r.winRate.toFixed(1)}%</td><td class="${r.totalReturn>=0?'up':'down'}">${r.totalReturn>=0?'+':''}${r.totalReturn.toFixed(1)}%</td>
+      <td>${r.profitFactor.toFixed(2)}</td><td class="down">${r.dd.toFixed(1)}%</td></tr>`).join('');
+    // Equalize dataset lengths for the chart (some strategies enter later/fewer trades)
+    const maxLen = Math.max(...datasets.map(d=>d.data.length));
+    datasets.forEach(d=>{ while(d.data.length<maxLen) d.data.push(d.data[d.data.length-1]); });
+    charts.bt = new Chart(document.getElementById('btChart'), {
+      type:'line',
+      data:{labels:Array.from({length:maxLen},(_,i)=>i), datasets},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{grid:{display:false},ticks:{color:'#5b6472'}},y:{grid:{color:'#1f2733'},ticks:{color:'#5b6472'}}}}
+    });
+    document.getElementById('btChartLegend').innerHTML = checked.map((k,idx)=>`<span><span class="dot" style="background:${BT_COLORS[idx%BT_COLORS.length]}"></span>${STRATEGY_LABEL[k]}</span>`).join('');
+  }
+
   statusEl.textContent = real
-    ? `Ran on ${closes.length} real daily closes for ${symbol} (${range}). Treat this win rate as one sample, not a guarantee — see the caveats in chat.`
-    : `Proxy unreachable — ran on a synthetic extended series (${closes.length} points) instead of real history. Numbers here are for demo purposes only until the server is live.`;
+    ? `Ran on ${closes.length} real daily closes for ${symbol} (${range}). Treat this win rate as one sample, not a guarantee \u2014 see the caveats in chat.`
+    : `Proxy unreachable \u2014 ran on a synthetic extended series (${closes.length} points) instead of real history. Numbers here are for demo purposes only until the server is live.`;
 });
 
 

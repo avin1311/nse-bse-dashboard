@@ -125,6 +125,140 @@ app.get('/api/history/:symbol', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
+// PERSISTENT STORE (Upstash Redis — free tier, HTTP REST API)
+// Needed so positions/alerts/watchlist survive across devices AND
+// so the server can check them even when nobody's browser is open.
+// Requires UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN env vars.
+// Degrades gracefully: without them, sync endpoints just no-op and
+// the frontend keeps using localStorage only, same as before.
+// ============================================================
+async function redisCmd(...args) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) throw new Error('Upstash not configured (UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN missing)');
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(args)
+  });
+  const json = await resp.json();
+  if (json.error) throw new Error(json.error);
+  return json.result;
+}
+async function storeGet(key, fallback) {
+  try {
+    const raw = await redisCmd('GET', key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+async function storeSet(key, value) {
+  await redisCmd('SET', key, JSON.stringify(value));
+}
+
+app.get('/api/sync/:key', async (req, res) => {
+  const allowed = ['positions', 'price-alerts', 'watchlist', 'portfolio'];
+  if (!allowed.includes(req.params.key)) return res.status(400).json({ error: 'unknown key' });
+  try {
+    const data = await storeGet(`store:${req.params.key}`, []);
+    res.json({ data, source: 'upstash' });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+app.post('/api/sync/:key', async (req, res) => {
+  const allowed = ['positions', 'price-alerts', 'watchlist', 'portfolio'];
+  if (!allowed.includes(req.params.key)) return res.status(400).json({ error: 'unknown key' });
+  try {
+    await storeSet(`store:${req.params.key}`, req.body);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// TELEGRAM NOTIFICATIONS
+// Requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID env vars.
+// ============================================================
+async function sendTelegram(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) throw new Error('Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing)');
+  const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+  });
+  const json = await resp.json();
+  if (!json.ok) throw new Error(json.description || 'Telegram send failed');
+  return json;
+}
+
+// ============================================================
+// SERVER-SIDE ALERT CHECK
+// Called on a schedule by GitHub Actions (see .github/workflows),
+// so it runs even when no browser is open. Reads positions/alerts
+// from Upstash, checks live prices via Yahoo, sends a Telegram
+// message for anything newly triggered, and writes status back.
+// Optional CHECK_ALERTS_SECRET env var gates this endpoint so
+// randoms can't spam your Telegram by hitting it directly.
+// ============================================================
+app.get('/api/check-alerts', async (req, res) => {
+  const secret = process.env.CHECK_ALERTS_SECRET;
+  if (secret && req.query.secret !== secret) return res.status(403).json({ error: 'forbidden' });
+
+  try {
+    const positions = await storeGet('store:positions', []);
+    const priceAlerts = await storeGet('store:price-alerts', []);
+    const openPositions = positions.filter(p => p.status === 'open');
+    const activeAlerts = priceAlerts.filter(a => a.status === 'active');
+    const notifications = [];
+
+    const symbols = [...new Set([...openPositions.map(p => p.symbol), ...activeAlerts.map(a => a.symbol)])];
+    const prices = {};
+    for (const sym of symbols) {
+      try {
+        const data = await getChartData(`${sym}.NS`, '1d', '5m');
+        if (data && data.price != null) prices[sym] = data.price;
+      } catch (e) { /* leave unpriced, skip this symbol this run */ }
+    }
+
+    for (const p of openPositions) {
+      const price = prices[p.symbol];
+      if (price == null) continue;
+      p.lastPrice = price;
+      const hitTarget = p.side === 'buy' ? price >= p.target : price <= p.target;
+      const hitStop = p.side === 'buy' ? price <= p.stopLoss : price >= p.stopLoss;
+      if (hitTarget) { p.status = 'target'; notifications.push(`🎯 <b>Target hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
+      else if (hitStop) { p.status = 'stoploss'; notifications.push(`⛔ <b>Stop-loss hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
+    }
+    for (const a of activeAlerts) {
+      const price = prices[a.symbol];
+      if (price == null) continue;
+      a.lastPrice = price;
+      const triggered = a.condition === 'above' ? price >= a.price : price <= a.price;
+      if (triggered) { a.status = 'triggered'; notifications.push(`🔔 <b>Price alert</b> — ${a.symbol} ${a.condition==='above'?'crossed above':'crossed below'} ₹${a.price.toFixed(2)} (now ₹${price.toFixed(2)})`); }
+    }
+
+    try {
+      await storeSet('store:positions', positions);
+      await storeSet('store:price-alerts', priceAlerts);
+    } catch (e) { /* Upstash not configured — nothing to persist, that's fine */ }
+
+    for (const msg of notifications) {
+      try { await sendTelegram(msg); } catch (e) { /* Telegram not configured or failed — keep going */ }
+    }
+
+    res.json({ checked: symbols.length, triggered: notifications.length, notifications });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+
+// ============================================================
 // UPSTOX F&O DATA (Open Interest, Max Pain, PCR, Option Chain)
 // Requires UPSTOX_ACCESS_TOKEN env var (Analytics Token — see README).
 // Degrades gracefully: if the token isn't set, or Upstox errors, or an

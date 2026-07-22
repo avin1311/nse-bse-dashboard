@@ -455,7 +455,7 @@
 
   <section id="sec-positions" class="panel">
     <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
-    <p class="desc">Paper positions only &mdash; nothing here places a real order. Targets/stop-losses are monitored every few seconds in the background, even while you're viewing a different stock or tab, and trigger the alert banner at the top of the page.</p>
+    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup.</p>
     <table>
       <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
       <tbody id="positionsBody"></tbody>
@@ -1506,7 +1506,10 @@ function renderTabBar(){
    BUY / SELL (paper positions) + ALERTS
    ============================================================ */
 window.POSITIONS = (function(){ try{ return JSON.parse(localStorage.getItem('positions')||'[]'); }catch(e){ return []; } })();
-function persistPositions(){ try{ localStorage.setItem('positions', JSON.stringify(window.POSITIONS)); }catch(e){} }
+function persistPositions(){
+  try{ localStorage.setItem('positions', JSON.stringify(window.POSITIONS)); }catch(e){}
+  fetch('/api/sync/positions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(window.POSITIONS)}).catch(()=>{});
+}
 
 function openOrderForm(side){
   const d=window.CURRENT; if(!d) return;
@@ -1772,7 +1775,10 @@ function renderHeatmap(){
    PRICE ALERTS (simpler than a paper position — just a level cross)
    ============================================================ */
 window.PRICE_ALERTS = (function(){ try{ return JSON.parse(localStorage.getItem('priceAlerts')||'[]'); }catch(e){ return []; } })();
-function persistPriceAlerts(){ try{ localStorage.setItem('priceAlerts', JSON.stringify(window.PRICE_ALERTS)); }catch(e){} }
+function persistPriceAlerts(){
+  try{ localStorage.setItem('priceAlerts', JSON.stringify(window.PRICE_ALERTS)); }catch(e){}
+  fetch('/api/sync/price-alerts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(window.PRICE_ALERTS)}).catch(()=>{});
+}
 function populateAlertStockList(){
   const sel=document.getElementById('alertStock');
   if(!sel || sel.options.length) return;
@@ -2168,6 +2174,19 @@ document.getElementById('screenerSector').addEventListener('change',renderScreen
 renderTicker();
 renderTabBar();
 renderPositions();
+async function hydrateFromServer(){
+  try{
+    const [posResp, alertResp] = await Promise.all([
+      fetch('/api/sync/positions',{cache:'no-store'}).then(r=>r.json()),
+      fetch('/api/sync/price-alerts',{cache:'no-store'}).then(r=>r.json())
+    ]);
+    if(posResp && Array.isArray(posResp.data) && posResp.data.length){ window.POSITIONS = posResp.data; try{localStorage.setItem('positions', JSON.stringify(window.POSITIONS));}catch(e){} }
+    if(alertResp && Array.isArray(alertResp.data) && alertResp.data.length){ window.PRICE_ALERTS = alertResp.data; try{localStorage.setItem('priceAlerts', JSON.stringify(window.PRICE_ALERTS));}catch(e){} }
+    renderPositions();
+    renderPriceAlerts();
+  }catch(e){ /* server unreachable — keep using whatever localStorage had */ }
+}
+hydrateFromServer();
 renderFnoIndices();
 renderHeatmap();
 renderScreener(); // populate the sector dropdown up front, so a heatmap-tile click works even before any stock is opened

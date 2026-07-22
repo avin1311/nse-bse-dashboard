@@ -42,6 +42,49 @@ using the Analytics Token (per their own community forum) — if a specific
 index keeps showing SIMULATED, check the Render logs for the actual error
 message from Upstox.
 
+## Server-side alerts (work even when your browser is closed)
+By default, Buy/Sell and price alerts only fire while this page is open in a
+browser tab. To get notified via Telegram at any time — including when your
+computer's off — three things need to be set up together:
+
+**1. Upstash Redis (free)** — gives the server somewhere to store your
+positions/alerts so it can check them independently of your browser.
+- Sign up at upstash.com → **Create Database** → any name, free tier
+- On the database page, find **REST API** → copy the URL and token
+- Render → your service → **Environment** → add:
+  - `UPSTASH_REDIS_REST_URL`
+  - `UPSTASH_REDIS_REST_TOKEN`
+
+**2. Telegram bot (free)** — how you actually get notified.
+- Message **@BotFather** on Telegram → `/newbot` → follow the prompts → it
+  gives you a bot token (looks like `123456:ABC-...`)
+- Message your new bot anything once (so it can see your chat)
+- Visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser →
+  find `"chat":{"id":123456789...}` in the response → that number is your chat ID
+- Render → **Environment** → add:
+  - `TELEGRAM_BOT_TOKEN`
+  - `TELEGRAM_CHAT_ID`
+- Optional but recommended: also add `CHECK_ALERTS_SECRET` (any random string
+  you make up) so random people on the internet can't hit your check endpoint
+  and spam your Telegram
+
+**3. GitHub Actions (free)** — the actual "checks every 5 minutes, even with
+no browser open" part. Already included as
+`.github/workflows/check-alerts.yml`. It needs two repo secrets:
+- GitHub → your repo → **Settings** → **Secrets and variables** → **Actions**
+  → **New repository secret**:
+  - `DASHBOARD_URL` = `https://nse-bse-dashboard.onrender.com` (no trailing slash)
+  - `CHECK_ALERTS_SECRET` = the same random string you used in step 2 (skip
+    this secret entirely if you didn't set one on Render either)
+
+Once all three are in place, positions/price alerts sync to the server
+automatically as you create them, and you'll get a Telegram message the
+moment a target/stop-loss/price level is crossed — checked every 5 minutes
+by GitHub Actions regardless of whether the dashboard is open anywhere.
+
+Without any of this configured, everything still works exactly as before —
+alerts just stay browser-only.
+
 ## Run it locally instead
 ```
 npm install

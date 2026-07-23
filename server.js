@@ -213,11 +213,20 @@ app.get('/api/check-alerts', async (req, res) => {
   try {
     const positions = await storeGet('store:positions', []);
     const priceAlerts = await storeGet('store:price-alerts', []);
-    const openPositions = positions.filter(p => p.status === 'open');
-    const activeAlerts = priceAlerts.filter(a => a.status === 'active');
+
+    // IMPORTANT: this checks telegramSent, NOT status. The browser's own
+    // 8-second monitor sets status ('target'/'stoploss'/'triggered') purely
+    // for its own UI — that used to also (wrongly) stop the server from ever
+    // notifying, since the server only looked at items still 'open'/'active'.
+    // That meant if the browser was open anywhere, Telegram would never fire.
+    // Checking telegramSent instead makes browser detection and Telegram
+    // notification fully independent: each item gets notified exactly once,
+    // whichever side (browser or this server check) detects it first.
+    const positionsToCheck = positions.filter(p => !p.telegramSent && p.status !== 'closed');
+    const alertsToCheck = priceAlerts.filter(a => !a.telegramSent);
     const notifications = [];
 
-    const symbols = [...new Set([...openPositions.map(p => p.symbol), ...activeAlerts.map(a => a.symbol)])];
+    const symbols = [...new Set([...positionsToCheck.map(p => p.symbol), ...alertsToCheck.map(a => a.symbol)])];
     const prices = {};
     for (const sym of symbols) {
       try {
@@ -226,21 +235,21 @@ app.get('/api/check-alerts', async (req, res) => {
       } catch (e) { /* leave unpriced, skip this symbol this run */ }
     }
 
-    for (const p of openPositions) {
+    for (const p of positionsToCheck) {
       const price = prices[p.symbol];
       if (price == null) continue;
       p.lastPrice = price;
       const hitTarget = p.side === 'buy' ? price >= p.target : price <= p.target;
       const hitStop = p.side === 'buy' ? price <= p.stopLoss : price >= p.stopLoss;
-      if (hitTarget) { p.status = 'target'; notifications.push(`🎯 <b>Target hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
-      else if (hitStop) { p.status = 'stoploss'; notifications.push(`⛔ <b>Stop-loss hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
+      if (hitTarget) { p.status = 'target'; p.telegramSent = true; notifications.push(`🎯 <b>Target hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
+      else if (hitStop) { p.status = 'stoploss'; p.telegramSent = true; notifications.push(`⛔ <b>Stop-loss hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
     }
-    for (const a of activeAlerts) {
+    for (const a of alertsToCheck) {
       const price = prices[a.symbol];
       if (price == null) continue;
       a.lastPrice = price;
       const triggered = a.condition === 'above' ? price >= a.price : price <= a.price;
-      if (triggered) { a.status = 'triggered'; notifications.push(`🔔 <b>Price alert</b> — ${a.symbol} ${a.condition==='above'?'crossed above':'crossed below'} ₹${a.price.toFixed(2)} (now ₹${price.toFixed(2)})`); }
+      if (triggered) { a.status = 'triggered'; a.telegramSent = true; notifications.push(`🔔 <b>Price alert</b> — ${a.symbol} ${a.condition==='above'?'crossed above':'crossed below'} ₹${a.price.toFixed(2)} (now ₹${price.toFixed(2)})`); }
     }
 
     try {

@@ -1537,7 +1537,8 @@ function openOrderForm(side){
       target: parseFloat(document.getElementById('ordTarget').value),
       stopLoss: parseFloat(document.getElementById('ordSL').value),
       openedAt: new Date().toISOString(),
-      status: 'open'
+      status: 'open',
+      telegramSent: false
     };
     window.POSITIONS.push(pos);
     persistPositions();
@@ -1789,7 +1790,7 @@ document.getElementById('addAlertBtn')?.addEventListener('click', ()=>{
   const condition = document.getElementById('alertCondition').value;
   const price = parseFloat(document.getElementById('alertPrice').value);
   if(!price || price<=0){ alert('Enter a valid price level.'); return; }
-  window.PRICE_ALERTS.push({id:Date.now()+'-'+symbol, symbol, condition, price, status:'active', createdAt:new Date().toISOString()});
+  window.PRICE_ALERTS.push({id:Date.now()+'-'+symbol, symbol, condition, price, status:'active', createdAt:new Date().toISOString(), telegramSent:false});
   persistPriceAlerts();
   document.getElementById('alertPrice').value='';
   renderPriceAlerts();

@@ -215,6 +215,12 @@
   <button class="rail-btn" data-target="sec-alerts" data-tip="Price alerts">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
   </button>
+  <button class="rail-btn" data-target="sec-portfolio" data-tip="Portfolio">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+  </button>
+  <button class="rail-btn" data-target="sec-compare" data-tip="Compare stocks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="10" rx="1"/></svg>
+  </button>
   <div class="rail-spacer"></div>
   <button class="rail-btn" id="collapseBtn" data-tip="Collapse">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
@@ -390,6 +396,48 @@
       <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
       <tbody id="alertsBody"></tbody>
     </table>
+  </section>
+
+  <section id="sec-portfolio" class="panel">
+    <div class="panel-head"><h3>Portfolio</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="metric-sub">Your real holdings &mdash; separate from the paper-trading Positions above</span>
+        <button class="btn" id="exportPortfolioBtn">Export CSV</button>
+      </div>
+    </div>
+    <div class="order-form" style="margin-top:0;">
+      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr 1fr auto;">
+        <div><label>Stock</label><select id="pfStock"></select></div>
+        <div><label>Quantity</label><input id="pfQty" type="number" step="1" placeholder="e.g. 10"></div>
+        <div><label>Avg. buy price (&#8377;)</label><input id="pfBuyPrice" type="number" step="0.01" placeholder="e.g. 1450"></div>
+        <div><label>Buy date (optional)</label><input id="pfBuyDate" type="date"></div>
+        <div style="display:flex;align-items:end;"><button class="btn" id="pfAddBtn" style="width:100%;">Add holding</button></div>
+      </div>
+    </div>
+    <div class="grid cols-4" id="portfolioSummary" style="margin-top:14px;"></div>
+    <div class="grid cols-2" style="margin-top:0;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Stock</th><th>Qty</th><th>Avg. buy</th><th>LTP</th><th>Invested</th><th>Current value</th><th>P&amp;L</th><th></th></tr></thead>
+          <tbody id="portfolioBody"></tbody>
+        </table>
+      </div>
+      <div>
+        <div class="card-title" style="margin-bottom:8px;">Sector allocation</div>
+        <div class="chart-wrap" style="height:220px;"><canvas id="portfolioAllocChart"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="sec-compare" class="panel">
+    <div class="panel-head"><h3>Compare stocks</h3><span class="metric-sub">Pick up to 3 stocks to see every metric side by side</span></div>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;">
+      <div><label>Stock 1</label><select id="cmpStock1"></select></div>
+      <div><label>Stock 2</label><select id="cmpStock2"></select></div>
+      <div><label>Stock 3 (optional)</label><select id="cmpStock3"><option value="">&mdash; none &mdash;</option></select></div>
+      <div><button class="btn" id="cmpRunBtn" style="width:100%;padding:9px;">Compare</button></div>
+    </div>
+    <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
   </section>
 
   <div class="grid cols-2b">
@@ -1009,6 +1057,7 @@ function selectStock(symbol){
   populateBacktestStockList();
   populateAlertStockList();
   renderPriceAlerts();
+  renderPortfolio();
   setLiveStatus('connecting');
   tickLive();
 }
@@ -1814,6 +1863,130 @@ function renderPriceAlerts(){
 }
 if(window.PRICE_ALERTS.some(a=>a.status==='active')) ensureAlertMonitor();
 
+/* ============================================================
+   PORTFOLIO TRACKER
+   Real holdings, distinct from paper-trading Positions. Syncs
+   to the server the same way positions/alerts do, so it's also
+   cross-device (and gets the same offline localStorage fallback).
+   ============================================================ */
+window.PORTFOLIO = (function(){ try{ return JSON.parse(localStorage.getItem('portfolio')||'[]'); }catch(e){ return []; } })();
+function persistPortfolio(){
+  try{ localStorage.setItem('portfolio', JSON.stringify(window.PORTFOLIO)); }catch(e){}
+  fetch('/api/sync/portfolio', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(window.PORTFOLIO)}).catch(()=>{});
+}
+function populatePortfolioStockList(){
+  const sel=document.getElementById('pfStock');
+  if(!sel || sel.options.length) return;
+  sel.innerHTML = STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+}
+document.getElementById('pfAddBtn')?.addEventListener('click', ()=>{
+  const symbol = document.getElementById('pfStock').value;
+  const qty = parseFloat(document.getElementById('pfQty').value);
+  const buyPrice = parseFloat(document.getElementById('pfBuyPrice').value);
+  const buyDate = document.getElementById('pfBuyDate').value || null;
+  if(!qty || qty<=0 || !buyPrice || buyPrice<=0){ alert('Enter a valid quantity and buy price.'); return; }
+  window.PORTFOLIO.push({id:Date.now()+'-'+symbol, symbol, qty, buyPrice, buyDate});
+  persistPortfolio();
+  document.getElementById('pfQty').value=''; document.getElementById('pfBuyPrice').value=''; document.getElementById('pfBuyDate').value='';
+  renderPortfolio();
+});
+function renderPortfolio(){
+  const body=document.getElementById('portfolioBody');
+  if(!body) return;
+  if(!window.PORTFOLIO.length){
+    body.innerHTML='<tr><td colspan="8" class="lbl">No holdings added yet.</td></tr>';
+    document.getElementById('portfolioSummary').innerHTML='';
+    if(charts.portfolioAlloc){ charts.portfolioAlloc.destroy(); charts.portfolioAlloc=null; }
+    return;
+  }
+  let totalInvested=0, totalCurrent=0;
+  const sectorValue={};
+  const rows = window.PORTFOLIO.map(h=>{
+    const row = STOCKS.find(s=>s[0]===h.symbol);
+    const d = row ? generateStockData(row[0],row[1],row[2],row[3]) : null;
+    const ltp = (window.CURRENT && window.CURRENT.symbol===h.symbol) ? window.CURRENT.price : (d?d.price:h.buyPrice);
+    const invested = h.qty*h.buyPrice;
+    const current = h.qty*ltp;
+    const pnl = current-invested;
+    totalInvested+=invested; totalCurrent+=current;
+    if(d) sectorValue[d.sector] = (sectorValue[d.sector]||0)+current;
+    return {...h, ltp, invested, current, pnl};
+  });
+  body.innerHTML = rows.map(r=>`
+    <tr><td><strong>${r.symbol}</strong></td><td>${r.qty}</td><td>&#8377;${fmt(r.buyPrice,2)}</td><td>&#8377;${fmt(r.ltp,2)}</td>
+      <td>&#8377;${fmt(r.invested,2)}</td><td>&#8377;${fmt(r.current,2)}</td>
+      <td class="${r.pnl>=0?'up':'down'}">${r.pnl>=0?'+':''}&#8377;${fmt(r.pnl,2)} (${(r.pnl/r.invested*100).toFixed(1)}%)</td>
+      <td><button class="btn" data-remove-holding="${r.id}">Remove</button></td></tr>`).join('');
+  body.querySelectorAll('[data-remove-holding]').forEach(b=>b.addEventListener('click',()=>{
+    window.PORTFOLIO = window.PORTFOLIO.filter(h=>h.id!==b.dataset.removeHolding);
+    persistPortfolio(); renderPortfolio();
+  }));
+
+  const totalPnl = totalCurrent-totalInvested;
+  document.getElementById('portfolioSummary').innerHTML = [
+    ['Invested', '&#8377;'+fmt(totalInvested,2)],
+    ['Current value', '&#8377;'+fmt(totalCurrent,2)],
+    ['Total P&L', (totalPnl>=0?'+':'')+'&#8377;'+fmt(totalPnl,2)],
+    ['Return', (totalPnl>=0?'+':'')+(totalPnl/totalInvested*100).toFixed(2)+'%']
+  ].map(([l,v])=>`<div class="card"><div class="card-title">${l}</div><div class="metric-val" style="font-size:17px;">${v}</div></div>`).join('');
+
+  if(charts.portfolioAlloc) charts.portfolioAlloc.destroy();
+  const sectors = Object.keys(sectorValue);
+  const colors=['#3d8bfd','#26c281','#f0a93a','#8b7cf6','#ef5350','#5b6472','#eb6834','#1baf7a'];
+  charts.portfolioAlloc = new Chart(document.getElementById('portfolioAllocChart'), {
+    type:'doughnut',
+    data:{labels:sectors, datasets:[{data:sectors.map(s=>sectorValue[s]), backgroundColor:sectors.map((_,i)=>colors[i%colors.length]), borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8a94a6',boxWidth:10,font:{size:10}}}},cutout:'60%'}
+  });
+}
+document.getElementById('exportPortfolioBtn')?.addEventListener('click', ()=>{
+  if(!window.PORTFOLIO.length){ alert('No holdings to export.'); return; }
+  const rows = [...document.querySelectorAll('#portfolioBody tr')].map(tr=>[...tr.children].slice(0,7).map(td=>td.textContent.trim()));
+  downloadCSV('portfolio.csv', ['Stock','Qty','Avg Buy','LTP','Invested','Current Value','P&L'], rows);
+});
+
+/* ============================================================
+   STOCK COMPARISON
+   ============================================================ */
+function populateCompareStockLists(){
+  ['cmpStock1','cmpStock2'].forEach(id=>{
+    const sel=document.getElementById(id);
+    if(sel && !sel.options.length) sel.innerHTML = STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+  });
+  const sel3=document.getElementById('cmpStock3');
+  if(sel3 && sel3.options.length<=1) sel3.innerHTML += STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+}
+document.getElementById('cmpRunBtn')?.addEventListener('click', ()=>{
+  const symbols = [document.getElementById('cmpStock1').value, document.getElementById('cmpStock2').value, document.getElementById('cmpStock3').value].filter(Boolean);
+  const uniqueSymbols = [...new Set(symbols)];
+  if(uniqueSymbols.length<2){ alert('Pick at least 2 different stocks.'); return; }
+  const stocksData = uniqueSymbols.map(sym=>{ const r=STOCKS.find(s=>s[0]===sym); return generateStockData(r[0],r[1],r[2],r[3]); });
+
+  const metrics = [
+    ['Price', d=>'₹'+fmt(d.price,2)],
+    ['Change', d=>(d.changePct>=0?'+':'')+d.changePct.toFixed(2)+'%'],
+    ['Sector', d=>d.sector],
+    ['Market cap', d=>'₹'+fmt(d.marketCapT,2)+' T'],
+    ['P/E', d=>fmt(d.pe,1)],
+    ['P/B', d=>fmt(d.pb,2)],
+    ['ROE', d=>fmt(d.roe,1)+'%'],
+    ['Div yield', d=>fmt(d.divYield,2)+'%'],
+    ['Rev growth', d=>fmt(d.revGrowth,1)+'%'],
+    ['D/E ratio', d=>fmt(d.deRatio,2)],
+    ['RSI', d=>fmt(d.rsi,1)],
+    ['Signal', d=>d.signalLabel],
+    ['Analyst target', d=>'₹'+fmt(d.targetMean,2)+' ('+(d.upside>=0?'+':'')+d.upside.toFixed(1)+'%)'],
+    ['52W range', d=>'₹'+fmt(d.wk52Low,0)+' – ₹'+fmt(d.wk52High,0)]
+  ];
+
+  document.getElementById('cmpTable').style.display='table';
+  document.getElementById('cmpBody').innerHTML = `
+    <tr><th>Metric</th>${stocksData.map(d=>`<th>${d.symbol}</th>`).join('')}</tr>
+    ${metrics.map(([label,fn])=>`<tr><td class="lbl">${label}</td>${stocksData.map(d=>`<td>${fn(d)}</td>`).join('')}</tr>`).join('')}
+  `;
+});
+
+
 
 /* ============================================================
    BACKTEST TAB
@@ -2186,11 +2359,19 @@ async function hydrateFromServer(){
     renderPositions();
     renderPriceAlerts();
   }catch(e){ /* server unreachable — keep using whatever localStorage had */ }
+  try{
+    const pfResp = await fetch('/api/sync/portfolio',{cache:'no-store'}).then(r=>r.json());
+    if(pfResp && Array.isArray(pfResp.data) && pfResp.data.length){ window.PORTFOLIO = pfResp.data; try{localStorage.setItem('portfolio', JSON.stringify(window.PORTFOLIO));}catch(e){} }
+    renderPortfolio();
+  }catch(e){ /* server unreachable — keep using whatever localStorage had */ }
 }
 hydrateFromServer();
 renderFnoIndices();
 renderHeatmap();
 renderScreener(); // populate the sector dropdown up front, so a heatmap-tile click works even before any stock is opened
+populatePortfolioStockList();
+populateCompareStockLists();
+renderPortfolio();
 setupAutoScan();
 updateStrategyDesc();
 (function(){

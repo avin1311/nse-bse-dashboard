@@ -243,6 +243,15 @@ app.get('/api/check-alerts', async (req, res) => {
       const hitStop = p.side === 'buy' ? price <= p.stopLoss : price >= p.stopLoss;
       if (hitTarget) { p.status = 'target'; p.telegramSent = true; notifications.push(`🎯 <b>Target hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
       else if (hitStop) { p.status = 'stoploss'; p.telegramSent = true; notifications.push(`⛔ <b>Stop-loss hit</b> — ${p.symbol} ${p.side.toUpperCase()} @ entry ₹${p.entryPrice.toFixed(2)}, now ₹${price.toFixed(2)}`); }
+      else if (p.deviationLevel != null && !p.deviationSent) {
+        // Early warning: price has moved halfway from entry toward stop-loss,
+        // but hasn't hit either target or stop-loss yet. Fires once per position.
+        const pastDeviation = p.side === 'buy' ? price <= p.deviationLevel : price >= p.deviationLevel;
+        if (pastDeviation) {
+          p.deviationSent = true;
+          notifications.push(`⚠️ <b>Deviation warning</b> — ${p.symbol} ${p.side.toUpperCase()} is moving against your entry (₹${p.entryPrice.toFixed(2)} → ₹${price.toFixed(2)}), roughly halfway to your stop-loss (₹${p.stopLoss.toFixed(2)}). Not stopped out yet — just an early heads-up.`);
+        }
+      }
     }
     for (const a of alertsToCheck) {
       const price = prices[a.symbol];

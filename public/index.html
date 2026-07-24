@@ -150,6 +150,7 @@
   @keyframes slideDown{from{transform:translateY(-100%);}to{transform:translateY(0);}}
   .alert-banner.target{background:#0d3324;color:var(--green);border-bottom:2px solid var(--green);}
   .alert-banner.stoploss{background:#3a1414;color:var(--red);border-bottom:2px solid var(--red);}
+  .alert-banner.deviation{background:#3a2e0d;color:var(--amber);border-bottom:2px solid var(--amber);}
   .alert-banner button{background:rgba(255,255,255,.1);border:none;color:inherit;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;}
 
   /* Home view */
@@ -314,6 +315,15 @@
         <option value="sell">Sell</option>
         <option value="strongsell">Strong sell</option>
       </select>
+      <select id="screenerHorizon" title="Which timeframe(s) must show the selected signal">
+        <option value="swing">Swing</option>
+        <option value="intraday">Intraday</option>
+        <option value="longterm">Long-term</option>
+        <option value="intraday_swing">Intraday + Swing</option>
+        <option value="swing_longterm">Swing + Long-term</option>
+        <option value="intraday_longterm">Intraday + Long-term</option>
+        <option value="all_three">All three (must all agree)</option>
+      </select>
       <select id="screenerSector"><option value="all">All sectors</option></select>
       <button class="btn" id="moreFiltersBtn">More filters &#9662;</button>
     </div>
@@ -361,7 +371,7 @@
     </div>
     <div style="max-height:360px;overflow-y:auto;">
       <table>
-        <thead><tr><th>Stock</th><th>Sector</th><th>Price</th><th>Change</th><th>RSI</th><th>Signal</th><th>Volume</th></tr></thead>
+        <thead><tr><th>Stock</th><th>Sector</th><th>Price</th><th>Change</th><th id="screenerRsiHeader">RSI</th><th id="screenerSignalHeader">Signal</th><th>Volume</th></tr></thead>
         <tbody id="screenerBody"></tbody>
       </table>
     </div>
@@ -503,7 +513,7 @@
 
   <section id="sec-positions" class="panel">
     <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
-    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup.</p>
+    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup. Each position also gets an automatic one-time <strong>deviation warning</strong> (amber ⚠️) at the halfway point between entry and stop-loss, as an early heads-up before the hard stop actually hits.</p>
     <table>
       <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
       <tbody id="positionsBody"></tbody>
@@ -1367,6 +1377,17 @@ function marketCapCategory(d){
   if(d.marketCapT >= 0.5) return 'mid';   // 0.5T = ₹5,000 Cr
   return 'small';
 }
+const HORIZON_COMBOS = {
+  swing: ['swing'],
+  intraday: ['intraday'],
+  longterm: ['longterm'],
+  intraday_swing: ['intraday','swing'],
+  swing_longterm: ['swing','longterm'],
+  intraday_longterm: ['intraday','longterm'],
+  all_three: ['intraday','swing','longterm']
+};
+const HORIZON_LABELS = {swing:'Swing', intraday:'Intraday', longterm:'Long-term'};
+
 function renderScreener(){
   const all = signalCounts();
   const sectorSel=document.getElementById('screenerSector');
@@ -1377,6 +1398,9 @@ function renderScreener(){
   const q=(document.getElementById('screenerSearch').value||'').toUpperCase();
   const filt=document.getElementById('screenerFilter').value;
   const sect=sectorSel.value;
+  const horizonKey = document.getElementById('screenerHorizon').value;
+  const combo = HORIZON_COMBOS[horizonKey] || ['swing'];
+  const displayHorizon = combo.includes('swing') ? 'swing' : combo[0];
   const minPrice=parseFloat(document.getElementById('fMinPrice').value);
   const maxPrice=parseFloat(document.getElementById('fMaxPrice').value);
   const mcap=document.getElementById('fMcap').value;
@@ -1387,9 +1411,15 @@ function renderScreener(){
   const minRevGrowth=parseFloat(document.getElementById('fMinRevGrowth').value);
   const dividendOnly=document.getElementById('fDividendOnly').checked;
 
+  document.getElementById('screenerRsiHeader').textContent = 'RSI ('+HORIZON_LABELS[displayHorizon]+')';
+  document.getElementById('screenerSignalHeader').textContent = combo.length>1 ? 'Signal ('+combo.map(h=>HORIZON_LABELS[h]).join('+')+' agree)' : 'Signal ('+HORIZON_LABELS[displayHorizon]+')';
+
   let rows = all.filter(d=>{
     if(!(d.symbol.includes(q)||d.name.toUpperCase().includes(q)||d.sector.toUpperCase().includes(q))) return false;
-    if(filt!=='all' && d.signal!==filt) return false;
+    // Horizon-combo filter: with a specific signal selected, every horizon in
+    // the combo must show that exact signal (this is what makes "Intraday +
+    // Swing", "All three", etc. mean "all of these must agree").
+    if(filt!=='all' && !combo.every(h=>d.horizons[h].signal===filt)) return false;
     if(sect!=='all' && d.sector!==sect) return false;
     if(!isNaN(minPrice) && d.price<minPrice) return false;
     if(!isNaN(maxPrice) && d.price>maxPrice) return false;
@@ -1403,16 +1433,19 @@ function renderScreener(){
     if(dividendOnly && d.divYield<=0) return false;
     return true;
   });
-  rows.sort((a,b)=>b.score-a.score);
+  rows.sort((a,b)=>b.horizons[displayHorizon].score-a.horizons[displayHorizon].score);
   document.getElementById('screenerCount').textContent=`${rows.length} of ${all.length} stocks &mdash; click a row to open it`;
   const body=document.getElementById('screenerBody');
-  body.innerHTML = rows.map(d=>`
-    <tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td><td>&#8377;${fmt(d.price,2)}</td>
+  body.innerHTML = rows.map(d=>{
+    const h = d.horizons[displayHorizon];
+    return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td><td>&#8377;${fmt(d.price,2)}</td>
       <td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
-      <td>${fmt(d.rsi,1)}</td><td><span class="signal-chip sig-${d.signal}">${d.signalLabel}</span></td>
-      <td>${fmt(d.volumeCr,2)} Cr</td></tr>`).join('');
+      <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
+      <td>${fmt(d.volumeCr,2)} Cr</td></tr>`;
+  }).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
 }
+document.getElementById('screenerHorizon')?.addEventListener('change', renderScreener);
 document.getElementById('moreFiltersBtn')?.addEventListener('click',()=>{
   const panel=document.getElementById('moreFiltersPanel');
   panel.style.display = panel.style.display==='none' ? 'block' : 'none';
@@ -1578,13 +1611,22 @@ function openOrderForm(side){
     </div>`;
   document.getElementById('ordCancel').addEventListener('click',()=>{ form.style.display='none'; });
   document.getElementById('ordConfirm').addEventListener('click',()=>{
+    const entryPrice = parseFloat(document.getElementById('ordEntry').value)||d.price;
+    const stopLoss = parseFloat(document.getElementById('ordSL').value);
+    // Halfway point between entry and stop-loss, in the adverse direction —
+    // an early warning before the hard stop actually hits. Direction-aware:
+    // for buy, stopLoss < entry, so halfway is entry minus half that gap;
+    // for sell, stopLoss > entry, so halfway is entry plus half that gap.
+    const deviationLevel = side==='buy' ? entryPrice-(entryPrice-stopLoss)*0.5 : entryPrice+(stopLoss-entryPrice)*0.5;
     const pos={
       id: Date.now()+'-'+d.symbol,
       symbol: d.symbol, side,
-      entryPrice: parseFloat(document.getElementById('ordEntry').value)||d.price,
+      entryPrice,
       qty: parseFloat(document.getElementById('ordQty').value)||1,
       target: parseFloat(document.getElementById('ordTarget').value),
-      stopLoss: parseFloat(document.getElementById('ordSL').value),
+      stopLoss,
+      deviationLevel,
+      deviationSent: false,
       openedAt: new Date().toISOString(),
       status: 'open',
       telegramSent: false
@@ -1612,7 +1654,7 @@ function renderPositions(){
       <td>&#8377;${fmt(p.entryPrice,2)}</td><td>&#8377;${fmt(ltp,2)}</td>
       <td class="${pnl>=0?'up':'down'}">${pnl>=0?'+':''}&#8377;${fmt(pnl,2)}</td>
       <td>&#8377;${fmt(p.target,2)}</td><td>&#8377;${fmt(p.stopLoss,2)}</td>
-      <td><span class="signal-chip ${p.status==='open'?'sig-buy':(p.status==='target'?'sig-strongbuy':'sig-sell')}">${p.status.toUpperCase()}</span></td>
+      <td><span class="signal-chip ${p.status==='open'?'sig-buy':(p.status==='target'?'sig-strongbuy':'sig-sell')}">${p.status.toUpperCase()}</span>${p.deviationSent?' <span title="Deviation warning already sent for this position">⚠️</span>':''}</td>
       <td>${p.status==='open'?`<button class="btn" data-close-pos="${p.id}">Close</button>`:''}</td></tr>`;
   }).join('');
   body.innerHTML = rows;
@@ -1640,17 +1682,20 @@ function playAlertTone(kind){
 function showAlertBanner(pos, kind){
   const host=document.getElementById('alertHost');
   const div=document.createElement('div');
-  div.className='alert-banner '+(kind==='target'?'target':'stoploss');
-  div.innerHTML = `<span>${kind==='target'?'🎯 Target hit':'⛔ Stop-loss hit'} &mdash; ${pos.symbol} ${pos.side.toUpperCase()} @ entry &#8377;${fmt(pos.entryPrice,2)}, now &#8377;${fmt(pos.lastPrice,2)}</span>
+  const cls = kind==='target' ? 'target' : (kind==='stoploss' ? 'stoploss' : 'deviation');
+  div.className='alert-banner '+cls;
+  const label = kind==='target' ? '🎯 Target hit' : (kind==='stoploss' ? '⛔ Stop-loss hit' : '⚠️ Deviation warning');
+  div.innerHTML = `<span>${label} &mdash; ${pos.symbol} ${pos.side.toUpperCase()} @ entry &#8377;${fmt(pos.entryPrice,2)}, now &#8377;${fmt(pos.lastPrice,2)}${kind==='deviation'?' (halfway to stop-loss, not stopped out yet)':''}</span>
     <button>Dismiss</button>`;
   div.querySelector('button').addEventListener('click',()=>div.remove());
   host.appendChild(div);
-  playAlertTone(kind);
+  playAlertTone(kind==='target'?'target':'stoploss');
   const originalTitle = document.title;
   let flashes=0;
-  const flashTimer=setInterval(()=>{ document.title = document.title===originalTitle ? (kind==='target'?'🎯 TARGET HIT':'⛔ SL HIT') : originalTitle; flashes++; if(flashes>6){ clearInterval(flashTimer); document.title=originalTitle; } },600);
+  const flashLabel = kind==='target' ? '🎯 TARGET HIT' : (kind==='stoploss' ? '⛔ SL HIT' : '⚠️ DEVIATION');
+  const flashTimer=setInterval(()=>{ document.title = document.title===originalTitle ? flashLabel : originalTitle; flashes++; if(flashes>6){ clearInterval(flashTimer); document.title=originalTitle; } },600);
   if(window.Notification && Notification.permission==='granted'){
-    new Notification(kind==='target'?'Target hit':'Stop-loss hit', {body:`${pos.symbol} ${pos.side.toUpperCase()} @ ${fmt(pos.lastPrice,2)}`});
+    new Notification(kind==='target'?'Target hit':(kind==='stoploss'?'Stop-loss hit':'Deviation warning'), {body:`${pos.symbol} ${pos.side.toUpperCase()} @ ${fmt(pos.lastPrice,2)}`});
   }
 }
 if(window.Notification && Notification.permission==='default'){ try{ Notification.requestPermission(); }catch(e){} }
@@ -1700,9 +1745,11 @@ function ensureAlertMonitor(){
       if(p.side==='buy'){
         if(price>=p.target){ p.status='target'; showAlertBanner(p,'target'); }
         else if(price<=p.stopLoss){ p.status='stoploss'; showAlertBanner(p,'stoploss'); }
+        else if(p.deviationLevel!=null && !p.deviationSent && price<=p.deviationLevel){ p.deviationSent=true; showAlertBanner(p,'deviation'); }
       } else {
         if(price<=p.target){ p.status='target'; showAlertBanner(p,'target'); }
         else if(price>=p.stopLoss){ p.status='stoploss'; showAlertBanner(p,'stoploss'); }
+        else if(p.deviationLevel!=null && !p.deviationSent && price>=p.deviationLevel){ p.deviationSent=true; showAlertBanner(p,'deviation'); }
       }
     });
     activeAlerts.forEach(a=>{

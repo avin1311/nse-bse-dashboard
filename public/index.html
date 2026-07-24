@@ -1655,12 +1655,17 @@ function renderPositions(){
       <td class="${pnl>=0?'up':'down'}">${pnl>=0?'+':''}&#8377;${fmt(pnl,2)}</td>
       <td>&#8377;${fmt(p.target,2)}</td><td>&#8377;${fmt(p.stopLoss,2)}</td>
       <td><span class="signal-chip ${p.status==='open'?'sig-buy':(p.status==='target'?'sig-strongbuy':'sig-sell')}">${p.status.toUpperCase()}</span>${p.deviationSent?' <span title="Deviation warning already sent for this position">⚠️</span>':''}</td>
-      <td>${p.status==='open'?`<button class="btn" data-close-pos="${p.id}">Close</button>`:''}</td></tr>`;
+      <td style="display:flex;gap:6px;">${p.status==='open'?`<button class="btn" data-close-pos="${p.id}">Close</button>`:''}<button class="btn" data-delete-pos="${p.id}" title="Remove from this list permanently">Delete</button></td></tr>`;
   }).join('');
   body.innerHTML = rows;
   body.querySelectorAll('[data-close-pos]').forEach(b=>b.addEventListener('click',()=>{
     const pos=window.POSITIONS.find(p=>p.id===b.dataset.closePos);
     if(pos){ pos.status='closed'; persistPositions(); renderPositions(); }
+  }));
+  body.querySelectorAll('[data-delete-pos]').forEach(b=>b.addEventListener('click',()=>{
+    if(!confirm('Delete this position permanently? This cannot be undone.')) return;
+    window.POSITIONS = window.POSITIONS.filter(p=>p.id!==b.dataset.deletePos);
+    persistPositions(); renderPositions();
   }));
   const openCount = window.POSITIONS.filter(p=>p.status==='open').length;
   document.getElementById('positionsSummary').textContent = openCount ? `${openCount} open` : 'All closed';
@@ -1901,7 +1906,7 @@ function renderPriceAlerts(){
     return `<tr><td>${a.symbol}</td><td class="lbl">${a.condition==='above'?'Goes above':'Goes below'}</td><td>&#8377;${fmt(a.price,2)}</td>
       <td>${current!=null?'&#8377;'+fmt(current,2):'&ndash;'}</td>
       <td><span class="signal-chip ${a.status==='active'?'sig-hold':'sig-strongbuy'}">${a.status.toUpperCase()}</span></td>
-      <td>${a.status==='active'?`<button class="btn" data-remove-alert="${a.id}">Remove</button>`:''}</td></tr>`;
+      <td><button class="btn" data-remove-alert="${a.id}">Remove</button></td></tr>`;
   }).join('');
   body.querySelectorAll('[data-remove-alert]').forEach(b=>b.addEventListener('click',()=>{
     window.PRICE_ALERTS = window.PRICE_ALERTS.filter(a=>a.id!==b.dataset.removeAlert);

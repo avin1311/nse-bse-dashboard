@@ -222,6 +222,9 @@
   <button class="rail-btn" data-target="sec-compare" data-tip="Compare stocks">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="10" rx="1"/></svg>
   </button>
+  <button class="rail-btn" data-target="sec-options" data-tip="Options &amp; futures">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg>
+  </button>
   <div class="rail-spacer"></div>
   <button class="rail-btn" id="collapseBtn" data-tip="Collapse">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
@@ -448,6 +451,28 @@
       <div><button class="btn" id="cmpRunBtn" style="width:100%;padding:9px;">Compare</button></div>
     </div>
     <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
+  </section>
+
+  <section id="sec-options" class="panel">
+    <div class="panel-head"><h3>Options &amp; futures scanning</h3></div>
+    <p class="desc">Real Upstox option-chain data once <code>UPSTOX_ACCESS_TOKEN</code> is configured. The "signal" here is the standard OI-buildup classification traders use (Long/Short Buildup, Long Unwinding, Short Covering) &mdash; derived from price direction + open-interest direction together, since RSI/MACD-style indicators don't translate meaningfully to option premiums. The very first scan of any stock/expiry shows "No comparison yet" since there's nothing prior to compare against &mdash; scan again a few minutes later to see real classifications.</p>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr auto;">
+      <div><label>Underlying</label><select id="optUnderlying">
+        <option value="NIFTY">NIFTY 50</option>
+        <option value="BANKNIFTY">Bank Nifty</option>
+        <option value="FINNIFTY">Nifty Financial Services</option>
+        <option value="NIFTYIT">Nifty IT</option>
+        <option value="SENSEX">BSE Sensex</option>
+        <option disabled>&mdash; F&amp;O stocks &mdash;</option>
+      </select></div>
+      <div><label>Expiry</label><select id="optExpiry"><option value="">Scan to load expiries</option></select></div>
+      <div><button class="btn" id="optScanBtn" style="width:100%;padding:9px;">Scan chain</button></div>
+    </div>
+    <div id="optStatus" class="metric-sub" style="margin-bottom:10px;"></div>
+    <div style="overflow-x:auto;"><table id="optTable" style="display:none;">
+      <thead><tr><th>Strike</th><th>CE LTP</th><th>CE OI</th><th>CE Signal</th><th></th><th>PE LTP</th><th>PE OI</th><th>PE Signal</th><th></th></tr></thead>
+      <tbody id="optBody"></tbody>
+    </table></div>
   </section>
 
   <div class="grid cols-2b">
@@ -1026,13 +1051,40 @@ function renderTicker(liveRows){
     <div><span class="idx-name">${n}</span><span class="idx-val ${c>=0?'up':'down'}">${v} <small>${c>=0?'+':''}${c.toFixed(2)}%</small></span></div>`).join('');
 }
 
+window.FULL_UNIVERSE = [];
+async function loadStockUniverse(){
+  try{
+    const resp = await fetch('/api/stock-universe', {cache:'no-store'});
+    const data = await resp.json();
+    if(data.stocks && data.stocks.length>500){
+      window.FULL_UNIVERSE = data.stocks; // [{symbol,name,exchange}] — thousands of real NSE+BSE listings
+    }
+    // If it failed or returned too few, FULL_UNIVERSE just stays empty and
+    // search silently keeps working off the curated 208-stock list only.
+  }catch(e){ /* server unreachable — curated list only, nothing breaks */ }
+}
 function stockOptionRows(filterText){
   const f=(filterText||'').toUpperCase();
-  return STOCKS.filter(s=>s[0].includes(f)||s[1].toUpperCase().includes(f)).slice(0,10);
+  if(!f) return [];
+  const curatedMatches = STOCKS.filter(s=>s[0].includes(f)||s[1].toUpperCase().includes(f));
+  if(!window.FULL_UNIVERSE.length) return curatedMatches.slice(0,10);
+  const curatedSymbols = new Set(STOCKS.map(s=>s[0]));
+  const universeMatches = window.FULL_UNIVERSE
+    .filter(u=>!curatedSymbols.has(u.symbol) && (u.symbol.toUpperCase().includes(f)||u.name.toUpperCase().includes(f)))
+    .map(u=>[u.symbol,u.name,u.exchange]);
+  return [...curatedMatches, ...universeMatches].slice(0,10);
 }
 
 function selectStock(symbol){
-  const row = STOCKS.find(s=>s[0]===symbol);
+  let row = STOCKS.find(s=>s[0]===symbol);
+  if(!row){
+    // Not in the curated fast-rendering list — check the full real universe.
+    // Sector defaults to 'Other' (macro/segment lookups already have generic
+    // fallbacks for unknown sectors) and price starts at a nominal placeholder
+    // that gets corrected within seconds by the live Yahoo tick right below.
+    const u = window.FULL_UNIVERSE.find(x=>x.symbol===symbol);
+    if(u) row = [u.symbol, u.name, 'Other', 100];
+  }
   if(!row){ console.warn('Unknown symbol:', symbol); return; }
   destroyCharts(); // BUGFIX: this was defined but never called, so switching stocks crashed
                     // Chart.js with "canvas already in use" and silently stopped every
@@ -1730,7 +1782,10 @@ function ensureAlertMonitor(){
     const activeAlerts = window.PRICE_ALERTS.filter(a=>a.status==='active');
     if(!openPos.length && !activeAlerts.length) return;
 
-    const allSymbols=[...new Set([...openPos.map(p=>p.symbol), ...activeAlerts.map(a=>a.symbol)])];
+    const stockAlerts = activeAlerts.filter(a=>!a.optionMeta);
+    const optionAlertsList = activeAlerts.filter(a=>a.optionMeta);
+
+    const allSymbols=[...new Set([...openPos.map(p=>p.symbol), ...stockAlerts.map(a=>a.symbol)])];
     const priceCache={};
     for(const sym of allSymbols){
       try{
@@ -1738,10 +1793,32 @@ function ensureAlertMonitor(){
         priceCache[sym] = q.price;
       }catch(e){
         const refPos = openPos.find(p=>p.symbol===sym);
-        const refAlert = activeAlerts.find(a=>a.symbol===sym);
+        const refAlert = stockAlerts.find(a=>a.symbol===sym);
         const base = (refPos && (refPos.lastPrice||refPos.entryPrice)) || (refAlert && (refAlert.lastPrice||refAlert.price)) || 100;
         priceCache[sym] = base*(1+(Math.random()-0.5)*0.006);
       }
+    }
+
+    // Option alerts fetch via our own server's option-chain endpoint (grouped
+    // by underlying+expiry so one chain covers several alerts on it), not
+    // Yahoo — Yahoo has no option-chain data in the shape we need.
+    const optionPriceCache={}; // alert.id -> ltp
+    const chainGroups={};
+    optionAlertsList.forEach(a=>{
+      const key=a.optionMeta.underlying+'|'+a.optionMeta.expiry;
+      (chainGroups[key]=chainGroups[key]||[]).push(a);
+    });
+    for(const key of Object.keys(chainGroups)){
+      const [underlying,expiry]=key.split('|');
+      try{
+        const resp = await fetch('/api/options/chain/'+encodeURIComponent(underlying)+'?expiry='+encodeURIComponent(expiry), {cache:'no-store'}).then(r=>r.json());
+        if(resp.error) throw new Error(resp.error);
+        chainGroups[key].forEach(a=>{
+          const row = resp.strikes.find(s=>s.strike===a.optionMeta.strike);
+          const side = a.optionMeta.side==='ce' ? row?.ce : row?.pe;
+          if(side && side.ltp!=null) optionPriceCache[a.id]=side.ltp;
+        });
+      }catch(e){ /* Upstox unreachable this tick — these alerts just get skipped this pass */ }
     }
 
     openPos.forEach(p=>{
@@ -1757,8 +1834,16 @@ function ensureAlertMonitor(){
         else if(p.deviationLevel!=null && !p.deviationSent && price>=p.deviationLevel){ p.deviationSent=true; showAlertBanner(p,'deviation'); }
       }
     });
-    activeAlerts.forEach(a=>{
+    stockAlerts.forEach(a=>{
       const price = priceCache[a.symbol];
+      if(price==null) return;
+      a.lastPrice=price;
+      if(a.condition==='above' && price>=a.price){ a.status='triggered'; showPriceAlertBanner(a); }
+      else if(a.condition==='below' && price<=a.price){ a.status='triggered'; showPriceAlertBanner(a); }
+    });
+    optionAlertsList.forEach(a=>{
+      const price = optionPriceCache[a.id];
+      if(price==null) return;
       a.lastPrice=price;
       if(a.condition==='above' && price>=a.price){ a.status='triggered'; showPriceAlertBanner(a); }
       else if(a.condition==='below' && price<=a.price){ a.status='triggered'; showPriceAlertBanner(a); }
@@ -2037,6 +2122,80 @@ document.getElementById('cmpRunBtn')?.addEventListener('click', ()=>{
     ${metrics.map(([label,fn])=>`<tr><td class="lbl">${label}</td>${stocksData.map(d=>`<td>${fn(d)}</td>`).join('')}</tr>`).join('')}
   `;
 });
+
+/* ============================================================
+   OPTIONS & FUTURES SCANNING
+   ============================================================ */
+function populateOptionsUnderlyingList(){
+  const sel=document.getElementById('optUnderlying');
+  if(!sel || sel.dataset.populated) return;
+  sel.dataset.populated='1';
+  sel.innerHTML += STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+}
+document.getElementById('optScanBtn')?.addEventListener('click', async ()=>{
+  const underlying = document.getElementById('optUnderlying').value;
+  const statusEl = document.getElementById('optStatus');
+  const expirySel = document.getElementById('optExpiry');
+  statusEl.textContent = 'Loading expiries…';
+  try{
+    if(!expirySel.value){
+      const expResp = await fetch('/api/options/expiries/'+encodeURIComponent(underlying), {cache:'no-store'}).then(r=>r.json());
+      if(expResp.error) throw new Error(expResp.error);
+      expirySel.innerHTML = expResp.expiries.map(e=>`<option value="${e}">${e}</option>`).join('');
+    }
+    statusEl.textContent = 'Scanning option chain…';
+    const chainResp = await fetch('/api/options/chain/'+encodeURIComponent(underlying)+'?expiry='+encodeURIComponent(expirySel.value), {cache:'no-store'}).then(r=>r.json());
+    if(chainResp.error) throw new Error(chainResp.error);
+    renderOptionsChain(underlying, chainResp);
+    statusEl.textContent = chainResp.hasComparison
+      ? `Scanned ${chainResp.strikes.length} strikes for ${underlying} (${chainResp.expiry}) — signals compare against your last scan.`
+      : `First scan for ${underlying} (${chainResp.expiry}) — signals need a second scan (a few minutes apart) to compare against, showing "No comparison yet" for now.`;
+  }catch(e){
+    statusEl.textContent = 'Could not load option data: '+e.message;
+    document.getElementById('optTable').style.display='none';
+  }
+});
+function signalChipClass(signal){
+  if(signal==='Long Buildup'||signal==='Short Covering') return 'sig-buy';
+  if(signal==='Short Buildup'||signal==='Long Unwinding') return 'sig-sell';
+  return 'sig-hold';
+}
+function renderOptionsChain(underlying, resp){
+  document.getElementById('optTable').style.display='table';
+  document.getElementById('optBody').innerHTML = resp.strikes.map(row=>`
+    <tr>
+      <td><strong>${fmt(row.strike,0)}</strong></td>
+      <td>${row.ce.ltp!=null?'₹'+fmt(row.ce.ltp,2):'–'}</td>
+      <td>${row.ce.oi!=null?fmt(row.ce.oi,0):'–'}</td>
+      <td><span class="signal-chip ${signalChipClass(row.ce.signal)}">${row.ce.signal}</span></td>
+      <td>${row.ce.ltp!=null?`<button class="btn" data-opt-alert="ce" data-strike="${row.strike}" data-ltp="${row.ce.ltp}">Alert</button>`:''}</td>
+      <td>${row.pe.ltp!=null?'₹'+fmt(row.pe.ltp,2):'–'}</td>
+      <td>${row.pe.oi!=null?fmt(row.pe.oi,0):'–'}</td>
+      <td><span class="signal-chip ${signalChipClass(row.pe.signal)}">${row.pe.signal}</span></td>
+      <td>${row.pe.ltp!=null?`<button class="btn" data-opt-alert="pe" data-strike="${row.strike}" data-ltp="${row.pe.ltp}">Alert</button>`:''}</td>
+    </tr>`).join('');
+  document.querySelectorAll('[data-opt-alert]').forEach(b=>b.addEventListener('click',()=>{
+    addOptionAlert(underlying, resp.expiry, parseFloat(b.dataset.strike), b.dataset.optAlert, parseFloat(b.dataset.ltp));
+  }));
+}
+function addOptionAlert(underlying, expiry, strike, side, currentLtp){
+  const priceStr = window.prompt(`Alert when ${underlying} ${fmt(strike,0)} ${side.toUpperCase()} crosses what price? (current: ₹${fmt(currentLtp,2)})`, currentLtp.toFixed(2));
+  if(!priceStr) return;
+  const price = parseFloat(priceStr);
+  if(!price || price<=0){ alert('Enter a valid price.'); return; }
+  const condition = price >= currentLtp ? 'above' : 'below';
+  const displaySymbol = `${underlying} ${fmt(strike,0)} ${side.toUpperCase()}`;
+  window.PRICE_ALERTS.push({
+    id: Date.now()+'-opt-'+underlying+strike+side,
+    symbol: displaySymbol,
+    condition, price,
+    status:'active', createdAt:new Date().toISOString(), telegramSent:false,
+    optionMeta: {underlying, expiry, strike, side}
+  });
+  persistPriceAlerts();
+  renderPriceAlerts();
+  alert('Alert added — see the Price Alerts tab. It\'ll be checked the same way your other alerts are (browser + server + Telegram if configured).');
+}
 
 
 
@@ -2398,6 +2557,7 @@ document.getElementById('screenerSector').addEventListener('change',renderScreen
    INIT
    ============================================================ */
 renderTicker();
+loadStockUniverse();
 renderTabBar();
 renderPositions();
 async function hydrateFromServer(){
@@ -2423,6 +2583,7 @@ renderHeatmap();
 renderScreener(); // populate the sector dropdown up front, so a heatmap-tile click works even before any stock is opened
 populatePortfolioStockList();
 populateCompareStockLists();
+populateOptionsUnderlyingList();
 renderPortfolio();
 setupAutoScan();
 updateStrategyDesc();

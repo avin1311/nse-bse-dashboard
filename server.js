@@ -126,6 +126,65 @@ app.get('/api/history/:symbol', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
+// FULL STOCK UNIVERSE (real NSE + BSE equity list from Upstox)
+// Upstox publishes a complete, officially-sourced instruments file,
+// refreshed daily, no auth needed to download. We fetch + gunzip +
+// filter to just equities (instrument_type EQ), cache in memory for
+// a day, and expose a lightweight list for the search bar to use.
+// Community reports occasional 403s/blank files on this public
+// asset URL, so this degrades gracefully to an empty result (the
+// frontend then just keeps using its curated fallback list) rather
+// than ever crashing the server.
+// ============================================================
+const zlib = require('zlib');
+let universeCache = { data: null, time: 0 };
+const UNIVERSE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function fetchInstrumentFile(exchange) {
+  const url = `https://assets.upstox.com/market-quote/instruments/exchange/${exchange}.json.gz`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Upstox instruments file (${exchange}) responded ${resp.status}`);
+  const buf = Buffer.from(await resp.arrayBuffer());
+  const json = zlib.gunzipSync(buf).toString('utf8');
+  const list = JSON.parse(json);
+  // Keep only plain equities — the same file also bundles F&O contracts,
+  // indices, etc., which we don't want cluttering the equity search list.
+  return list.filter(row => row.instrument_type === 'EQ' && row.trading_symbol);
+}
+
+async function fetchAndCacheUniverse() {
+  const [nse, bse] = await Promise.all([
+    fetchInstrumentFile('NSE').catch(() => []),
+    fetchInstrumentFile('BSE').catch(() => [])
+  ]);
+  const seen = new Set();
+  const combined = [];
+  // NSE first so it wins on any symbol collision between the two exchanges
+  for (const row of [...nse, ...bse]) {
+    if (seen.has(row.trading_symbol)) continue;
+    seen.add(row.trading_symbol);
+    combined.push({ symbol: row.trading_symbol, name: row.name, exchange: row.exchange, instrument_key: row.instrument_key });
+  }
+  if (!combined.length) throw new Error('Both NSE and BSE instrument fetches returned nothing');
+  universeCache = { data: combined, time: Date.now() };
+  return combined;
+}
+
+app.get('/api/stock-universe', async (req, res) => {
+  if (universeCache.data && Date.now() - universeCache.time < UNIVERSE_TTL_MS) {
+    return res.json({ stocks: universeCache.data, cached: true });
+  }
+  try {
+    const combined = await fetchAndCacheUniverse();
+    res.json({ stocks: combined, cached: false });
+  } catch (e) {
+    res.status(502).json({ error: e.message, stocks: [] });
+  }
+});
+
+
+
+// ============================================================
 // PERSISTENT STORE (Upstash Redis — free tier, HTTP REST API)
 // Needed so positions/alerts/watchlist survive across devices AND
 // so the server can check them even when nobody's browser is open.
@@ -226,13 +285,38 @@ app.get('/api/check-alerts', async (req, res) => {
     const alertsToCheck = priceAlerts.filter(a => !a.telegramSent);
     const notifications = [];
 
-    const symbols = [...new Set([...positionsToCheck.map(p => p.symbol), ...alertsToCheck.map(a => a.symbol)])];
+    // Positions never carry optionMeta (Buy/Sell only trades the underlying
+    // stock), so their symbols always go through the Yahoo equity path.
+    const equitySymbols = [...new Set([...positionsToCheck.map(p => p.symbol), ...alertsToCheck.filter(a => !a.optionMeta).map(a => a.symbol)])];
     const prices = {};
-    for (const sym of symbols) {
+    for (const sym of equitySymbols) {
       try {
         const data = await getChartData(`${sym}.NS`, '1d', '5m');
         if (data && data.price != null) prices[sym] = data.price;
       } catch (e) { /* leave unpriced, skip this symbol this run */ }
+    }
+
+    // Option alerts fetch through the same option-chain logic the scanning
+    // UI uses — grouped by underlying+expiry so a chain with several alerts
+    // on it only gets fetched once per run, not once per alert.
+    const optionAlerts = alertsToCheck.filter(a => a.optionMeta);
+    const chainGroups = {};
+    optionAlerts.forEach(a => {
+      const key = `${a.optionMeta.underlying}|${a.optionMeta.expiry}`;
+      (chainGroups[key] = chainGroups[key] || []).push(a);
+    });
+    const optionPrices = {}; // alert.id -> ltp
+    for (const key of Object.keys(chainGroups)) {
+      const [underlying, expiry] = key.split('|');
+      try {
+        const instrumentKey = await resolveInstrumentKey(underlying);
+        const chainData = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${expiry}`);
+        chainGroups[key].forEach(a => {
+          const row = (chainData || []).find(r => r.strike_price === a.optionMeta.strike);
+          const side = a.optionMeta.side === 'ce' ? row?.call_options?.market_data : row?.put_options?.market_data;
+          if (side && side.ltp != null) optionPrices[a.id] = side.ltp;
+        });
+      } catch (e) { /* Upstox not configured/reachable this run — these alerts just get skipped this pass */ }
     }
 
     for (const p of positionsToCheck) {
@@ -254,7 +338,7 @@ app.get('/api/check-alerts', async (req, res) => {
       }
     }
     for (const a of alertsToCheck) {
-      const price = prices[a.symbol];
+      const price = a.optionMeta ? optionPrices[a.id] : prices[a.symbol];
       if (price == null) continue;
       a.lastPrice = price;
       const triggered = a.condition === 'above' ? price >= a.price : price <= a.price;
@@ -270,7 +354,7 @@ app.get('/api/check-alerts', async (req, res) => {
       try { await sendTelegram(msg); } catch (e) { /* Telegram not configured or failed — keep going */ }
     }
 
-    res.json({ checked: symbols.length, triggered: notifications.length, notifications });
+    res.json({ checked: equitySymbols.length + optionAlerts.length, triggered: notifications.length, notifications });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
@@ -357,6 +441,92 @@ app.get('/api/upstox/fno/:index', async (req, res) => {
     });
   } catch (e) {
     res.status(502).json({ error: e.message, symbol: req.params.index });
+  }
+});
+
+// ============================================================
+// OPTIONS CHAIN SCANNING (any F&O-enabled stock or index)
+// "Signal" here means the standard OI-buildup classification
+// traders actually use for options — Long/Short Buildup, Long
+// Unwinding, Short Covering — derived from price direction + OI
+// direction together, NOT an RSI/MACD-style indicator (those
+// don't translate meaningfully to option premiums).
+//
+// OI change needs a "before" snapshot to compare against. We
+// keep our own snapshot in Upstash (refreshed each scan) rather
+// than relying on an unverified historical-OI endpoint, so the
+// very first scan of a symbol+expiry has no signal yet — that's
+// expected, not a bug — and every scan after that does.
+// ============================================================
+async function resolveInstrumentKey(symbol) {
+  if (UPSTOX_INDEX_KEYS[symbol]) return UPSTOX_INDEX_KEYS[symbol];
+  if (!universeCache.data) { try { await fetchAndCacheUniverse(); } catch (e) { /* fall through */ } }
+  const hit = universeCache.data && universeCache.data.find(s => s.symbol === symbol);
+  if (hit && hit.instrument_key) return hit.instrument_key;
+  throw new Error(`Could not resolve an Upstox instrument key for "${symbol}" — it may not be F&O-enabled, or the stock universe hasn't loaded yet.`);
+}
+
+function classifyBuildup(priceChangePct, oiChangePct) {
+  if (oiChangePct == null || priceChangePct == null) return 'No comparison yet';
+  const priceUp = priceChangePct > 0.5, priceDown = priceChangePct < -0.5;
+  const oiUp = oiChangePct > 2, oiDown = oiChangePct < -2;
+  if (priceUp && oiUp) return 'Long Buildup';
+  if (priceDown && oiUp) return 'Short Buildup';
+  if (priceDown && oiDown) return 'Long Unwinding';
+  if (priceUp && oiDown) return 'Short Covering';
+  return 'Neutral';
+}
+
+app.get('/api/options/chain/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol;
+    const instrumentKey = await resolveInstrumentKey(symbol);
+    const expiry = req.query.expiry || await nearestExpiry(instrumentKey);
+    const chainData = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${expiry}`);
+
+    const snapshotKey = `optionsnapshot:${instrumentKey}:${expiry}`;
+    const prevSnapshot = await storeGet(snapshotKey, null);
+    const prevByStrike = {};
+    if (prevSnapshot) prevSnapshot.strikes.forEach(s => { prevByStrike[s.strike] = s; });
+
+    const strikes = (chainData || []).map(row => {
+      const ce = row.call_options?.market_data || {};
+      const pe = row.put_options?.market_data || {};
+      const prev = prevByStrike[row.strike_price];
+
+      function withSignal(curr, prevSide) {
+        if (!prev || !prevSide || curr.ltp == null || prevSide.ltp == null) {
+          return { ltp: curr.ltp, oi: curr.oi, signal: 'No comparison yet' };
+        }
+        const priceChangePct = prevSide.ltp ? ((curr.ltp - prevSide.ltp) / prevSide.ltp) * 100 : null;
+        const oiChangePct = prevSide.oi ? ((curr.oi - prevSide.oi) / prevSide.oi) * 100 : null;
+        return { ltp: curr.ltp, oi: curr.oi, priceChangePct, oiChangePct, signal: classifyBuildup(priceChangePct, oiChangePct) };
+      }
+      return {
+        strike: row.strike_price,
+        ce: withSignal(ce, prev && prev.ce),
+        pe: withSignal(pe, prev && prev.pe)
+      };
+    });
+
+    try {
+      await storeSet(snapshotKey, { time: Date.now(), strikes: strikes.map(s => ({ strike: s.strike, ce: { ltp: s.ce.ltp, oi: s.ce.oi }, pe: { ltp: s.pe.ltp, oi: s.pe.oi } })) });
+    } catch (e) { /* Upstash not configured — signals just won't have a "before" to compare next time */ }
+
+    res.json({ symbol, expiry, strikes, hasComparison: !!prevSnapshot });
+  } catch (e) {
+    res.status(502).json({ error: e.message, symbol: req.params.symbol });
+  }
+});
+
+app.get('/api/options/expiries/:symbol', async (req, res) => {
+  try {
+    const instrumentKey = await resolveInstrumentKey(req.params.symbol);
+    const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(instrumentKey)}`);
+    const expiries = [...new Set(contracts.map(c => c.expiry))].sort();
+    res.json({ symbol: req.params.symbol, expiries });
+  } catch (e) {
+    res.status(502).json({ error: e.message, symbol: req.params.symbol });
   }
 });
 

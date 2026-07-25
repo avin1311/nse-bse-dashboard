@@ -42,6 +42,28 @@ using the Analytics Token (per their own community forum) — if a specific
 index keeps showing SIMULATED, check the Render logs for the actual error
 message from Upstox.
 
+## Options & futures scanning
+Once `UPSTOX_ACCESS_TOKEN` is set (see below) and your Upstox account's F&O
+segment is active, the **Options & futures** tab scans real option chains for
+any index or F&O-enabled stock. The "signal" shown per strike is the standard
+OI-buildup classification traders use — Long Buildup, Short Buildup, Long
+Unwinding, Short Covering — derived from price direction + open-interest
+direction together, computed by comparing each scan against your previous
+one (stored in Upstash). The very first scan of a symbol+expiry always shows
+"No comparison yet", since there's nothing prior to compare against — scan
+again a few minutes later for real classifications. You can set a price alert
+directly on any specific strike/CE/PE from the scan results, monitored the
+same way (browser + server + Telegram) as your regular stock alerts.
+
+## Full stock search (1000s of real NSE + BSE listings)
+The search bar can find and open any real NSE/BSE-listed stock, not just the
+~208 curated ones shown by default in the Screener — fetched from Upstox's
+official, publicly-published instruments file (refreshed daily, no extra
+setup needed, works independently of the other Upstox features above). The
+Screener table itself intentionally stays limited to the curated list for
+performance — rendering full technical analysis for thousands of stocks at
+once would freeze the browser tab.
+
 ## Server-side alerts (work even when your browser is closed)
 By default, Buy/Sell and price alerts only fire while this page is open in a
 browser tab. To get notified via Telegram at any time — including when your

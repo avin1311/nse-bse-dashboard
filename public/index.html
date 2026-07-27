@@ -405,10 +405,12 @@
         <div style="display:flex;align-items:end;"><button class="btn" id="addAlertBtn" style="width:100%;">Add alert</button></div>
       </div>
     </div>
+    <div style="overflow-x:auto;">
     <table style="margin-top:14px;">
       <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
       <tbody id="alertsBody"></tbody>
     </table>
+    </div>
   </section>
 
   <section id="sec-portfolio" class="panel">
@@ -539,10 +541,12 @@
   <section id="sec-positions" class="panel">
     <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
     <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup. Each position also gets an automatic one-time <strong>deviation warning</strong> (amber ⚠️) at the halfway point between entry and stop-loss, as an early heads-up before the hard stop actually hits.</p>
+    <div style="overflow-x:auto;">
     <table>
       <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
       <tbody id="positionsBody"></tbody>
     </table>
+    </div>
   </section>
 
   <div class="panel">
@@ -1085,7 +1089,11 @@ function selectStock(symbol){
     const u = window.FULL_UNIVERSE.find(x=>x.symbol===symbol);
     if(u) row = [u.symbol, u.name, 'Other', 100];
   }
-  if(!row){ console.warn('Unknown symbol:', symbol); return; }
+  if(!row){
+    console.warn('Unknown symbol, falling back to Home:', symbol);
+    showHome();
+    return;
+  }
   destroyCharts(); // BUGFIX: this was defined but never called, so switching stocks crashed
                     // Chart.js with "canvas already in use" and silently stopped every
                     // panel after the price chart from updating (the root cause of the
@@ -2557,7 +2565,7 @@ document.getElementById('screenerSector').addEventListener('change',renderScreen
    INIT
    ============================================================ */
 renderTicker();
-loadStockUniverse();
+const universeLoadPromise = loadStockUniverse();
 renderTabBar();
 renderPositions();
 async function hydrateFromServer(){
@@ -2587,7 +2595,15 @@ populateOptionsUnderlyingList();
 renderPortfolio();
 setupAutoScan();
 updateStrategyDesc();
-(function(){
+(async function(){
+  // BUGFIX: this used to run synchronously right after firing off
+  // loadStockUniverse() without waiting for it. If a previously-opened tab
+  // was a full-universe stock (not in the curated list), selectStock()
+  // couldn't resolve it yet (universe hadn't loaded), silently gave up, and
+  // left the whole page blank — nothing before this fix ever showed the
+  // user an error, it just did nothing. Awaiting the universe load first
+  // closes that race condition.
+  await universeLoadPromise;
   const params = new URLSearchParams(location.search);
   const requested = (params.get('symbol')||'').toUpperCase();
   const match = STOCKS.find(s=>s[0]===requested);

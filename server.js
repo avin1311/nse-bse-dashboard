@@ -58,10 +58,23 @@ function parseChartPayload(json, requestedSymbol) {
   if (!result || !result.meta) return null;
   const meta = result.meta;
   const timestamps = result.timestamp || [];
-  const closes = (result.indicators && result.indicators.quote && result.indicators.quote[0] && result.indicators.quote[0].close) || [];
+  const quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
+  const closes = quote.close || [];
+  const opens = quote.open || [];
+  const highs = quote.high || [];
+  const lows = quote.low || [];
+  const volumes = quote.volume || [];
   const series = [];
   for (let i = 0; i < timestamps.length; i++) {
-    if (closes[i] != null) series.push({ t: timestamps[i], c: closes[i] });
+    if (closes[i] != null) {
+      series.push({
+        t: timestamps[i], c: closes[i],
+        o: opens[i] != null ? opens[i] : closes[i],
+        h: highs[i] != null ? highs[i] : closes[i],
+        l: lows[i] != null ? lows[i] : closes[i],
+        v: volumes[i] != null ? volumes[i] : 0
+      });
+    }
   }
   return {
     symbol: requestedSymbol,
@@ -140,17 +153,56 @@ const zlib = require('zlib');
 let universeCache = { data: null, time: 0 };
 const UNIVERSE_TTL_MS = 24 * 60 * 60 * 1000;
 
-async function fetchInstrumentFile(exchange) {
+async function fetchRawInstrumentFile(exchange) {
   const url = `https://assets.upstox.com/market-quote/instruments/exchange/${exchange}.json.gz`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Upstox instruments file (${exchange}) responded ${resp.status}`);
   const buf = Buffer.from(await resp.arrayBuffer());
   const json = zlib.gunzipSync(buf).toString('utf8');
-  const list = JSON.parse(json);
+  return JSON.parse(json);
+}
+async function fetchInstrumentFile(exchange) {
+  const list = await fetchRawInstrumentFile(exchange);
   // Keep only plain equities — the same file also bundles F&O contracts,
   // indices, etc., which we don't want cluttering the equity search list.
   return list.filter(row => row.instrument_type === 'EQ' && row.trading_symbol);
 }
+
+// Some of our hardcoded index instrument_key guesses (see UPSTOX_INDEX_KEYS)
+// turned out wrong on the real API — expected, since I couldn't verify them
+// without a live account. Rather than guess again blindly, this searches
+// Upstox's own instruments file for an index whose name matches, so it
+// self-corrects instead of needing another manual fix each time.
+let indexNameCache = { data: null, time: 0 };
+async function findIndexInstrumentKey(keywords) {
+  if (!indexNameCache.data || Date.now() - indexNameCache.time > UNIVERSE_TTL_MS) {
+    const [nse, bse] = await Promise.all([
+      fetchRawInstrumentFile('NSE').catch(() => []),
+      fetchRawInstrumentFile('BSE').catch(() => [])
+    ]);
+    // Indices sit in a distinct segment from plain equities (which are
+    // NSE_EQ/BSE_EQ) — keep anything that isn't equity or a derivative
+    // contract, then match by name below.
+    indexNameCache = {
+      data: [...nse, ...bse].filter(r => r.instrument_type && r.instrument_type !== 'EQ' && !['FUT', 'CE', 'PE'].includes(r.instrument_type) && r.name),
+      time: Date.now()
+    };
+  }
+  const upper = k => k.toUpperCase();
+  const match = indexNameCache.data.find(r => keywords.every(k => upper(r.name).includes(upper(k))));
+  if (!match) throw new Error(`No index matching [${keywords.join(', ')}] found in Upstox's instruments file`);
+  return match.instrument_key;
+}
+// Fallback name-keywords for indices whose hardcoded key might be wrong —
+// used only if the hardcoded UPSTOX_INDEX_KEYS guess fails against the
+// live API for that symbol.
+const INDEX_NAME_FALLBACK = {
+  NIFTYIT: ['NIFTY', 'IT'],
+  MIDCPNIFTY: ['MIDCAP'],
+  FINNIFTY: ['FIN'],
+  BANKEX: ['BANKEX'],
+  NIFTYNXT50: ['NEXT', '50']
+};
 
 async function fetchAndCacheUniverse() {
   const [nse, bse] = await Promise.all([
@@ -407,40 +459,35 @@ async function nearestExpiry(instrumentKey) {
   return expiries.find(e => e >= today) || expiries[expiries.length - 1];
 }
 
+async function fetchFnoSnapshot(instrumentKey) {
+  const expiry = await nearestExpiry(instrumentKey);
+  const date = todayIso();
+  const [pcrData, maxPainData, chainData] = await Promise.all([
+    upstoxGet(`/market/pcr?instrument_key=${encodeURIComponent(instrumentKey)}&expiry=${expiry}&date=${date}&bucket_interval=60`),
+    upstoxGet(`/market/max-pain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry=${expiry}&date=${date}&bucket_interval=60`),
+    upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${expiry}`)
+  ]);
+  let totalCallOi = 0, totalPutOi = 0, atmIv = null, minDiff = Infinity;
+  const spot = pcrData.spot_closing_price;
+  (chainData || []).forEach(row => {
+    totalCallOi += row.call_options?.market_data?.oi || 0;
+    totalPutOi += row.put_options?.market_data?.oi || 0;
+    const diff = Math.abs(row.strike_price - spot);
+    if (diff < minDiff) { minDiff = diff; atmIv = row.call_options?.option_greeks?.iv ?? row.put_options?.option_greeks?.iv; }
+  });
+  return { expiry, spot, pcr: pcrData.pcr, maxPain: maxPainData.max_pain, totalCallOi, totalPutOi, atmIv };
+}
+
 app.get('/api/upstox/fno/:index', async (req, res) => {
+  const indexSymbol = req.params.index;
+  if (!UPSTOX_INDEX_KEYS[indexSymbol]) return res.status(400).json({ error: 'Unknown index symbol', symbol: indexSymbol });
   try {
-    const instrumentKey = UPSTOX_INDEX_KEYS[req.params.index];
-    if (!instrumentKey) return res.status(400).json({ error: 'Unknown index symbol', symbol: req.params.index });
-    const expiry = await nearestExpiry(instrumentKey);
-    const date = todayIso();
-
-    const [pcrData, maxPainData, chainData] = await Promise.all([
-      upstoxGet(`/market/pcr?instrument_key=${encodeURIComponent(instrumentKey)}&expiry=${expiry}&date=${date}&bucket_interval=60`),
-      upstoxGet(`/market/max-pain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry=${expiry}&date=${date}&bucket_interval=60`),
-      upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${expiry}`)
-    ]);
-
-    let totalCallOi = 0, totalPutOi = 0, atmIv = null, minDiff = Infinity;
-    const spot = pcrData.spot_closing_price;
-    (chainData || []).forEach(row => {
-      totalCallOi += row.call_options?.market_data?.oi || 0;
-      totalPutOi += row.put_options?.market_data?.oi || 0;
-      const diff = Math.abs(row.strike_price - spot);
-      if (diff < minDiff) { minDiff = diff; atmIv = row.call_options?.option_greeks?.iv ?? row.put_options?.option_greeks?.iv; }
-    });
-
-    res.json({
-      symbol: req.params.index,
-      expiry,
-      spot,
-      pcr: pcrData.pcr,
-      maxPain: maxPainData.max_pain,
-      totalCallOi, totalPutOi,
-      atmIv,
-      source: 'upstox-real'
-    });
+    const instrumentKey = await resolveInstrumentKey(indexSymbol); // self-heals via name search if our hardcoded guess is wrong
+    const snap = await fetchFnoSnapshot(instrumentKey);
+    const healed = instrumentKey !== UPSTOX_INDEX_KEYS[indexSymbol];
+    return res.json({ symbol: indexSymbol, ...snap, source: healed ? 'upstox-real-selfhealed' : 'upstox-real' });
   } catch (e) {
-    res.status(502).json({ error: e.message, symbol: req.params.index });
+    return res.status(502).json({ error: e.message, symbol: indexSymbol });
   }
 });
 
@@ -459,7 +506,17 @@ app.get('/api/upstox/fno/:index', async (req, res) => {
 // expected, not a bug — and every scan after that does.
 // ============================================================
 async function resolveInstrumentKey(symbol) {
-  if (UPSTOX_INDEX_KEYS[symbol]) return UPSTOX_INDEX_KEYS[symbol];
+  if (UPSTOX_INDEX_KEYS[symbol]) {
+    const primary = UPSTOX_INDEX_KEYS[symbol];
+    try {
+      await nearestExpiry(primary); // cheap validity check against the real API
+      return primary;
+    } catch (e) {
+      const keywords = INDEX_NAME_FALLBACK[symbol];
+      if (!keywords) throw e; // no fallback keywords configured for this one — surface the original error
+      return await findIndexInstrumentKey(keywords); // self-heal by name search instead of needing another manual fix
+    }
+  }
   if (!universeCache.data) { try { await fetchAndCacheUniverse(); } catch (e) { /* fall through */ } }
   const hit = universeCache.data && universeCache.data.find(s => s.symbol === symbol);
   if (hit && hit.instrument_key) return hit.instrument_key;

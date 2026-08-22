@@ -6,6 +6,7 @@
 <title>NSE + BSE Analytics Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root{
     --bg:#0b0f17; --panel:#121826; --panel2:#0f1420; --border:#1f2733;
@@ -226,6 +227,9 @@
   <button class="rail-btn" data-target="sec-options" data-tip="Options &amp; futures">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg>
   </button>
+  <button class="rail-btn" data-target="sec-priceaction" data-tip="Price action">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l4-8 4 4 6-10 4 6"/></svg>
+  </button>
   <div class="rail-spacer"></div>
   <button class="rail-btn" id="collapseBtn" data-tip="Collapse">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
@@ -260,7 +264,7 @@
     <section id="sec-chart" class="panel">
       <div class="panel-head"><h3>Price chart with Supertrend</h3></div>
       <p class="desc">Intraday close price with Supertrend overlay &mdash; green points trade above trend, red below. Uses real Yahoo Finance data when the local proxy server is running (see the status badge next to the price above), otherwise falls back to a simulated feed.</p>
-      <div class="chart-wrap" style="height:260px;"><canvas id="priceChart"></canvas></div>
+      <div class="chart-wrap" style="height:340px;"><div id="priceChart" style="width:100%;height:100%;"></div></div>
     </section>
     <section id="sec-signal" class="panel">
       <div class="panel-head">
@@ -476,6 +480,37 @@
       <thead><tr><th>Strike</th><th>CE LTP</th><th>CE OI</th><th>CE Signal</th><th></th><th>PE LTP</th><th>PE OI</th><th>PE Signal</th><th></th></tr></thead>
       <tbody id="optBody"></tbody>
     </table></div>
+  </section>
+
+  <section id="sec-priceaction" class="panel">
+    <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
+    <p class="desc">Pattern-based signals using real intraday OHLC data. All three strategies run on the currently selected stock. <strong>Signal</strong> shows the latest bar's reading. <strong>Backtest</strong> walks all historical bars forward individually without look-ahead — entries on confirmed closes, exits on stop-loss or target. Composite signal fires when at least 2 of 3 strategies agree.</p>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;margin-bottom:10px;">
+      <div><label>Stock</label><select id="paStock"></select></div>
+      <div><label>Strategy</label><select id="paStrategy">
+        <option value="all">All three (composite)</option>
+        <option value="5ema">5-EMA Breakout</option>
+        <option value="support-resistance">Support / Resistance</option>
+        <option value="trend-pullback">Trend Pullback</option>
+      </select></div>
+      <div><label>Lookback</label><select id="paRange">
+        <option value="6mo">6 months</option>
+        <option value="1y" selected>1 year</option>
+        <option value="2y">2 years</option>
+      </select></div>
+      <div style="display:flex;gap:6px;align-items:end;">
+        <button class="btn" id="paScanBtn" style="padding:9px;">Signal</button>
+        <button class="btn" id="paBacktestBtn" style="padding:9px;">Backtest</button>
+      </div>
+    </div>
+    <div id="paSignalOut" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
+    <div id="paComposite" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
+    <div class="grid cols-4" id="paStats" style="margin-bottom:14px;display:none;"></div>
+    <div style="overflow-x:auto;"><table id="paTable" style="display:none;margin-bottom:14px;">
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
+      <tbody id="paBody"></tbody>
+    </table></div>
+    <div id="paStatus" class="metric-sub"></div>
   </section>
 
   <div class="grid cols-2b">
@@ -1048,7 +1083,14 @@ function generateStockData(symbol,name,sector,base){
    RENDERING
    ============================================================ */
 let charts={};
-function destroyCharts(){Object.values(charts).forEach(c=>c&&c.destroy());charts={};}
+function destroyCharts(){
+  Object.values(charts).forEach(c=>{
+    if(!c) return;
+    if(typeof c.destroy==='function') c.destroy();
+    else if(typeof c.remove==='function') c.remove();
+  });
+  charts={};
+}
 
 function renderTicker(liveRows){
   const idx = liveRows || [["NIFTY 50","24,175.7",0.71],["BANK NIFTY","58,031.6",0.0],["NIFTY IT","26,965.0",0.64],["INDIA VIX","12.29",-7.21]];
@@ -1127,6 +1169,7 @@ function selectStock(symbol){
   renderPositions();
   populateBacktestStockList();
   populateAlertStockList();
+  populatePaStockList();
   renderPriceAlerts();
   renderPortfolio();
   setLiveStatus('connecting');
@@ -1188,21 +1231,64 @@ function renderOverview(d){
     <div class="card"><div class="card-title">${l}</div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
 }
 
+function syntheticCandlesFromCloses(prices){
+  const candles=[];
+  const now=Math.floor(Date.now()/1000);
+  const startTime = now - (prices.length-1)*300;
+  for(let i=0;i<prices.length;i++){
+    const close=prices[i];
+    const open=i>0?prices[i-1]:close;
+    const high=Math.max(open,close)*(1+Math.random()*0.004);
+    const low=Math.min(open,close)*(1-Math.random()*0.004);
+    candles.push({time:startTime+i*300, open, high, low, close});
+  }
+  return candles;
+}
 function renderPriceChart(d){
-  const ctx=document.getElementById('priceChart');
-  const labels=d.prices.map((_,i)=>i+1);
-  charts.price = new Chart(ctx,{
-    type:'line',
-    data:{labels,datasets:[
-      {label:'Price',data:d.prices,borderColor:'#3d8bfd',borderWidth:1.5,pointRadius:3,tension:.25,
-        pointBackgroundColor:d.prices.map((p,i)=>p>=d.trendLine[i]?'#26c281':'#ef5350')},
-      {label:'Supertrend',data:d.trendLine,borderColor:'#f0a93a',borderWidth:1.3,borderDash:[5,4],pointRadius:0,tension:0}
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{display:false},ticks:{color:'#5b6472',maxTicksLimit:8}},
-        y:{grid:{color:'#1f2733'},ticks:{color:'#5b6472',callback:v=>Math.round(v)}}}}
+  const container=document.getElementById('priceChart');
+  if(charts.price && typeof charts.price.remove==='function'){ charts.price.remove(); charts.price=null; }
+  const chart = LightweightCharts.createChart(container, {
+    layout:{background:{color:'transparent'}, textColor:'#8a94a6'},
+    grid:{vertLines:{color:'#1f2733'}, horzLines:{color:'#1f2733'}},
+    rightPriceScale:{borderColor:'#1f2733'},
+    timeScale:{borderColor:'#1f2733', timeVisible:true, secondsVisible:false},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal}
   });
+  const candleSeries = chart.addCandlestickSeries({
+    upColor:'#26c281', downColor:'#ef5350', borderVisible:false,
+    wickUpColor:'#26c281', wickDownColor:'#ef5350'
+  });
+  const volumeSeries = chart.addHistogramSeries({
+    priceFormat:{type:'volume'}, priceScaleId:'', color:'#3d8bfd'
+  });
+  volumeSeries.priceScale().applyOptions({scaleMargins:{top:0.82, bottom:0}});
+  const supertrendSeries = chart.addLineSeries({color:'#f0a93a', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, crosshairMarkerVisible:false});
+
+  function paint(candles, trendVals){
+    candleSeries.setData(candles.map(c=>({time:c.time, open:c.open, high:c.high, low:c.low, close:c.close})));
+    if(candles[0] && candles[0].volume!=null){
+      volumeSeries.setData(candles.map(c=>({time:c.time, value:c.volume, color:c.close>=c.open?'rgba(38,194,129,.4)':'rgba(239,83,80,.4)'})));
+    }
+    if(trendVals) supertrendSeries.setData(candles.map((c,i)=>({time:c.time, value:trendVals[i]})));
+    chart.timeScale().fitContent();
+    charts.priceCandles = candles;
+    charts.priceCandleSeries = candleSeries;
+    charts.priceSupertrendSeries = supertrendSeries;
+  }
+
+  const fallbackCandles = syntheticCandlesFromCloses(d.prices);
+  paint(fallbackCandles, d.trendLine);
+
+  fetchYahooChart(d.symbol).then(q=>{
+    if(!q.series || q.series.length<10) throw new Error('insufficient real series');
+    if(window.CURRENT !== d) return;
+    const candles = q.series.map(p=>({time:Math.floor(p.t), open:p.o, high:p.h, low:p.l, close:p.c, volume:p.v}));
+    const closes = candles.map(c=>c.close);
+    const st = computeSupertrend(closes, 0.15);
+    paint(candles, st.trendLine);
+  }).catch(()=>{ /* stays on synthetic fallback */ });
+
+  charts.price = chart;
 }
 
 function renderSignal(d){
@@ -1908,6 +1994,202 @@ async function renderFnoIndices(){
 document.getElementById('fnoScanBtn')?.addEventListener('click', renderFnoIndices);
 
 /* ============================================================
+   PRICE ACTION STRATEGIES (5-EMA Breakout, Support/Resistance,
+   Trend-Pullback) — reviewed strategy module by Vrushal Bhilpawar
+   Integrated into the dashboard: wired to the existing fetch
+   pipeline (Yahoo history), using the same EMA helper already
+   present in the codebase, outputting to the same Backtest
+   table column format.
+   ============================================================ */
+
+// ---- core helpers ----
+function paEma(closes, period){
+  const k=2/(period+1), out=new Array(closes.length).fill(null);
+  if(closes.length<period) return out;
+  let seed=0; for(let i=0;i<period;i++) seed+=closes[i]; seed/=period;
+  out[period-1]=seed;
+  for(let i=period;i<closes.length;i++) out[i]=closes[i]*k+out[i-1]*(1-k);
+  return out;
+}
+function paCandlePos(c, emaVal){
+  if(emaVal==null) return 'Mixed';
+  if(c.low>emaVal) return 'Above';
+  if(c.high<emaVal) return 'Below';
+  return 'Mixed';
+}
+
+// ---- strategy 1: 5-EMA breakout ----
+function strategy5Ema(candles){
+  if(!candles||candles.length<8) return {signal:'Hold', reason:'Need 8+ candles'};
+  const closes=candles.map(c=>c.close), emaSeries=paEma(closes,5);
+  const positions=candles.map((c,i)=>paCandlePos(c,emaSeries[i]));
+  let streak=1;
+  for(let i=candles.length-2;i>0;i--){
+    if(positions[i]===positions[candles.length-2]&&positions[i]!=='Mixed') streak++;
+    else break;
+  }
+  const last=candles[candles.length-1], prevPos=positions[candles.length-2];
+  const lastEma=emaSeries[candles.length-1], lastPos=positions[candles.length-1];
+  if(streak>=3&&prevPos==='Below'&&last.close>lastEma&&lastPos!=='Below')
+    return {signal:'Buy', reason:`Closed above 5-EMA after ${streak} candles below`, stopLoss:last.low, target:+(last.close+(last.close-last.low)*1.5).toFixed(2)};
+  if(streak>=3&&prevPos==='Above'&&last.close<lastEma&&lastPos!=='Above')
+    return {signal:'Sell', reason:`Closed below 5-EMA after ${streak} candles above`, stopLoss:last.high, target:+(last.close-(last.high-last.close)*1.5).toFixed(2)};
+  return {signal:'Hold', reason:'No qualifying 5-EMA breakout'};
+}
+
+// ---- strategy 2: support/resistance ----
+function strategySR(candles, lookback=20){
+  if(!candles||candles.length<lookback+1) return {signal:'Hold', reason:`Need ${lookback+1}+ candles`};
+  const win=candles.slice(-lookback-1,-1);
+  const resistance=Math.max(...win.map(c=>c.high)), support=Math.min(...win.map(c=>c.low));
+  const last=candles[candles.length-1];
+  if(last.close>resistance) return {signal:'Buy', reason:`Close above ${lookback}-bar resistance (${resistance.toFixed(2)})`, stopLoss:support, target:+(last.close+(last.close-support)*0.5).toFixed(2)};
+  if(last.close<support) return {signal:'Sell', reason:`Close below ${lookback}-bar support (${support.toFixed(2)})`, stopLoss:resistance, target:+(last.close-(resistance-last.close)*0.5).toFixed(2)};
+  return {signal:'Hold', reason:'Price inside support/resistance range'};
+}
+
+// ---- strategy 3: trend pullback ----
+function strategyTrendPullback(candles, emaPeriod=20){
+  if(!candles||candles.length<emaPeriod+3) return {signal:'Hold', reason:`Need ${emaPeriod+3}+ candles`};
+  const closes=candles.map(c=>c.close), emaSeries=paEma(closes,emaPeriod);
+  const n=candles.length, last=candles[n-1], prev=candles[n-2];
+  const lastEma=emaSeries[n-1], prevEma=emaSeries[n-2];
+  const emaRising=lastEma!=null&&prevEma!=null&&lastEma>prevEma;
+  const emaFalling=lastEma!=null&&prevEma!=null&&lastEma<prevEma;
+  const nearFromAbove=prev.low<=prevEma*1.01&&prev.low>=prevEma*0.985;
+  const nearFromBelow=prev.high>=prevEma*0.99&&prev.high<=prevEma*1.015;
+  const bullRev=last.close>last.open&&last.close>prev.close;
+  const bearRev=last.close<last.open&&last.close<prev.close;
+  if(emaRising&&nearFromAbove&&bullRev) return {signal:'Buy', reason:`Uptrend + pullback to ${emaPeriod}-EMA + bullish reversal`, stopLoss:Math.min(last.low,prev.low), target:+(last.close+(last.close-Math.min(last.low,prev.low))*2).toFixed(2)};
+  if(emaFalling&&nearFromBelow&&bearRev) return {signal:'Sell', reason:`Downtrend + pullback to ${emaPeriod}-EMA + bearish reversal`, stopLoss:Math.max(last.high,prev.high), target:+(last.close-(Math.max(last.high,prev.high)-last.close)*2).toFixed(2)};
+  return {signal:'Hold', reason:'No qualifying trend-pullback setup'};
+}
+
+// ---- composite ----
+function paComposite(candles){
+  const r={fiveEma:strategy5Ema(candles), sr:strategySR(candles), tp:strategyTrendPullback(candles)};
+  const votes=Object.values(r).map(x=>x.signal);
+  const buys=votes.filter(v=>v==='Buy').length, sells=votes.filter(v=>v==='Sell').length;
+  let signal='Hold';
+  if(buys>=2) signal='Strong Buy';
+  else if(buys===1&&sells===0) signal='Buy';
+  else if(sells>=2) signal='Strong Sell';
+  else if(sells===1&&buys===0) signal='Sell';
+  return {signal, details:r};
+}
+
+// ---- backtester ----
+const PA_STRAT_FNS = {'5ema':strategy5Ema, 'support-resistance':strategySR, 'trend-pullback':strategyTrendPullback};
+const PA_STRAT_LABELS = {'5ema':'5-EMA Breakout', 'support-resistance':'Support/Resistance', 'trend-pullback':'Trend Pullback'};
+
+function paBacktest(candles, stratKey){
+  const fn=PA_STRAT_FNS[stratKey];
+  let pos=null, wins=0, trades=0, equity=100, peak=100, maxDd=0, grossP=0, grossL=0;
+  for(let i=10;i<candles.length;i++){
+    const slice=candles.slice(0,i+1), c=candles[i];
+    if(pos){
+      let exit=null;
+      if(pos.side==='Buy'){ if(c.low<=pos.stop) exit=pos.stop; else if(c.high>=pos.target) exit=pos.target; }
+      else { if(c.high>=pos.stop) exit=pos.stop; else if(c.low<=pos.target) exit=pos.target; }
+      if(exit!=null){
+        const pnl=pos.side==='Buy'?exit-pos.entry:pos.entry-exit;
+        equity+=pnl; peak=Math.max(peak,equity); maxDd=Math.min(maxDd,equity-peak);
+        if(pnl>0){wins++;grossP+=pnl;}else{grossL+=Math.abs(pnl);}
+        trades++; pos=null;
+      }
+    }
+    if(!pos){
+      const res=fn(slice);
+      if(res.signal==='Buy'||res.signal==='Sell') pos={side:res.signal, entry:c.close, stop:res.stopLoss, target:res.target};
+    }
+  }
+  return {
+    trades, winRate:trades?(wins/trades*100).toFixed(1):0,
+    totalReturn:(equity-100).toFixed(2),
+    profitFactor:grossL?(grossP/grossL).toFixed(2):(grossP?'∞':'0'),
+    maxDrawdown:maxDd.toFixed(2)
+  };
+}
+
+// ---- fetch OHLC candles from the existing /api/history endpoint ----
+async function paFetchCandles(symbol, range){
+  try{
+    const resp=await fetch('/api/history/'+encodeURIComponent(symbol+'.NS')+'?range='+range, {cache:'no-store'});
+    const data=await resp.json();
+    if(!data.series||data.series.length<30) throw new Error('insufficient data');
+    return data.series.map(p=>({time:p.t||0, open:p.o||p.c, high:p.h||p.c, low:p.l||p.c, close:p.c, volume:p.v||0}));
+  }catch(e){
+    // offline fallback: synthetic OHLC from the same random-close series the screener uses
+    const row=STOCKS.find(s=>s[0]===symbol)||[symbol,'','',(window.CURRENT&&window.CURRENT.price)||1000];
+    const rnd=mulberry32(hashCode(symbol+'pa'+range));
+    const n=range==='6mo'?130:(range==='2y'?500:250);
+    const candles=[]; let p=row[3]*0.85;
+    for(let i=0;i<n;i++){
+      const o=p; p=p*(1+sig(rnd,-2.4,2.4)/100);
+      const h=Math.max(o,p)*(1+Math.random()*0.004), l=Math.min(o,p)*(1-Math.random()*0.004);
+      candles.push({time:Math.floor(Date.now()/1000)-(n-i)*86400, open:o, high:h, low:l, close:p, volume:0});
+    }
+    return candles;
+  }
+}
+
+// ---- populate stock dropdown ----
+function populatePaStockList(){
+  const sel=document.getElementById('paStock');
+  if(!sel||sel.options.length) return;
+  sel.innerHTML=STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+  if(window.CURRENT) sel.value=window.CURRENT.symbol;
+}
+
+// ---- signal button ----
+document.getElementById('paScanBtn')?.addEventListener('click', async ()=>{
+  const symbol=document.getElementById('paStock').value;
+  const stratKey=document.getElementById('paStrategy').value;
+  const range=document.getElementById('paRange').value;
+  const statusEl=document.getElementById('paStatus');
+  const signalOut=document.getElementById('paSignalOut');
+  const compositeEl=document.getElementById('paComposite');
+  statusEl.textContent='Fetching candles…'; signalOut.style.display='none'; compositeEl.style.display='none';
+  const candles=await paFetchCandles(symbol,range);
+  if(stratKey==='all'){
+    const comp=paComposite(candles);
+    const cls=comp.signal.includes('Buy')?'up':comp.signal.includes('Sell')?'down':'';
+    compositeEl.innerHTML=`<div style="font-size:15px;font-weight:700;" class="${cls}">Composite: ${comp.signal}</div>
+      ${Object.entries(comp.details).map(([k,r])=>`<div class="metric-sub">${PA_STRAT_LABELS[k]||k}: <strong>${r.signal}</strong>${r.reason?' — '+r.reason:''}</div>`).join('')}`;
+    compositeEl.style.display='block';
+  } else {
+    const fn=PA_STRAT_FNS[stratKey], res=fn(candles);
+    const cls=res.signal==='Buy'?'up':res.signal==='Sell'?'down':'';
+    signalOut.innerHTML=`<div style="font-size:15px;font-weight:700;" class="${cls}">${PA_STRAT_LABELS[stratKey]}: ${res.signal}</div>
+      <div class="metric-sub">${res.reason||''}</div>
+      ${res.stopLoss!=null?`<div class="metric-sub">Stop: ₹${fmt(res.stopLoss,2)} &middot; Target: ₹${fmt(res.target,2)}</div>`:''}`;
+    signalOut.style.display='block';
+  }
+  statusEl.textContent=`Signal computed on ${candles.length} candles for ${symbol} (${range}).`;
+});
+
+// ---- backtest button ----
+document.getElementById('paBacktestBtn')?.addEventListener('click', async ()=>{
+  const symbol=document.getElementById('paStock').value;
+  const stratKey=document.getElementById('paStrategy').value;
+  const range=document.getElementById('paRange').value;
+  const statusEl=document.getElementById('paStatus');
+  statusEl.textContent='Running backtest…';
+  const candles=await paFetchCandles(symbol,range);
+  const keys=stratKey==='all'?Object.keys(PA_STRAT_FNS):[stratKey];
+  document.getElementById('paBody').innerHTML=keys.map(k=>{
+    const m=paBacktest(candles,k);
+    return `<tr><td><strong>${PA_STRAT_LABELS[k]}</strong></td><td>${m.trades}</td>
+      <td>${m.winRate}%</td>
+      <td class="${parseFloat(m.totalReturn)>=0?'up':'down'}">${parseFloat(m.totalReturn)>=0?'+':''}${m.totalReturn}</td>
+      <td>${m.profitFactor}</td><td class="down">${m.maxDrawdown}</td></tr>`;
+  }).join('');
+  document.getElementById('paTable').style.display='table';
+  document.getElementById('paStats').style.display='none';
+  statusEl.textContent=`Backtest complete for ${symbol} (${candles.length} candles, ${range}).`;
+});
+
+/* ============================================================
    CSV EXPORT
    ============================================================ */
 function downloadCSV(filename, headers, rows){
@@ -2508,11 +2790,15 @@ function refreshLiveDom(d){
   if(chg){ chg.className='chg '+(d.changePct>=0?'up':'down'); chg.innerHTML=`${d.changePct>=0?'&#9650;':'&#9660;'} ${Math.abs(d.changePct).toFixed(2)}%`; }
   renderOverview(d);
   renderSignal(d);
-  if(charts.price){
-    charts.price.data.datasets[0].data=d.prices;
-    charts.price.data.datasets[0].pointBackgroundColor=d.prices.map((p,i)=>p>=d.trendLine[i]?'#26c281':'#ef5350');
-    charts.price.data.datasets[1].data=d.trendLine;
-    charts.price.update('none');
+  if(charts.priceCandleSeries && charts.priceCandles && charts.priceCandles.length){
+    const last = charts.priceCandles[charts.priceCandles.length-1];
+    last.close = d.price;
+    last.high = Math.max(last.high, d.price);
+    last.low = Math.min(last.low, d.price);
+    charts.priceCandleSeries.update(last);
+    if(charts.priceSupertrendSeries && d.trendLine && d.trendLine.length){
+      charts.priceSupertrendSeries.update({time:last.time, value:d.trendLine[d.trendLine.length-1]});
+    }
   }
 }
 
@@ -2593,6 +2879,7 @@ renderScreener(); // populate the sector dropdown up front, so a heatmap-tile cl
 populatePortfolioStockList();
 populateCompareStockLists();
 populateOptionsUnderlyingList();
+populatePaStockList();
 renderPortfolio();
 setupAutoScan();
 updateStrategyDesc();

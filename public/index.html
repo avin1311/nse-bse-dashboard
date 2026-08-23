@@ -1675,12 +1675,23 @@ function renderHome(){
   const gainers = [...all].sort((a,b)=>b.changePct-a.changePct).slice(0,5);
   const losers = [...all].sort((a,b)=>a.changePct-b.changePct).slice(0,5);
   const openPositions = (window.POSITIONS||[]).filter(p=>p.status==='open');
+  const advancers = all.filter(d=>d.changePct>0).length;
+  const decliners = all.filter(d=>d.changePct<0).length;
   document.getElementById('homeView').innerHTML = `
     <div class="home-hero">
       <h2>Market overview</h2>
-      <p>Quick snapshot across ${STOCKS.length} covered stocks. Pick a stock from the search bar, screener, or a tab below to dig in.</p>
+      <p>Live index snapshot + quick scan across ${STOCKS.length} covered stocks. Pick any stock from the search bar, screener, or the movers below.</p>
     </div>
-    <div class="grid cols-2b">
+    <div class="grid cols-4" id="homeIndexCards" style="margin-bottom:0;">
+      <div class="card" id="idx-NIFTY50"><div class="card-title">Nifty 50</div><div class="metric-val" id="idx-val-NIFTY50">—</div><div class="metric-sub" id="idx-chg-NIFTY50">Loading…</div></div>
+      <div class="card" id="idx-BANKNIFTY"><div class="card-title">Bank Nifty</div><div class="metric-val" id="idx-val-BANKNIFTY">—</div><div class="metric-sub" id="idx-chg-BANKNIFTY">Loading…</div></div>
+      <div class="card" id="idx-SENSEX"><div class="card-title">Sensex</div><div class="metric-val" id="idx-val-SENSEX">—</div><div class="metric-sub" id="idx-chg-SENSEX">Loading…</div></div>
+      <div class="card"><div class="card-title">Market breadth (${STOCKS.length} stocks)</div>
+        <div class="metric-val" style="font-size:16px;"><span class="up">▲ ${advancers}</span> &nbsp; <span class="down">▼ ${decliners}</span></div>
+        <div class="metric-sub">${((advancers/STOCKS.length)*100).toFixed(0)}% advancing</div>
+      </div>
+    </div>
+    <div class="grid cols-2b" style="margin-top:0;">
       <div class="panel">
         <h3 style="color:var(--green);">Top gainers</h3>
         ${gainers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">+${d.changePct.toFixed(2)}%</span></div>`).join('')}
@@ -1692,11 +1703,36 @@ function renderHome(){
     </div>
     <div class="panel">
       <h3>Open positions</h3>
-      ${openPositions.length ? `<table><thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>Target</th><th>Stop-loss</th></tr></thead><tbody>
+      ${openPositions.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>Target</th><th>Stop-loss</th></tr></thead><tbody>
         ${openPositions.map(p=>`<tr class="row-click" data-symbol="${p.symbol}"><td>${p.symbol}</td><td class="${p.side==='buy'?'up':'down'}">${p.side.toUpperCase()}</td><td>&#8377;${fmt(p.entryPrice,2)}</td><td>&#8377;${fmt(p.target,2)}</td><td>&#8377;${fmt(p.stopLoss,2)}</td></tr>`).join('')}
-        </tbody></table>` : '<div class="metric-sub">No open positions. Open a stock and click Buy or Sell to paper-trade it.</div>'}
+        </tbody></table></div>` : '<div class="metric-sub">No open positions. Open a stock and click Buy or Sell to paper-trade it.</div>'}
     </div>`;
   document.querySelectorAll('#homeView [data-symbol]').forEach(el=>el.addEventListener('click',()=>{ openTab(el.dataset.symbol); }));
+
+  // Fetch live index data from Yahoo Finance (same proxy the stock chart uses)
+  const indices = [
+    {id:'NIFTY50', yahoo:'^NSEI'},
+    {id:'BANKNIFTY', yahoo:'^NSEBANK'},
+    {id:'SENSEX', yahoo:'^BSESN'}
+  ];
+  indices.forEach(async ({id, yahoo})=>{
+    try{
+      const resp = await fetch(`/api/quote/${encodeURIComponent(yahoo)}`, {cache:'no-store'});
+      const data = await resp.json();
+      if(data.error) throw new Error(data.error);
+      const price = data.price, chg = data.changePct;
+      const valEl = document.getElementById('idx-val-'+id);
+      const chgEl = document.getElementById('idx-chg-'+id);
+      if(valEl) valEl.textContent = fmt(price, 2);
+      if(chgEl){
+        chgEl.className = 'metric-sub ' + (chg>=0?'up':'down');
+        chgEl.textContent = (chg>=0?'+':'') + chg.toFixed(2) + '%';
+      }
+    }catch(e){
+      const chgEl = document.getElementById('idx-chg-'+id);
+      if(chgEl){ chgEl.textContent = 'Unavailable'; }
+    }
+  });
 }
 
 /* ============================================================

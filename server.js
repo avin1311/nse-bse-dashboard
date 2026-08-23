@@ -123,6 +123,20 @@ app.get('/api/quotes', async (req, res) => {
   res.json(results);
 });
 
+// Lightweight quote endpoint — used by the Home page for live index cards
+// (Nifty 50, Bank Nifty, Sensex). Reuses the same chart endpoint with a
+// minimal 1d/1m fetch so we get the current price and day change quickly.
+app.get('/api/quote/:symbol', async (req, res) => {
+  try {
+    const data = await getChartData(req.params.symbol, '1d', '5m');
+    if (!data || data.price == null) return res.status(502).json({ error: 'No price data' });
+    const changePct = data.prevClose ? ((data.price - data.prevClose) / data.prevClose * 100) : 0;
+    res.json({ price: data.price, prevClose: data.prevClose, changePct, marketState: data.marketState });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // Longer daily history, used by the Backtest tab to run strategies against
 // real historical closes instead of the short mock series.
 app.get('/api/history/:symbol', async (req, res) => {

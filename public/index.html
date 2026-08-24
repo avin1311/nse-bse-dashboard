@@ -2849,10 +2849,14 @@ async function tickLive(){
   const d=window.CURRENT;
   if(!d) return;
   try{
-    const q=await fetchYahooChart(d.symbol);
-    applyLiveQuote(d,q);
+    // Route through our server's /api/quote which tries Upstox LTPC first
+    // (exchange-direct, faster) then falls back to Yahoo automatically.
+    const resp = await fetch('/api/quote/'+encodeURIComponent(d.symbol), {cache:'no-store'});
+    const q = await resp.json();
+    if(q.error) throw new Error(q.error);
+    applyLiveQuote(d, q);
     refreshLiveDom(d);
-    setLiveStatus('live');
+    setLiveStatus(q.source==='upstox' ? 'live' : 'live');
   }catch(e){
     const move=(Math.random()-0.5)*0.6;
     d.price=d.price*(1+move/100);
@@ -2869,7 +2873,7 @@ async function tickLive(){
     setLiveStatus('sim');
   }
 }
-setInterval(tickLive, 15000); // matches the reference site's 15s auto-refresh cadence
+setInterval(tickLive, 15000);
 
 async function refreshTickerLive(){
   try{

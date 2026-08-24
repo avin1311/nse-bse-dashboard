@@ -123,19 +123,69 @@ app.get('/api/quotes', async (req, res) => {
   res.json(results);
 });
 
-// Lightweight quote endpoint — used by the Home page for live index cards
-// (Nifty 50, Bank Nifty, Sensex). Reuses the same chart endpoint with a
-// minimal 1d/1m fetch so we get the current price and day change quickly.
+// ============================================================
+// UPSTOX LTPC LIVE QUOTE
+// Upstox's LTPC (Last Trade Price + Change) endpoint gives the
+// real last-traded price in near-real-time via REST — no WebSocket
+// complexity, no Protobuf decoding, works fine on Render's free tier.
+// Tries Upstox first (faster, exchange-direct), falls back to Yahoo
+// if the token isn't set or Upstox errors.
+// ============================================================
+const ltpcCache = {};
+const LTPC_TTL = 5000; // 5 second local cache so rapid UI refreshes don't hammer the API
+
+async function getUpstoxLTPC(instrumentKey) {
+  const now = Date.now();
+  if (ltpcCache[instrumentKey] && now - ltpcCache[instrumentKey].time < LTPC_TTL) {
+    return { ...ltpcCache[instrumentKey].data, cached: true };
+  }
+  const data = await upstoxGet(`/market-quote/ltp?instrument_key=${encodeURIComponent(instrumentKey)}`);
+  // Upstox returns { [instrumentKey]: { last_price, ohlc: { close } } }
+  const entry = data && data[instrumentKey.replace('|', ':')];
+  if (!entry) throw new Error('No LTPC data returned for ' + instrumentKey);
+  const price = entry.last_price;
+  const prevClose = entry.ohlc?.close || price;
+  const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : 0;
+  const result = { price, prevClose, changePct, source: 'upstox' };
+  ltpcCache[instrumentKey] = { data: result, time: now };
+  return result;
+}
+
+// Live quote endpoint — used by the price ticker and Home page index cards.
+// Symbol can be an equity symbol (RELIANCE, TCS etc.) or a Yahoo Finance
+// index symbol (^NSEI, ^BSESN etc. — those always fall through to Yahoo
+// since they're not Upstox instrument keys).
 app.get('/api/quote/:symbol', async (req, res) => {
+  const sym = req.params.symbol;
+  // Index symbols (start with ^) always use Yahoo — not in the Upstox instruments format
+  if (!sym.startsWith('^') && process.env.UPSTOX_ACCESS_TOKEN) {
+    try {
+      // Resolve the instrument key from the universe cache if available
+      let instrumentKey = UPSTOX_INDEX_KEYS[sym];
+      if (!instrumentKey) {
+        if (!universeCache.data) await fetchAndCacheUniverse().catch(() => {});
+        const hit = universeCache.data && universeCache.data.find(s => s.symbol === sym);
+        if (hit && hit.instrument_key) instrumentKey = hit.instrument_key;
+      }
+      if (instrumentKey) {
+        const data = await getUpstoxLTPC(instrumentKey);
+        return res.json(data);
+      }
+    } catch (e) { /* fall through to Yahoo */ }
+  }
+  // Yahoo fallback — always used for index symbols and when Upstox not configured
   try {
-    const data = await getChartData(req.params.symbol, '1d', '5m');
+    const ySymbol = sym.startsWith('^') ? sym : sym + '.NS';
+    const data = await getChartData(ySymbol, '1d', '5m');
     if (!data || data.price == null) return res.status(502).json({ error: 'No price data' });
     const changePct = data.prevClose ? ((data.price - data.prevClose) / data.prevClose * 100) : 0;
-    res.json({ price: data.price, prevClose: data.prevClose, changePct, marketState: data.marketState });
+    res.json({ price: data.price, prevClose: data.prevClose, changePct, marketState: data.marketState, source: 'yahoo' });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
 });
+
+
 
 // Longer daily history, used by the Backtest tab to run strategies against
 // real historical closes instead of the short mock series.

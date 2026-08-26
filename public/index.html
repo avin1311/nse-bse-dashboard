@@ -1172,7 +1172,7 @@ function selectStock(symbol){
   renderPriceAlerts();
   renderPortfolio();
   setLiveStatus('connecting');
-  tickLive();
+  startLiveFeed(d);
 }
 
 window.WATCHLIST = window.WATCHLIST || [];
@@ -1659,6 +1659,7 @@ document.getElementById('rail').addEventListener('click',(e)=>{
    ============================================================ */
 function showHome(){
   window.IN_HOME_VIEW = true;
+  stopLiveFeed();
   try{ history.replaceState(null,'','?'); }catch(e){}
   document.getElementById('homeView').style.display='block';
   document.getElementById('stockView').style.display='none';
@@ -2845,18 +2846,74 @@ function refreshLiveDom(d){
   }
 }
 
+// ============================================================
+// 1-SECOND LIVE FEED via Upstox WebSocket → Server-Sent Events
+// When Upstox streaming is available, price updates arrive in
+// real time (~1 second). Falls back to 15-second REST polling
+// automatically if SSE isn't available (token not set, etc.).
+// ============================================================
+let liveEventSource = null;
+let livePollInterval = null;
+
+function applyStreamTick(d, q) {
+  d.price = q.price;
+  d.changePct = q.changePct;
+  d.prices[d.prices.length - 1] = q.price;
+  d.support1 = d.price * 0.982; d.support2 = d.price * 0.958;
+  d.resistance1 = d.price * 1.018; d.resistance2 = d.price * 1.042;
+}
+
+function startLiveFeed(d) {
+  stopLiveFeed();
+  const row = STOCKS.find(s => s[0] === d.symbol);
+  const instrumentKey = window.FULL_UNIVERSE && window.FULL_UNIVERSE.find(u => u.symbol === d.symbol)?.instrument_key;
+  if (!instrumentKey) {
+    startFallbackPoll(d);
+    return;
+  }
+
+  try {
+    liveEventSource = new EventSource('/api/stream?symbols=' + encodeURIComponent(instrumentKey));
+    liveEventSource.onmessage = (e) => {
+      try {
+        const tick = JSON.parse(e.data);
+        const cur = window.CURRENT;
+        if (!cur || cur.symbol !== d.symbol) return;
+        applyStreamTick(cur, tick);
+        refreshLiveDom(cur);
+        setLiveStatus('live');
+      } catch (_) {}
+    };
+    liveEventSource.addEventListener('feed_unavailable', () => {
+      liveEventSource.close(); liveEventSource = null;
+      startFallbackPoll(d);
+    });
+    liveEventSource.onerror = () => {
+      // SSE connection dropped — switch to fallback poll silently
+      if (liveEventSource) { liveEventSource.close(); liveEventSource = null; }
+      startFallbackPoll(d);
+    };
+    setLiveStatus('live');
+  } catch (e) {
+    startFallbackPoll(d);
+  }
+}
+
+function stopLiveFeed() {
+  if (liveEventSource) { try { liveEventSource.close(); } catch (_) {} liveEventSource = null; }
+  if (livePollInterval) { clearInterval(livePollInterval); livePollInterval = null; }
+}
+
 async function tickLive(){
   const d=window.CURRENT;
   if(!d) return;
   try{
-    // Route through our server's /api/quote which tries Upstox LTPC first
-    // (exchange-direct, faster) then falls back to Yahoo automatically.
     const resp = await fetch('/api/quote/'+encodeURIComponent(d.symbol), {cache:'no-store'});
     const q = await resp.json();
     if(q.error) throw new Error(q.error);
     applyLiveQuote(d, q);
     refreshLiveDom(d);
-    setLiveStatus(q.source==='upstox' ? 'live' : 'live');
+    setLiveStatus('live');
   }catch(e){
     const move=(Math.random()-0.5)*0.6;
     d.price=d.price*(1+move/100);
@@ -2873,7 +2930,12 @@ async function tickLive(){
     setLiveStatus('sim');
   }
 }
-setInterval(tickLive, 15000);
+
+function startFallbackPoll(d) {
+  if (livePollInterval) return;
+  livePollInterval = setInterval(tickLive, 15000);
+}
+
 
 async function refreshTickerLive(){
   try{

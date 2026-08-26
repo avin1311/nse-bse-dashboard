@@ -10,7 +10,8 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "upstox-js-sdk": "^2.0.0"
   },
   "license": "ISC"
 }

@@ -204,28 +204,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
 // UPSTOX WEBSOCKET → SERVER-SENT EVENTS LIVE FEED
-// Architecture: Upstox WebSocket (Protobuf, handled by SDK) →
-// server decodes → SSE stream → browser's EventSource.
-// One persistent Upstox connection shared across all browser
-// clients — the server subscribes/unsubscribes instrument keys
-// as browsers connect and disconnect.
-// Requires UPSTOX_ACCESS_TOKEN. Degrades gracefully: if the
-// token isn't set or Upstox disconnects, SSE clients get a
-// 'feed_unavailable' event and the browser falls back to the
-// 15-second REST polling it already does.
 // ============================================================
-const { MarketDataStreamerV3 } = require('upstox-js-sdk');
+let UpstoxClient;
+try { UpstoxClient = require('upstox-js-sdk'); } catch(e) { console.warn('upstox-js-sdk not installed — WebSocket feed unavailable'); }
 
 let upstoxStreamer = null;
 let streamerConnected = false;
-const sseClients = new Map(); // clientId → { res, symbols: Set }
-const latestPrices = new Map(); // instrumentKey → { price, changePct, time }
+const sseClients = new Map();
+const latestPrices = new Map();
 let streamerRetryTimer = null;
 
-function getStreamerToken() {
+function initUpstoxAuth() {
+  if (!UpstoxClient) return false;
   const token = process.env.UPSTOX_ACCESS_TOKEN;
-  if (!token) throw new Error('UPSTOX_ACCESS_TOKEN not set');
-  return token;
+  if (!token) return false;
+  const defaultClient = UpstoxClient.ApiClient.instance;
+  const OAUTH2 = defaultClient.authentications['OAUTH2'];
+  OAUTH2.accessToken = token;
+  return true;
 }
 
 function allSubscribedKeys() {
@@ -239,25 +235,30 @@ function broadcastPrice(instrumentKey, data) {
   const payload = JSON.stringify({ instrumentKey, ...data });
   sseClients.forEach(client => {
     if (client.symbols.has(instrumentKey)) {
-      try { client.res.write(`data: ${payload}\n\n`); } catch (e) { /* client disconnected */ }
+      try { client.res.write(`data: ${payload}\n\n`); } catch (e) {}
     }
   });
 }
 
-async function startUpstoxStreamer(instrumentKeys) {
-  if (!process.env.UPSTOX_ACCESS_TOKEN) return;
+function startUpstoxStreamer(instrumentKeys) {
+  if (!initUpstoxAuth()) return;
+  if (!instrumentKeys.length) return;
   if (upstoxStreamer) { try { upstoxStreamer.disconnect(); } catch (e) {} upstoxStreamer = null; }
   streamerConnected = false;
-  try {
-    // The SDK reads the access token from the ApiClient default instance
-    const { ApiClient } = require('upstox-js-sdk');
-    ApiClient.instance.authentications['OAUTH2'].accessToken = getStreamerToken();
+  clearTimeout(streamerRetryTimer);
 
-    upstoxStreamer = new MarketDataStreamerV3(instrumentKeys, 'ltpc');
+  try {
+    // Auth is set on ApiClient.instance above — SDK reads it automatically
+    upstoxStreamer = new UpstoxClient.MarketDataStreamerV3(instrumentKeys, 'ltpc');
+
+    upstoxStreamer.on('open', async () => {
+      streamerConnected = true;
+      console.log('Upstox WebSocket connected, streaming', instrumentKeys.length, 'instruments');
+    });
 
     upstoxStreamer.on('message', (data) => {
-      // The SDK decodes Protobuf for us — data is a plain JS object
       try {
+        // SDK delivers decoded JS object — feeds is keyed by instrument key
         const feeds = data?.feeds || {};
         Object.entries(feeds).forEach(([key, feed]) => {
           const ltpc = feed?.ltpc;
@@ -267,73 +268,76 @@ async function startUpstoxStreamer(instrumentKeys) {
           const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : 0;
           broadcastPrice(key, { price, changePct, source: 'upstox-ws' });
         });
-      } catch (e) { /* malformed message, skip */ }
-    });
-
-    upstoxStreamer.on('open', () => {
-      streamerConnected = true;
-      console.log('Upstox WebSocket connected, streaming', instrumentKeys.length, 'instruments');
+      } catch (e) {}
     });
 
     upstoxStreamer.on('close', () => {
       streamerConnected = false;
-      console.log('Upstox WebSocket closed — will retry in 10s if clients still connected');
+      console.log('Upstox WebSocket closed — retrying in 10s');
       streamerRetryTimer = setTimeout(() => {
         const keys = allSubscribedKeys();
-        if (keys.length > 0) startUpstoxStreamer(keys);
+        if (keys.length) startUpstoxStreamer(keys);
       }, 10000);
     });
 
     upstoxStreamer.on('error', (e) => {
-      console.error('Upstox WebSocket error:', e.message || e);
+      console.error('Upstox WebSocket error:', typeof e === 'object' ? e.message || JSON.stringify(e) : e);
     });
 
-    await upstoxStreamer.connect();
+    upstoxStreamer.connect();
   } catch (e) {
-    console.error('Could not start Upstox streamer:', e.message);
-    sseClients.forEach(client => {
-      try { client.res.write(`event: feed_unavailable\ndata: ${JSON.stringify({ error: e.message })}\n\n`); } catch (_) {}
-    });
+    console.error('Failed to start Upstox streamer:', e.message);
   }
 }
 
-// SSE endpoint — browsers open this to receive 1-second price updates
-app.get('/api/stream', (req, res) => {
-  if (!process.env.UPSTOX_ACCESS_TOKEN) {
-    return res.status(503).json({ error: 'UPSTOX_ACCESS_TOKEN not configured' });
+// Resolve an equity symbol to its Upstox instrument key via the universe cache
+async function symbolToInstrumentKey(symbol) {
+  if (UPSTOX_INDEX_KEYS[symbol]) return UPSTOX_INDEX_KEYS[symbol];
+  if (!universeCache.data) await fetchAndCacheUniverse().catch(() => {});
+  const hit = universeCache.data && universeCache.data.find(s => s.symbol === symbol);
+  return hit && hit.instrument_key ? hit.instrument_key : null;
+}
+
+// SSE endpoint — browser opens this to receive 1s price updates
+app.get('/api/stream', async (req, res) => {
+  if (!process.env.UPSTOX_ACCESS_TOKEN || !UpstoxClient) {
+    return res.status(503).json({ error: 'Upstox streaming not configured' });
   }
-  const clientId = Date.now() + '-' + Math.random().toString(36).slice(2);
-  const symbolsParam = (req.query.symbols || '').split(',').filter(Boolean);
+
+  // Accept either instrument keys directly or equity symbols (we resolve them)
+  const rawSymbols = (req.query.symbols || '').split(',').filter(Boolean);
+  const instrumentKeys = [];
+  for (const sym of rawSymbols) {
+    const key = sym.includes('|') ? sym : await symbolToInstrumentKey(sym).catch(() => null);
+    if (key) instrumentKeys.push(key);
+  }
+
+  if (!instrumentKeys.length) return res.status(400).json({ error: 'No valid instrument keys resolved' });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // important for Render/nginx proxies
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  const clientSymbols = new Set(symbolsParam);
-  sseClients.set(clientId, { res, symbols: clientSymbols });
+  const clientId = Date.now() + '-' + Math.random().toString(36).slice(2);
+  sseClients.set(clientId, { res, symbols: new Set(instrumentKeys) });
 
-  // Send any already-cached prices immediately so the browser doesn't wait
-  clientSymbols.forEach(key => {
+  // Send cached prices immediately so there's no delay on tab switch
+  instrumentKeys.forEach(key => {
     const cached = latestPrices.get(key);
-    if (cached) {
-      try { res.write(`data: ${JSON.stringify({ instrumentKey: key, ...cached })}\n\n`); } catch (_) {}
-    }
+    if (cached) try { res.write(`data: ${JSON.stringify({ instrumentKey: key, ...cached })}\n\n`); } catch (_) {}
   });
 
-  // Subscribe new keys on the streamer if it's already running
-  if (upstoxStreamer && streamerConnected) {
-    const newKeys = symbolsParam.filter(k => !Array.from(latestPrices.keys()).includes(k));
-    if (newKeys.length) {
-      try { upstoxStreamer.subscribe(newKeys, 'ltpc'); } catch (e) { /* ignore */ }
-    }
+  // Start or extend the streamer
+  if (streamerConnected && upstoxStreamer) {
+    const newKeys = instrumentKeys.filter(k => !latestPrices.has(k));
+    if (newKeys.length) try { upstoxStreamer.subscribe(newKeys, 'ltpc'); } catch (e) {}
   } else {
-    // Start the streamer with all needed keys
     startUpstoxStreamer(allSubscribedKeys());
   }
 
-  // Keepalive ping every 20s so Render doesn't close the connection
+  // Keepalive every 20s (Render/nginx would close idle SSE otherwise)
   const ping = setInterval(() => {
     try { res.write(': ping\n\n'); } catch (_) { clearInterval(ping); }
   }, 20000);
@@ -342,27 +346,15 @@ app.get('/api/stream', (req, res) => {
     clearInterval(ping);
     sseClients.delete(clientId);
     if (sseClients.size === 0 && upstoxStreamer) {
-      console.log('No more SSE clients — disconnecting Upstox WebSocket');
       clearTimeout(streamerRetryTimer);
       try { upstoxStreamer.disconnect(); } catch (e) {}
       upstoxStreamer = null;
       streamerConnected = false;
+      console.log('All SSE clients gone — Upstox WebSocket disconnected');
     }
   });
 });
 
-// Subscribe additional instruments to an existing stream (called when user switches stocks)
-app.post('/api/stream/subscribe', express.json(), (req, res) => {
-  const { symbols } = req.body || {};
-  if (!Array.isArray(symbols) || !symbols.length) return res.status(400).json({ error: 'symbols array required' });
-  if (upstoxStreamer && streamerConnected) {
-    try { upstoxStreamer.subscribe(symbols, 'ltpc'); res.json({ ok: true }); }
-    catch (e) { res.status(502).json({ error: e.message }); }
-  } else {
-    startUpstoxStreamer([...allSubscribedKeys(), ...symbols]);
-    res.json({ ok: true, note: 'streamer starting' });
-  }
-});
 
 
 

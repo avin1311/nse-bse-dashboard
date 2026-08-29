@@ -2865,15 +2865,8 @@ function applyStreamTick(d, q) {
 
 function startLiveFeed(d) {
   stopLiveFeed();
-  const row = STOCKS.find(s => s[0] === d.symbol);
-  const instrumentKey = window.FULL_UNIVERSE && window.FULL_UNIVERSE.find(u => u.symbol === d.symbol)?.instrument_key;
-  if (!instrumentKey) {
-    startFallbackPoll(d);
-    return;
-  }
-
   try {
-    liveEventSource = new EventSource('/api/stream?symbols=' + encodeURIComponent(instrumentKey));
+    liveEventSource = new EventSource('/api/stream?symbols=' + encodeURIComponent(d.symbol));
     liveEventSource.onmessage = (e) => {
       try {
         const tick = JSON.parse(e.data);
@@ -2884,16 +2877,10 @@ function startLiveFeed(d) {
         setLiveStatus('live');
       } catch (_) {}
     };
-    liveEventSource.addEventListener('feed_unavailable', () => {
-      liveEventSource.close(); liveEventSource = null;
-      startFallbackPoll(d);
-    });
     liveEventSource.onerror = () => {
-      // SSE connection dropped — switch to fallback poll silently
       if (liveEventSource) { liveEventSource.close(); liveEventSource = null; }
       startFallbackPoll(d);
     };
-    setLiveStatus('live');
   } catch (e) {
     startFallbackPoll(d);
   }

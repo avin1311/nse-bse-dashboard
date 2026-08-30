@@ -301,18 +301,11 @@ async function symbolToInstrumentKey(symbol) {
 // SSE endpoint — browser opens this to receive 1s price updates
 app.get('/api/stream', async (req, res) => {
   if (!process.env.UPSTOX_ACCESS_TOKEN || !UpstoxClient) {
-    return res.status(503).json({ error: 'Upstox streaming not configured' });
+    return res.status(503).json({ error: 'Upstox streaming not configured — UPSTOX_ACCESS_TOKEN missing' });
   }
 
-  // Accept either instrument keys directly or equity symbols (we resolve them)
   const rawSymbols = (req.query.symbols || '').split(',').filter(Boolean);
-  const instrumentKeys = [];
-  for (const sym of rawSymbols) {
-    const key = sym.includes('|') ? sym : await symbolToInstrumentKey(sym).catch(() => null);
-    if (key) instrumentKeys.push(key);
-  }
-
-  if (!instrumentKeys.length) return res.status(400).json({ error: 'No valid instrument keys resolved' });
+  if (!rawSymbols.length) return res.status(400).json({ error: 'symbols param required' });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -321,23 +314,61 @@ app.get('/api/stream', async (req, res) => {
   res.flushHeaders();
 
   const clientId = Date.now() + '-' + Math.random().toString(36).slice(2);
-  sseClients.set(clientId, { res, symbols: new Set(instrumentKeys) });
+  const clientSymbols = new Set();
+  sseClients.set(clientId, { res, symbols: clientSymbols });
 
-  // Send cached prices immediately so there's no delay on tab switch
-  instrumentKeys.forEach(key => {
-    const cached = latestPrices.get(key);
-    if (cached) try { res.write(`data: ${JSON.stringify({ instrumentKey: key, ...cached })}\n\n`); } catch (_) {}
-  });
+  // Resolve instrument keys — fetch universe if needed, then start streaming
+  (async () => {
+    const instrumentKeys = [];
+    for (const sym of rawSymbols) {
+      const key = sym.includes('|') ? sym : await symbolToInstrumentKey(sym).catch(() => null);
+      if (key) { instrumentKeys.push(key); clientSymbols.add(key); }
+    }
 
-  // Start or extend the streamer
-  if (streamerConnected && upstoxStreamer) {
-    const newKeys = instrumentKeys.filter(k => !latestPrices.has(k));
-    if (newKeys.length) try { upstoxStreamer.subscribe(newKeys, 'ltpc'); } catch (e) {}
-  } else {
-    startUpstoxStreamer(allSubscribedKeys());
-  }
+    if (!instrumentKeys.length) {
+      // Can't resolve yet — send a REST quote as a one-off so browser at least gets current price
+      for (const sym of rawSymbols) {
+        try {
+          const ySymbol = sym + '.NS';
+          const data = await getChartData(ySymbol, '1d', '5m');
+          if (data && data.price) {
+            const changePct = data.prevClose ? ((data.price - data.prevClose) / data.prevClose * 100) : 0;
+            const payload = JSON.stringify({ instrumentKey: sym, price: data.price, changePct, source: 'yahoo-fallback' });
+            try { res.write(`data: ${payload}\n\n`); } catch (_) {}
+          }
+        } catch (e) {}
+      }
+      // Retry resolution after 5s (universe may finish loading by then)
+      setTimeout(async () => {
+        for (const sym of rawSymbols) {
+          const key = await symbolToInstrumentKey(sym).catch(() => null);
+          if (key && !clientSymbols.has(key)) {
+            clientSymbols.add(key);
+            if (streamerConnected && upstoxStreamer) {
+              try { upstoxStreamer.subscribe([key], 'ltpc'); } catch (e) {}
+            }
+          }
+        }
+        const keys = allSubscribedKeys();
+        if (keys.length && (!upstoxStreamer || !streamerConnected)) startUpstoxStreamer(keys);
+      }, 5000);
+      return;
+    }
 
-  // Keepalive every 20s (Render/nginx would close idle SSE otherwise)
+    // Send cached prices immediately
+    instrumentKeys.forEach(key => {
+      const cached = latestPrices.get(key);
+      if (cached) try { res.write(`data: ${JSON.stringify({ instrumentKey: key, ...cached })}\n\n`); } catch (_) {}
+    });
+
+    if (streamerConnected && upstoxStreamer) {
+      const newKeys = instrumentKeys.filter(k => !latestPrices.has(k));
+      if (newKeys.length) try { upstoxStreamer.subscribe(newKeys, 'ltpc'); } catch (e) {}
+    } else {
+      startUpstoxStreamer(allSubscribedKeys());
+    }
+  })();
+
   const ping = setInterval(() => {
     try { res.write(': ping\n\n'); } catch (_) { clearInterval(ping); }
   }, 20000);
@@ -352,6 +383,18 @@ app.get('/api/stream', async (req, res) => {
       streamerConnected = false;
       console.log('All SSE clients gone — Upstox WebSocket disconnected');
     }
+  });
+});
+
+// Debug endpoint — shows streamer status and what's being subscribed
+app.get('/api/stream/status', (req, res) => {
+  res.json({
+    streamerConnected,
+    activeClients: sseClients.size,
+    subscribedKeys: allSubscribedKeys(),
+    cachedPrices: Array.from(latestPrices.keys()),
+    upstoxTokenSet: !!process.env.UPSTOX_ACCESS_TOKEN,
+    sdkLoaded: !!UpstoxClient
   });
 });
 

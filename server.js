@@ -293,6 +293,11 @@ function startUpstoxStreamer(instrumentKeys) {
 // Resolve an equity symbol to its Upstox instrument key via the universe cache
 async function symbolToInstrumentKey(symbol) {
   if (UPSTOX_INDEX_KEYS[symbol]) return UPSTOX_INDEX_KEYS[symbol];
+  // Check hardcoded EQ keys first — instant, no network needed
+  const normalized = symbol.replace(/[&-]/g, '_'); // handle M&M, BAJAJ-AUTO etc.
+  if (HARDCODED_EQ_KEYS[symbol]) return HARDCODED_EQ_KEYS[symbol];
+  if (HARDCODED_EQ_KEYS[normalized]) return HARDCODED_EQ_KEYS[normalized];
+  // Fall through to universe cache
   if (!universeCache.data) await fetchAndCacheUniverse().catch(() => {});
   const hit = universeCache.data && universeCache.data.find(s => s.symbol === symbol);
   return hit && hit.instrument_key ? hit.instrument_key : null;
@@ -699,6 +704,63 @@ const UPSTOX_INDEX_KEYS = {
   NIFTYNXT50: 'NSE_INDEX|Nifty Next 50'
 };
 
+// Hardcoded NSE_EQ instrument keys for the most commonly opened stocks.
+// These follow the pattern NSE_EQ|<ISIN> and are used as a fallback when
+// the Upstox instruments file hasn't loaded yet (or fails to fetch on Render).
+// Format: NSE_EQ|<ISIN> — ISINs are permanent and never change for a stock.
+const HARDCODED_EQ_KEYS = {
+  RELIANCE:   'NSE_EQ|INE002A01018',
+  TCS:        'NSE_EQ|INE467B01029',
+  HDFCBANK:   'NSE_EQ|INE040A01034',
+  INFY:       'NSE_EQ|INE009A01021',
+  ICICIBANK:  'NSE_EQ|INE090A01021',
+  SBIN:       'NSE_EQ|INE062A01020',
+  HINDUNILVR: 'NSE_EQ|INE030A01027',
+  ITC:        'NSE_EQ|INE154A01025',
+  KOTAKBANK:  'NSE_EQ|INE237A01028',
+  LT:         'NSE_EQ|INE018A01030',
+  BHARTIARTL: 'NSE_EQ|INE397D01024',
+  AXISBANK:   'NSE_EQ|INE238A01034',
+  BAJFINANCE: 'NSE_EQ|INE296A01024',
+  MARUTI:     'NSE_EQ|INE585B01010',
+  TATAMOTORS: 'NSE_EQ|INE155A01022',
+  WIPRO:      'NSE_EQ|INE075A01022',
+  ULTRACEMCO: 'NSE_EQ|INE481G01011',
+  SUNPHARMA:  'NSE_EQ|INE044A01036',
+  ASIANPAINT: 'NSE_EQ|INE021A01026',
+  NESTLEIND:  'NSE_EQ|INE239A01024',
+  APOLLOHOSP: 'NSE_EQ|INE437A01024',
+  ZOMATO:     'NSE_EQ|INE758T01015',
+  ADANIENT:   'NSE_EQ|INE423A01024',
+  ADANIPORTS: 'NSE_EQ|INE742F01042',
+  HCLTECH:    'NSE_EQ|INE860A01027',
+  ONGC:       'NSE_EQ|INE213A01029',
+  POWERGRID:  'NSE_EQ|INE752E01010',
+  NTPC:       'NSE_EQ|INE733E01010',
+  TITAN:      'NSE_EQ|INE280A01028',
+  BAJAJFINSV: 'NSE_EQ|INE918I01026',
+  JSWSTEEL:   'NSE_EQ|INE019A01038',
+  TATASTEEL:  'NSE_EQ|INE081A01020',
+  GRASIM:     'NSE_EQ|INE047A01021',
+  CIPLA:      'NSE_EQ|INE059A01026',
+  DRREDDY:    'NSE_EQ|INE089A01023',
+  EICHERMOT:  'NSE_EQ|INE066A01021',
+  BPCL:       'NSE_EQ|INE029A01011',
+  TECHM:      'NSE_EQ|INE669C01036',
+  HINDALCO:   'NSE_EQ|INE038A01020',
+  SBILIFE:    'NSE_EQ|INE330G01039',
+  M_M:        'NSE_EQ|INE101A01026', // M&M
+  INDUSINDBK: 'NSE_EQ|INE095A01012',
+  HDFCLIFE:   'NSE_EQ|INE795G01014',
+  DIVISLAB:   'NSE_EQ|INE361B01024',
+  COALINDIA:  'NSE_EQ|INE522F01014',
+  BAJAJ_AUTO: 'NSE_EQ|INE917I01010',
+  VEDL:       'NSE_EQ|INE205A01025',
+  HAL:        'NSE_EQ|INE066F01012',
+  BEL:        'NSE_EQ|INE263A01024',
+  DLF:        'NSE_EQ|INE271C01023',
+};
+
 function upstoxHeaders() {
   const token = process.env.UPSTOX_ACCESS_TOKEN;
   if (!token) throw new Error('UPSTOX_ACCESS_TOKEN not configured on the server');
@@ -856,4 +918,12 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.listen(PORT, () => {
   console.log(`\nDashboard running at http://localhost:${PORT}`);
   console.log(`Live data proxied from Yahoo Finance (cache TTL ${CACHE_TTL_MS / 1000}s)\n`);
+  // Pre-warm the stock universe cache so instrument key resolution works
+  // immediately when the first SSE client connects, rather than adding a
+  // cold-start delay to the first live feed request.
+  setTimeout(() => {
+    fetchAndCacheUniverse()
+      .then(stocks => console.log(`Universe cache warmed: ${stocks.length} stocks loaded`))
+      .catch(e => console.warn('Universe pre-warm failed (will retry on first request):', e.message));
+  }, 3000); // 3s delay gives the server time to fully start before the fetch
 });

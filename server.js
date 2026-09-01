@@ -248,17 +248,15 @@ function startUpstoxStreamer(instrumentKeys) {
   clearTimeout(streamerRetryTimer);
 
   try {
-    // Auth is set on ApiClient.instance above — SDK reads it automatically
     upstoxStreamer = new UpstoxClient.MarketDataStreamerV3(instrumentKeys, 'ltpc');
 
-    upstoxStreamer.on('open', async () => {
+    upstoxStreamer.on('open', () => {
       streamerConnected = true;
       console.log('Upstox WebSocket connected, streaming', instrumentKeys.length, 'instruments');
     });
 
     upstoxStreamer.on('message', (data) => {
       try {
-        // SDK delivers decoded JS object — feeds is keyed by instrument key
         const feeds = data?.feeds || {};
         Object.entries(feeds).forEach(([key, feed]) => {
           const ltpc = feed?.ltpc;
@@ -271,8 +269,15 @@ function startUpstoxStreamer(instrumentKeys) {
       } catch (e) {}
     });
 
-    upstoxStreamer.on('close', () => {
+    upstoxStreamer.on('close', (code) => {
       streamerConnected = false;
+      // 401 = wrong token type — Analytics Token can't do WebSocket streaming.
+      // Don't retry in a tight loop — the REST /api/quote endpoint still works.
+      if (code === 401 || code === 4001) {
+        console.warn('Upstox WebSocket 401 — Analytics Token lacks streaming permission. Live REST quotes still work via /api/quote. For 1s WebSocket feed, use a full OAuth access token (generated daily via Upstox login flow).');
+        upstoxStreamer = null;
+        return; // no retry for auth failures
+      }
       console.log('Upstox WebSocket closed — retrying in 10s');
       streamerRetryTimer = setTimeout(() => {
         const keys = allSubscribedKeys();
@@ -281,12 +286,21 @@ function startUpstoxStreamer(instrumentKeys) {
     });
 
     upstoxStreamer.on('error', (e) => {
-      console.error('Upstox WebSocket error:', typeof e === 'object' ? e.message || JSON.stringify(e) : e);
+      const msg = typeof e === 'object' ? (e.message || JSON.stringify(e)) : String(e);
+      // 401 on the error event — same as close with code 401
+      if (msg.includes('401')) {
+        console.warn('Upstox WebSocket 401 — Analytics Token lacks streaming permission. Falling back to REST polling.');
+        streamerConnected = false;
+        upstoxStreamer = null;
+        return;
+      }
+      console.error('Upstox WebSocket error:', msg);
     });
 
     upstoxStreamer.connect();
   } catch (e) {
     console.error('Failed to start Upstox streamer:', e.message);
+    upstoxStreamer = null;
   }
 }
 
@@ -690,9 +704,59 @@ app.get('/api/check-alerts', async (req, res) => {
 // it never crashes the app either way.
 // ============================================================
 const UPSTOX_BASE = 'https://api.upstox.com/v2';
-// Confirmed against Upstox's own documentation examples. A couple of the
-// less common indices are best-guess formats and may need correcting once
-// tested against the real API — they'll just error gracefully if wrong.
+
+// ============================================================
+// UPSTOX OAUTH TOKEN REFRESH FLOW
+// The WebSocket streaming API requires a full OAuth access token
+// (not the Analytics Token which only covers REST endpoints).
+// This flow lets you refresh it from your dashboard without
+// manually copying tokens — visit /upstox-login to start.
+// Requires UPSTOX_API_KEY and UPSTOX_API_SECRET env vars
+// (from your Upstox developer app settings).
+// ============================================================
+app.get('/upstox-login', (req, res) => {
+  const apiKey = process.env.UPSTOX_API_KEY;
+  const redirectUri = process.env.UPSTOX_REDIRECT_URI || `https://nse-bse-dashboard.onrender.com/upstox-callback`;
+  if (!apiKey) return res.send('<h2>Set UPSTOX_API_KEY in Render environment variables first.</h2>');
+  const authUrl = `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=${apiKey}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  res.redirect(authUrl);
+});
+
+app.get('/upstox-callback', async (req, res) => {
+  const { code } = req.query;
+  const apiKey = process.env.UPSTOX_API_KEY;
+  const apiSecret = process.env.UPSTOX_API_SECRET;
+  const redirectUri = process.env.UPSTOX_REDIRECT_URI || `https://nse-bse-dashboard.onrender.com/upstox-callback`;
+  if (!code || !apiKey || !apiSecret) return res.send('<h2>Missing code or API credentials. Check UPSTOX_API_KEY and UPSTOX_API_SECRET in Render.</h2>');
+  try {
+    const resp = await fetch('https://api.upstox.com/v2/login/authorization/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: new URLSearchParams({ code, client_id: apiKey, client_secret: apiSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' })
+    });
+    const data = await resp.json();
+    if (!data.access_token) throw new Error(JSON.stringify(data));
+    const token = data.access_token;
+    // Update the running server's token immediately — no restart needed
+    process.env.UPSTOX_ACCESS_TOKEN = token;
+    if (UpstoxClient) initUpstoxAuth();
+    // Restart streamer with new token if clients are waiting
+    const keys = allSubscribedKeys();
+    if (keys.length) startUpstoxStreamer(keys);
+    res.send(`<html><body style="font-family:monospace;background:#0b0f17;color:#e0e6f0;padding:32px;">
+      <h2 style="color:#26c281">✓ Upstox OAuth token generated successfully</h2>
+      <p>The server is now using the new token for WebSocket streaming. This token is valid until midnight IST.</p>
+      <p style="color:#8a94a6;font-size:12px;">Token (first 20 chars): ${token.slice(0,20)}...</p>
+      <p><strong>To make this permanent until midnight:</strong> copy the full token below and update UPSTOX_ACCESS_TOKEN in Render → Environment. The server is already using it for this session.</p>
+      <details><summary style="cursor:pointer;color:#3d8bfd">Show full token</summary><pre style="word-break:break-all;font-size:11px;">${token}</pre></details>
+      <br><a href="/" style="color:#3d8bfd">← Back to dashboard</a>
+    </body></html>`);
+  } catch (e) {
+    res.send(`<h2>Token exchange failed: ${e.message}</h2><p>Check UPSTOX_API_KEY and UPSTOX_API_SECRET.</p>`);
+  }
+});
+
+
 const UPSTOX_INDEX_KEYS = {
   NIFTY: 'NSE_INDEX|Nifty 50',
   BANKNIFTY: 'NSE_INDEX|Nifty Bank',

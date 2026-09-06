@@ -2407,9 +2407,61 @@ document.getElementById('exportBtBtn')?.addEventListener('click', ()=>{
 /* ============================================================
    SECTOR HEATMAP
    ============================================================ */
+const HEATMAP_INDICES = [
+  {label:'Nifty 50',     yahoo:'^NSEI'},
+  {label:'Bank Nifty',   yahoo:'^NSEBANK'},
+  {label:'Nifty IT',     yahoo:'^CNXIT'},
+  {label:'Nifty FMCG',   yahoo:'^CNXFMCG'},
+  {label:'Nifty Pharma', yahoo:'^CNXPHARMA'},
+  {label:'Nifty Auto',   yahoo:'^CNXAUTO'},
+  {label:'Nifty Metal',  yahoo:'^CNXMETAL'},
+  {label:'Nifty Realty', yahoo:'^CNXREALTY'},
+  {label:'Nifty Energy', yahoo:'^CNXENERGY'},
+  {label:'Nifty Infra',  yahoo:'^CNXINFRA'},
+  {label:'Nifty PSU Bank',yahoo:'^CNXPSUBANK'},
+  {label:'Nifty MidCap', yahoo:'^CNXMIDCAP'},
+  {label:'Nifty SmallCap',yahoo:'^CNXSMALLCAP'},
+  {label:'Nifty Next 50',yahoo:'^NSMIDCP100'},
+  {label:'Sensex',       yahoo:'^BSESN'},
+  {label:'India VIX',    yahoo:'^INDIAVIX'}
+];
+
+function heatTile(chg, label, sub, clickFn){
+  const intensity = Math.min(1, Math.abs(chg)/3);
+  const bg = chg>=0 ? `rgba(38,194,129,${0.12+intensity*0.35})` : `rgba(239,83,80,${0.12+intensity*0.35})`;
+  const border = chg>=0 ? 'var(--green)' : 'var(--red)';
+  const div = document.createElement('div');
+  div.style.cssText = `background:${bg};border:1px solid ${border};border-radius:8px;padding:14px;text-align:center;cursor:pointer;`;
+  div.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:4px;">${label}</div>
+    <div style="font-size:18px;font-weight:700;" class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
+    <div class="metric-sub">${sub}</div>`;
+  if(clickFn) div.addEventListener('click', clickFn);
+  return div;
+}
+
 function renderHeatmap(){
   const grid=document.getElementById('heatmapGrid');
   if(!grid) return;
+
+  // Section header: Indices
+  grid.innerHTML = `<div style="grid-column:1/-1;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:2px;margin-top:4px;">INDICES (live)</div>`;
+
+  // Placeholder tiles for indices (show 0% until live data arrives)
+  const indexPlaceholders = {};
+  HEATMAP_INDICES.forEach(idx=>{
+    const tile = heatTile(0, idx.label, 'Loading…', null);
+    tile.id = 'hm-idx-' + idx.yahoo.replace(/[\^.]/g,'_');
+    grid.appendChild(tile);
+    indexPlaceholders[idx.yahoo] = tile;
+  });
+
+  // Section header: Sectors
+  const sectorHeader = document.createElement('div');
+  sectorHeader.style.cssText = 'grid-column:1/-1;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:2px;margin-top:8px;';
+  sectorHeader.textContent = 'SECTORS (simulated change)';
+  grid.appendChild(sectorHeader);
+
+  // Sector tiles from stock data
   const all = signalCounts();
   const bySector={};
   all.forEach(d=>{ (bySector[d.sector]=bySector[d.sector]||[]).push(d); });
@@ -2417,22 +2469,40 @@ function renderHeatmap(){
     const avgChg = stocks.reduce((a,d)=>a+d.changePct,0)/stocks.length;
     return {sector, count:stocks.length, avgChg};
   }).sort((a,b)=>b.avgChg-a.avgChg);
-  grid.innerHTML = tiles.map(t=>{
-    const intensity = Math.min(1, Math.abs(t.avgChg)/3);
-    const bg = t.avgChg>=0 ? `rgba(38,194,129,${0.12+intensity*0.35})` : `rgba(239,83,80,${0.12+intensity*0.35})`;
-    const border = t.avgChg>=0 ? 'var(--green)' : 'var(--red)';
-    return `<div class="row-click" data-sector="${t.sector}" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:14px;text-align:center;">
-      <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${t.sector}</div>
-      <div style="font-size:18px;font-weight:700;" class="${t.avgChg>=0?'up':'down'}">${t.avgChg>=0?'+':''}${t.avgChg.toFixed(2)}%</div>
-      <div class="metric-sub">${t.count} stocks</div>
-    </div>`;
-  }).join('');
-  grid.querySelectorAll('[data-sector]').forEach(el=>el.addEventListener('click',()=>{
-    document.getElementById('sec-screener').scrollIntoView({behavior:'smooth'});
-    const sel=document.getElementById('screenerSector');
-    sel.value = el.dataset.sector;
-    renderScreener();
-  }));
+
+  tiles.forEach(t=>{
+    const tile = heatTile(t.avgChg, t.sector, `${t.count} stocks`, ()=>{
+      document.getElementById('sec-screener').scrollIntoView({behavior:'smooth'});
+      const sel=document.getElementById('screenerSector');
+      sel.value = t.sector;
+      renderScreener();
+    });
+    tile.dataset.sector = t.sector;
+    grid.appendChild(tile);
+  });
+
+  // Fetch live index data and update tiles
+  HEATMAP_INDICES.forEach(async idx=>{
+    try{
+      const resp = await fetch(`/api/quote/${encodeURIComponent(idx.yahoo)}`, {cache:'no-store'});
+      const data = await resp.json();
+      if(data.error) throw new Error(data.error);
+      const tile = indexPlaceholders[idx.yahoo];
+      if(!tile) return;
+      const chg = data.changePct || 0;
+      const intensity = Math.min(1, Math.abs(chg)/3);
+      const bg = chg>=0 ? `rgba(38,194,129,${0.12+intensity*0.35})` : `rgba(239,83,80,${0.12+intensity*0.35})`;
+      const border = chg>=0 ? 'var(--green)' : 'var(--red)';
+      tile.style.background = bg;
+      tile.style.border = `1px solid ${border}`;
+      tile.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:4px;">${idx.label}</div>
+        <div style="font-size:18px;font-weight:700;" class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
+        <div class="metric-sub">₹${fmt(data.price,2)}</div>`;
+    }catch(e){
+      const tile = indexPlaceholders[idx.yahoo];
+      if(tile){ const sub = tile.querySelector('.metric-sub'); if(sub) sub.textContent='Unavailable'; }
+    }
+  });
 }
 
 /* ============================================================

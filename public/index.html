@@ -245,7 +245,13 @@
     <input id="stockSearch" placeholder="Search NSE / BSE stock (e.g. TCS, HDFCBANK, RELIANCE)" autocomplete="off">
     <div class="search-results" id="searchResults"></div>
   </div>
-  <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <a href="/upstox-login" target="_blank" id="upstoxConnectBtn" title="Connect Upstox for 1-second live feed" style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;background:rgba(61,139,253,.15);border:1px solid rgba(61,139,253,.4);color:#3d8bfd;cursor:pointer;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      <span id="upstoxConnectLabel">Connect Upstox</span>
+    </a>
+    <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
+  </div>
 </div>
 
 <div id="homeView" class="container" style="display:none;"></div>
@@ -3005,16 +3011,34 @@ async function fetchYahooChart(symbol){
 
 function setLiveStatus(mode){
   const el=document.getElementById('liveStatus');
-  if(!el) return;
-  if(mode==='live'){
-    el.style.color='var(--green)'; el.style.background='rgba(38,194,129,.12)';
-    el.innerHTML='<span class="pulse" style="background:var(--green);"></span>LIVE';
-  } else if(mode==='connecting'){
-    el.style.color='var(--text2)'; el.style.background='rgba(138,148,166,.12)';
-    el.innerHTML='<span class="pulse" style="background:var(--text2);"></span>Connecting&hellip;';
-  } else {
-    el.style.color='var(--amber)'; el.style.background='rgba(240,169,58,.12)';
-    el.innerHTML='<span class="pulse" style="background:var(--amber);"></span>YAHOO (15s delay)';
+  const btn=document.getElementById('upstoxConnectBtn');
+  const label=document.getElementById('upstoxConnectLabel');
+  if(el){
+    if(mode==='live'){
+      el.style.color='var(--green)'; el.style.background='rgba(38,194,129,.12)';
+      el.innerHTML='<span class="pulse" style="background:var(--green);"></span>LIVE';
+    } else if(mode==='connecting'){
+      el.style.color='var(--text2)'; el.style.background='rgba(138,148,166,.12)';
+      el.innerHTML='<span class="pulse" style="background:var(--text2);"></span>Connecting&hellip;';
+    } else {
+      el.style.color='var(--amber)'; el.style.background='rgba(240,169,58,.12)';
+      el.innerHTML='<span class="pulse" style="background:var(--amber);"></span>YAHOO (15s delay)';
+    }
+  }
+  if(btn && label){
+    if(mode==='live'){
+      btn.style.background='rgba(38,194,129,.15)';
+      btn.style.borderColor='rgba(38,194,129,.5)';
+      btn.style.color='var(--green)';
+      label.textContent='Upstox Connected';
+      btn.title='1-second live feed active via Upstox WebSocket';
+    } else {
+      btn.style.background='rgba(61,139,253,.15)';
+      btn.style.borderColor='rgba(61,139,253,.4)';
+      btn.style.color='#3d8bfd';
+      label.textContent='Connect Upstox';
+      btn.title='Click to connect Upstox for 1-second live feed';
+    }
   }
 }
 

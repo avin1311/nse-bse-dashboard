@@ -1320,6 +1320,7 @@ function renderWatchlist(){
 }
 
 function renderOverview(d){
+  // Show simulated data immediately — upgraded to real Upstox fundamentals below
   const cards=[
     ["Market cap",`&#8377;${fmt(d.marketCapT,2)} T`,''],
     ["P/E ratio",fmt(d.pe,1),`Fwd ${fmt(d.pe*0.88,1)}`],
@@ -1330,6 +1331,28 @@ function renderOverview(d){
   ];
   document.getElementById('overviewGrid').innerHTML = cards.map(([l,v,s])=>`
     <div class="card"><div class="card-title">${l}</div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
+
+  // Upgrade to real Upstox fundamentals in the background
+  fetch(`/api/fundamentals/${encodeURIComponent(d.symbol)}`, {cache:'no-store'})
+    .then(r=>r.json())
+    .then(f=>{
+      if(f.error || window.CURRENT?.symbol !== d.symbol) return; // stale or error
+      const realCards=[
+        ["Market cap", f.marketCap ? `&#8377;${fmt(f.marketCap/1e12, 2)} T` : `&#8377;${fmt(d.marketCapT,2)} T`, f.sector||''],
+        ["P/E ratio", f.pe!=null ? fmt(f.pe,1) : fmt(d.pe,1), f.peSector!=null ? `Sector avg ${fmt(f.peSector,1)}` : `Fwd ${fmt(d.pe*0.88,1)}`],
+        ["P/B ratio", f.pb!=null ? fmt(f.pb,2) : fmt(d.pb,2), f.pbSector!=null ? `Sector avg ${fmt(f.pbSector,2)}` : ''],
+        ["ROE", f.roe!=null ? `${fmt(f.roe,1)}%` : `${fmt(d.roe,1)}%`, f.roce!=null ? `ROCE ${fmt(f.roce,1)}%` : `ROA ${fmt(d.roa,1)}%`],
+        ["D/E ratio", f.debtEquity!=null ? fmt(f.debtEquity,2) : fmt(d.deRatio,2), f.currentRatio!=null ? `Current ratio ${fmt(f.currentRatio,2)}` : ''],
+        ["Div yield", f.dividendYield!=null ? `${fmt(f.dividendYield,2)}%` : `${fmt(d.divYield,2)}%`, f.eps!=null ? `EPS ₹${fmt(f.eps,2)}` : '']
+      ];
+      document.getElementById('overviewGrid').innerHTML = realCards.map(([l,v,s])=>`
+        <div class="card"><div class="card-title">${l} <span style="font-size:9px;color:var(--green);">LIVE</span></div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
+      // Also update the company description if available
+      if(f.description && document.getElementById('stockDesc')){
+        document.getElementById('stockDesc').textContent = f.description;
+      }
+    })
+    .catch(()=>{ /* keep simulated data, Upstox not reachable */ });
 }
 
 function syntheticCandlesFromCloses(prices){

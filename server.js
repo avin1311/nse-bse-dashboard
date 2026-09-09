@@ -867,6 +867,82 @@ async function fetchFnoSnapshot(instrumentKey) {
   return { expiry, spot, pcr: pcrData.pcr, maxPain: maxPainData.max_pain, totalCallOi, totalPutOi, atmIv };
 }
 
+// ============================================================
+// UPSTOX FUNDAMENTALS API
+// Real P/E, P/B, ROE, ROCE, EPS, Market Cap, etc. from Upstox.
+// Requires UPSTOX_ACCESS_TOKEN (Analytics Token covers this).
+// Cached for 6 hours since fundamentals don't change intraday.
+// ============================================================
+const fundamentalsCache = {};
+const FUNDAMENTALS_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
+// Extract ISIN from the instrument key (NSE_EQ|INE002A01018 → INE002A01018)
+function isinFromKey(instrumentKey) {
+  if (!instrumentKey) return null;
+  const parts = instrumentKey.split('|');
+  return parts.length > 1 ? parts[1] : null;
+}
+
+async function getUpstoxFundamentals(symbol) {
+  const now = Date.now();
+  if (fundamentalsCache[symbol] && now - fundamentalsCache[symbol].time < FUNDAMENTALS_TTL) {
+    return { ...fundamentalsCache[symbol].data, cached: true };
+  }
+  const instrumentKey = HARDCODED_EQ_KEYS[symbol] || (universeCache.data && universeCache.data.find(s => s.symbol === symbol)?.instrument_key);
+  if (!instrumentKey) throw new Error(`No instrument key found for ${symbol}`);
+  const isin = isinFromKey(instrumentKey);
+  if (!isin) throw new Error(`Could not extract ISIN from instrument key: ${instrumentKey}`);
+
+  const [ratiosData, profileData] = await Promise.allSettled([
+    upstoxGet(`/fundamentals/${isin}/key-ratios`),
+    upstoxGet(`/fundamentals/${isin}/profile`)
+  ]);
+
+  const ratios = ratiosData.status === 'fulfilled' ? ratiosData.value : null;
+  const profile = profileData.status === 'fulfilled' ? profileData.value : null;
+
+  const result = {
+    symbol,
+    isin,
+    // Key ratios
+    pe: ratios?.pe_ratio?.company ?? null,
+    peSector: ratios?.pe_ratio?.sector ?? null,
+    pb: ratios?.pb_ratio?.company ?? null,
+    pbSector: ratios?.pb_ratio?.sector ?? null,
+    roe: ratios?.roe?.company ?? null,
+    roeSector: ratios?.roe?.sector ?? null,
+    roce: ratios?.roce?.company ?? null,
+    roceSector: ratios?.roce?.sector ?? null,
+    roa: ratios?.roa?.company ?? null,
+    evEbitda: ratios?.ev_ebitda?.company ?? null,
+    debtEquity: ratios?.debt_to_equity?.company ?? null,
+    currentRatio: ratios?.current_ratio?.company ?? null,
+    eps: ratios?.eps ?? null,
+    dividendYield: ratios?.dividend_yield ?? null,
+    // Company profile
+    marketCap: profile?.market_cap ?? null,
+    sector: profile?.sector ?? null,
+    industry: profile?.industry ?? null,
+    description: profile?.description ?? null,
+    founded: profile?.founded ?? null,
+    employees: profile?.total_employees ?? null,
+    website: profile?.website ?? null,
+    source: 'upstox'
+  };
+
+  fundamentalsCache[symbol] = { data: result, time: now };
+  return result;
+}
+
+app.get('/api/fundamentals/:symbol', async (req, res) => {
+  try {
+    const data = await getUpstoxFundamentals(req.params.symbol);
+    res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message, symbol: req.params.symbol });
+  }
+});
+
 app.get('/api/upstox/fno/:index', async (req, res) => {
   const indexSymbol = req.params.index;
   if (!UPSTOX_INDEX_KEYS[indexSymbol]) return res.status(400).json({ error: 'Unknown index symbol', symbol: indexSymbol });

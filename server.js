@@ -110,6 +110,83 @@ app.get('/api/chart/:symbol', async (req, res) => {
 });
 
 // Multiple symbols in one call, lighter payload (used for screener/peers/ticker)
+// ============================================================
+// NEWS ENDPOINT — Real RSS feed from Economic Times Markets
+// Fetches and parses RSS XML, filters for the stock symbol,
+// returns up to 8 relevant headlines with basic sentiment.
+// ============================================================
+const newsCache = {};
+const NEWS_TTL = 15 * 60 * 1000; // 15 minutes
+
+function parseRSS(xml) {
+  const items = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1];
+    const title = (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || block.match(/<title>(.*?)<\/title>/))?.[1]?.trim() || '';
+    const link = (block.match(/<link>(.*?)<\/link>/) || block.match(/<guid[^>]*>(.*?)<\/guid>/))?.[1]?.trim() || '';
+    const pubDate = (block.match(/<pubDate>(.*?)<\/pubDate>/))?.[1]?.trim() || '';
+    const desc = (block.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || block.match(/<description>(.*?)<\/description>/))?.[1]?.trim() || '';
+    if (title) items.push({ title, link, pubDate: pubDate ? new Date(pubDate).toLocaleDateString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Today', description: desc });
+  }
+  return items;
+}
+
+function getSentiment(text) {
+  const t = text.toLowerCase();
+  const pos = ['gain','rise','surge','jump','rally','profit','growth','beat','up','high','positive','strong','buy','bullish','record'];
+  const neg = ['fall','drop','decline','loss','crash','down','weak','miss','sell','bearish','concern','risk','low','negative'];
+  const posScore = pos.filter(w => t.includes(w)).length;
+  const negScore = neg.filter(w => t.includes(w)).length;
+  if (posScore > negScore) return 'Positive';
+  if (negScore > posScore) return 'Negative';
+  return 'Neutral';
+}
+
+app.get('/api/news/:symbol', async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const now = Date.now();
+  if (newsCache[symbol] && now - newsCache[symbol].time < NEWS_TTL) {
+    return res.json(newsCache[symbol].data);
+  }
+  try {
+    const feeds = [
+      `https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146842.cms`,
+      `https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms`
+    ];
+    let allItems = [];
+    for (const url of feeds) {
+      try {
+        const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!resp.ok) continue;
+        const xml = await resp.text();
+        const items = parseRSS(xml);
+        allItems = allItems.concat(items);
+      } catch (e) { continue; }
+    }
+    // Filter for relevance — look for company name or symbol in title/desc
+    const row = allItems;
+    const symbolLower = symbol.toLowerCase();
+    // Try to get the company name for better matching
+    const relevant = row.filter(item => {
+      const text = (item.title + ' ' + item.description).toLowerCase();
+      return text.includes(symbolLower) || text.includes(symbolLower.replace('ltd','').trim());
+    });
+    // If no symbol-specific news, return general market news
+    const finalItems = (relevant.length >= 3 ? relevant : allItems).slice(0, 8).map(item => ({
+      ...item,
+      sentiment: getSentiment(item.title + ' ' + item.description),
+      source: 'ET Markets'
+    }));
+    const result = { symbol, items: finalItems, cached: false };
+    newsCache[symbol] = { data: result, time: now };
+    res.json(result);
+  } catch (e) {
+    res.status(502).json({ error: e.message, items: [] });
+  }
+});
+
 app.get('/api/quotes', async (req, res) => {
   const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!symbols.length) return res.status(400).json({ error: 'symbols query param required, comma separated' });

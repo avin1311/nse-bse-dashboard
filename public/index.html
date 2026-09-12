@@ -1307,16 +1307,36 @@ function toggleWatch(symbol){
 }
 function renderWatchlist(){
   const box=document.getElementById('watchlistBody');
-  if(!window.WATCHLIST.length){ box.innerHTML='No stocks watched yet.'; return; }
-  const rows = window.WATCHLIST.map(sym=>{const r=STOCKS.find(s=>s[0]===sym); if(!r) return null; return generateStockData(r[0],r[1],r[2],r[3]);}).filter(Boolean);
-  box.innerHTML = `<table><thead><tr><th>Stock</th><th>Sector</th><th>Price</th><th>Change</th><th>Signal</th><th></th></tr></thead><tbody>
+  if(!window.WATCHLIST.length){ box.innerHTML='No stocks watched yet. Click the ★ next to any stock price to add it.'; return; }
+  // Show simulated data immediately
+  const rows = window.WATCHLIST.map(sym=>{const r=STOCKS.find(s=>s[0]===sym)||[sym,sym,'Other',100]; return generateStockData(r[0],r[1],r[2],r[3]);});
+  function buildTable(rows){
+    return `<div style="overflow-x:auto;"><table><thead><tr><th>Stock</th><th>Sector</th><th>Price</th><th>Change</th><th>Signal</th><th></th></tr></thead><tbody>
     ${rows.map(d=>`<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td>
-      <td>&#8377;${fmt(d.price,2)}</td><td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
+      <td>&#8377;<span id="wl-price-${d.symbol}">${fmt(d.price,2)}</span></td>
+      <td class="${d.changePct>=0?'up':'down'}" id="wl-chg-${d.symbol}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
       <td><span class="signal-chip sig-${d.signal}">${d.signalLabel}</span></td>
       <td><button class="star-btn active" data-remove="${d.symbol}">&#9733;</button></td></tr>`).join('')}
-  </tbody></table>`;
+    </tbody></table></div>`;
+  }
+  box.innerHTML = buildTable(rows);
   box.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',(e)=>{e.stopPropagation();toggleWatch(b.dataset.remove);}));
   box.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
+  // Upgrade to live prices from Yahoo
+  window.WATCHLIST.forEach(async sym=>{
+    try{
+      const resp = await fetch(`/api/quote/${encodeURIComponent(sym)}`,{cache:'no-store'});
+      const q = await resp.json();
+      if(q.error||!q.price) return;
+      const priceEl=document.getElementById(`wl-price-${sym}`);
+      const chgEl=document.getElementById(`wl-chg-${sym}`);
+      if(priceEl) priceEl.textContent=fmt(q.price,2);
+      if(chgEl){
+        chgEl.className=(q.changePct>=0?'up':'down');
+        chgEl.textContent=(q.changePct>=0?'+':'')+fmt(q.changePct,2)+'%';
+      }
+    }catch(e){}
+  });
 }
 
 function renderOverview(d){
@@ -1590,21 +1610,66 @@ function renderPeers(d){
   peersBody.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
 }
 
+function renderNews(d){
+  const panel = document.getElementById('newsPanel');
+  panel.innerHTML = '<div class="metric-sub">Loading news…</div>';
+  // Fetch real news via our server-side RSS proxy
+  fetch(`/api/news/${encodeURIComponent(d.symbol)}`, {cache:'no-store'})
+    .then(r=>r.json())
+    .then(data=>{
+      if(!data.items || !data.items.length) throw new Error('No news found');
+      panel.innerHTML = data.items.map(n=>`
+        <div class="news-item">
+          <a href="${n.link}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;">
+            <p style="margin:0 0 4px;">${n.title}</p>
+          </a>
+          <div class="news-meta">
+            <span>${n.source||'ET Markets'}</span>&middot;
+            <span>${n.pubDate||'Today'}</span>&middot;
+            <span class="signal-chip ${n.sentiment==='Positive'?'sig-buy':n.sentiment==='Negative'?'sig-sell':'sig-hold'}">${n.sentiment||'Neutral'}</span>
+          </div>
+        </div>`).join('');
+    })
+    .catch(()=>{
+      // Fallback: simulated headlines
+      panel.innerHTML = d.news.map(n=>`
+        <div class="news-item"><p>${n.t}</p><div class="news-meta"><span>Simulated</span>&middot;<span>Today</span>&middot;
+          <span class="signal-chip ${n.s==='Positive'?'sig-buy':n.s==='Negative'?'sig-sell':'sig-hold'}">${n.s}</span></div></div>`).join('');
+    });
+}
+
 function renderVolumeProfile(d){
-  const buckets=10; const levels=[]; const vols=[];
-  const rnd=mulberry32(hashCode(d.symbol+'vol'));
-  for(let i=0;i<buckets;i++){
-    levels.push((d.price*(0.94+i*0.013)).toFixed(0));
-    vols.push(sig(rnd,20,320));
-  }
-  const highlight = Math.floor(buckets/2);
   const ctx=document.getElementById('volumeChart');
+  if(charts.volume){ charts.volume.destroy(); charts.volume=null; }
+  // Build volume profile from the current price series (real if fetched, synthetic otherwise)
+  const prices = d.prices || [];
+  const n = 12;
+  const min = Math.min(...prices)*0.98, max = Math.max(...prices)*1.02;
+  const step = (max-min)/n;
+  const buckets = Array.from({length:n},(_,i)=>({ level: min+i*step+step/2, vol:0 }));
+  prices.forEach(p=>{
+    const idx = Math.min(n-1, Math.floor((p-min)/step));
+    buckets[idx].vol++;
+  });
+  const currentBucket = Math.min(n-1, Math.floor((d.price-min)/step));
   charts.volume = new Chart(ctx,{
     type:'bar',
-    data:{labels:levels,datasets:[{data:vols,backgroundColor:vols.map((_,i)=>i===highlight?'#3d8bfd':'#2a3242')}]},
-    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'#1f2733'},ticks:{color:'#5b6472'}},y:{grid:{display:false},ticks:{color:'#5b6472'}}}}
+    data:{
+      labels:buckets.map(b=>'₹'+fmt(b.level,0)),
+      datasets:[{
+        data:buckets.map(b=>b.vol),
+        backgroundColor:buckets.map((_,i)=>i===currentBucket?'#3d8bfd':'rgba(61,139,253,0.25)'),
+        borderRadius:3
+      }]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>`${ctx.raw} bars at this level`}}},
+      scales:{
+        x:{grid:{color:'#1f2733'},ticks:{color:'#5b6472'},title:{display:true,text:'Bar count',color:'#5b6472'}},
+        y:{grid:{display:false},ticks:{color:'#5b6472',font:{size:10}}}
+      }
+    }
   });
 }
 

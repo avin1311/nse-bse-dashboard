@@ -556,11 +556,11 @@ async function findIndexInstrumentKey(keywords) {
 // used only if the hardcoded UPSTOX_INDEX_KEYS guess fails against the
 // live API for that symbol.
 const INDEX_NAME_FALLBACK = {
-  NIFTYIT: ['NIFTY', 'IT'],
-  MIDCPNIFTY: ['MIDCAP'],
-  FINNIFTY: ['FIN'],
+  NIFTYIT: ['Nifty IT'],
+  MIDCPNIFTY: ['MID SELECT'],
+  FINNIFTY: ['Fin Service'],
   BANKEX: ['BANKEX'],
-  NIFTYNXT50: ['NEXT', '50']
+  NIFTYNXT50: ['Next 50']
 };
 
 async function fetchAndCacheUniverse() {
@@ -840,7 +840,7 @@ const UPSTOX_INDEX_KEYS = {
   NIFTYIT: 'NSE_INDEX|Nifty IT',
   SENSEX: 'BSE_INDEX|SENSEX',
   FINNIFTY: 'NSE_INDEX|Nifty Fin Service',
-  MIDCPNIFTY: 'NSE_INDEX|Nifty Midcap Select',
+  MIDCPNIFTY: 'NSE_INDEX|NIFTY MID SELECT',
   BANKEX: 'BSE_INDEX|BANKEX',
   NIFTYNXT50: 'NSE_INDEX|Nifty Next 50'
 };

@@ -3275,6 +3275,33 @@ renderTicker();
 const universeLoadPromise = loadStockUniverse();
 renderTabBar();
 renderPositions();
+
+(function pollUpstoxStatus(){
+  async function checkStatus(){
+    try{
+      const resp = await fetch('/api/stream/status',{cache:'no-store'});
+      const data = await resp.json();
+      const btn=document.getElementById('upstoxConnectBtn');
+      const label=document.getElementById('upstoxConnectLabel');
+      if(!btn||!label) return;
+      if(data.streamerConnected){
+        btn.style.background='rgba(38,194,129,.15)'; btn.style.borderColor='rgba(38,194,129,.5)'; btn.style.color='var(--green)';
+        label.textContent='⚡ Upstox Live';
+        btn.title='1-second live feed active via Upstox WebSocket';
+      } else if(data.upstoxTokenSet){
+        btn.style.background='rgba(240,169,58,.15)'; btn.style.borderColor='rgba(240,169,58,.4)'; btn.style.color='var(--amber)';
+        label.textContent='↻ Reconnect Upstox';
+        btn.title='Token set but WebSocket disconnected — click to re-authenticate';
+      } else {
+        btn.style.background='rgba(61,139,253,.15)'; btn.style.borderColor='rgba(61,139,253,.4)'; btn.style.color='#3d8bfd';
+        label.textContent='Connect Upstox';
+        btn.title='Click to connect Upstox for 1-second live feed';
+      }
+    }catch(e){}
+  }
+  checkStatus();
+  setInterval(checkStatus,10000);
+})();
 async function hydrateFromServer(){
   try{
     const [posResp, alertResp] = await Promise.all([

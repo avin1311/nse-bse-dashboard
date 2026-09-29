@@ -36,6 +36,10 @@
   .search-results div:hover{background:var(--panel2);}
   .search-results .sym{font-weight:600;} .search-results .nm{color:var(--text2);font-size:12px;}
 
+  .view-tabs{display:flex;gap:4px;max-width:1300px;margin:0 auto;padding:0 16px;overflow-x:auto;border-bottom:1px solid var(--border);}
+  .vt-btn{background:none;border:0;border-bottom:2px solid transparent;color:var(--text2);padding:10px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .vt-btn:hover{color:var(--text);}
+  .vt-btn.active{color:var(--blue);border-bottom-color:var(--blue);}
   .stock-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 16px;max-width:1300px;margin:0 auto;}
   .stock-name{font-size:13px;color:var(--text2);}
   .stock-price{font-size:26px;font-weight:600;margin-top:2px;}
@@ -316,20 +320,12 @@
 <div id="stockView">
 <div class="stock-head" id="stockHead"></div>
 
+<div class="view-tabs" id="viewTabs"><button class="vt-btn" data-vtab="overview">Overview</button><button class="vt-btn" data-vtab="chart">Chart &amp; patterns</button><button class="vt-btn" data-vtab="fundamentals">Fundamentals</button><button class="vt-btn" data-vtab="screener">Screener &amp; scans</button><button class="vt-btn" data-vtab="derivatives">Derivatives</button><button class="vt-btn" data-vtab="portfolio">Portfolio &amp; tools</button></div>
 <div class="container">
-
+<div class="vtab-pane" id="vtab-overview" data-vtab="overview" style="display:none;">
   <section id="sec-overview">
   <div class="grid cols-6" id="overviewGrid"></div>
   </section>
-
-  <div class="grid cols-2" style="grid-template-columns:1fr;">
-    <section id="sec-chart" class="panel">
-      <div class="panel-head"><h3>Chart</h3>
-        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Upstox real data: drawing tools, indicators, strategies, backtest">Upstox chart</button><button class="pc-btn" data-mode="tv" title="Embedded TradingView chart">TradingView</button><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="Open the full TradingView chart in a new tab (works for every NSE/BSE symbol)" style="text-decoration:none;">Open on tradingview.com ↗</a></div>
-      </div>
-      <div id="proChartRoot"></div>
-      <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
-    </section>
     <section id="sec-signal" class="panel">
       <div class="panel-head">
         <h3>Composite signal</h3>
@@ -338,45 +334,107 @@
       <div id="signalBody"></div>
       <div class="info-box" id="signalInfo"></div>
     </section>
-  </div>
-
-  <div class="grid cols-2">
-    <div class="panel">
-      <h3>200-day backtest vs buy-and-hold</h3>
-      <p class="desc">The strategy's return is now benchmarked against simply holding the stock &mdash; a gap in the original design.</p>
-      <div class="chart-wrap" style="height:200px;"><canvas id="backtestChart"></canvas></div>
-      <div class="grid cols-4" id="backtestStats" style="margin-top:12px;"></div>
+    <section id="sec-news" class="panel">
+      <h3>News &amp; headlines</h3>
+      <div id="newsPanel"></div>
+    </section>
+</div>
+<div class="vtab-pane" id="vtab-chart" data-vtab="chart" style="display:none;">
+<div class="grid cols-2" style="grid-template-columns:1fr;">    <section id="sec-chart" class="panel">
+      <div class="panel-head"><h3>Chart</h3>
+        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Upstox real data: drawing tools, indicators, strategies, backtest">Upstox chart</button><button class="pc-btn" data-mode="tv" title="Embedded TradingView chart">TradingView</button><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="Open the full TradingView chart in a new tab (works for every NSE/BSE symbol)" style="text-decoration:none;">Open on tradingview.com ↗</a></div>
+      </div>
+      <div id="proChartRoot"></div>
+      <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
+    </section></div>
+  <section id="sec-patterns" class="panel">
+    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">17 classic patterns &middot; detected on real Upstox candles &middot; several can be active at once</span></div>
+    <p class="desc">Swing-point analysis finds every pattern that is <strong>forming</strong> or <strong>confirmed</strong> on the chart right now &mdash; overlapping patterns (e.g. a flag inside a triangle) are all listed. Click a row to draw it on the chart; click <strong>full logic</strong> for the complete strategy (how it forms, entry, stop, target, failure, volume).</p>
+    <div class="pat-controls">
+      <div><label>Symbol</label><input id="patSym" placeholder="e.g. RELIANCE, NIFTY" autocomplete="off"></div>
+      <div><label>Timeframe</label><select id="patTf"><option value="1D" selected>Daily (~1 year)</option><option value="1W">Weekly</option><option value="1h">Hourly</option></select></div>
+      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select></div>
+      <button class="btn" id="patGo" style="padding:9px;">Analyse</button>
+      <button class="btn" id="patScanBtn" style="padding:9px;" title="Scan every stock and index in the screener list on daily data">Scan all</button>
     </div>
-    <div class="panel">
+    <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
+    <div id="patChart" style="width:100%;height:340px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;"></div>
+    <div id="patSummary" style="margin-bottom:6px;"></div>
+    <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status</th><th>Confidence</th><th>Levels</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
+    <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume and trend alignment &mdash; it is a ranking aid, not a probability of profit.</div>
+    <h4 style="margin:16px 0 4px;">Scan across all stocks</h4>
+    <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
+    <div id="patScanOut" style="overflow-x:auto;"></div>
+  </section>
+  <section id="sec-priceaction" class="panel">
+    <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
+    <p class="desc">Pattern-based signals using real intraday OHLC data. All three strategies run on the currently selected stock. <strong>Signal</strong> shows the latest bar's reading. <strong>Backtest</strong> walks all historical bars forward individually without look-ahead — entries on confirmed closes, exits on stop-loss or target. Composite signal fires when at least 2 of 3 strategies agree.</p>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;margin-bottom:10px;">
+      <div><label>Stock</label><select id="paStock"></select></div>
+      <div><label>Strategy</label><select id="paStrategy">
+        <option value="all">All three (composite)</option>
+        <option value="5ema">5-EMA Breakout</option>
+        <option value="support-resistance">Support / Resistance</option>
+        <option value="trend-pullback">Trend Pullback</option>
+      </select></div>
+      <div><label>Lookback</label><select id="paRange">
+        <option value="6mo">6 months</option>
+        <option value="1y" selected>1 year</option>
+        <option value="2y">2 years</option>
+      </select></div>
+      <div style="display:flex;gap:6px;align-items:end;">
+        <button class="btn" id="paScanBtn" style="padding:9px;">Signal</button>
+        <button class="btn" id="paBacktestBtn" style="padding:9px;">Backtest</button>
+      </div>
+    </div>
+    <div id="paSignalOut" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
+    <div id="paComposite" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
+    <div class="grid cols-4" id="paStats" style="margin-bottom:14px;display:none;"></div>
+    <div style="overflow-x:auto;"><table id="paTable" style="display:none;margin-bottom:14px;">
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
+      <tbody id="paBody"></tbody>
+    </table></div>
+    <div id="paStatus" class="metric-sub"></div>
+  </section>
+</div>
+<div class="vtab-pane" id="vtab-fundamentals" data-vtab="fundamentals" style="display:none;">
+  <section id="sec-fourpanel">
+  <div class="grid cols-4" id="fourPanel"></div>
+  </section>
+<div class="grid cols-2">    <div class="panel">
       <h3>Segment revenue mix</h3>
       <p class="desc">Business-segment split, since one blended P/E hides how a diversified company actually earns.</p>
       <div class="chart-wrap" style="height:190px;"><canvas id="segmentChart"></canvas></div>
       <div class="legend" id="segmentLegend"></div>
-    </div>
-  </div>
-
-  <section id="sec-fourpanel">
-  <div class="grid cols-4" id="fourPanel"></div>
-  </section>
-
-  <section id="sec-seasonality" class="panel">
-    <div class="panel-head"><h3>Seasonality</h3><span class="metric-sub">Month / quarter / year returns across past years &middot; real data</span></div>
-    <div id="seasStockBody"></div>
-  </section>
-
-  <div class="grid cols-2b">
-    <div class="panel">
+    </div>    <div class="panel">
       <h3 id="macroTitle">Price vs macro driver</h3>
       <p class="desc" id="macroDesc"></p>
       <div class="chart-wrap" style="height:180px;"><canvas id="macroChart"></canvas></div>
-    </div>
+    </div></div>
     <div class="panel">
-      <h3>F&amp;O snapshot</h3>
-      <p class="desc">Options-market context, entirely absent from the original single-stock view.</p>
-      <div class="grid cols-4" id="fnoGrid" style="margin-top:4px;"></div>
+      <h3>Sector peer comparison</h3>
+      <table>
+        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>Rev growth</th></tr></thead>
+        <tbody id="peersBody"></tbody>
+      </table>
     </div>
+  <section id="sec-compare" class="panel">
+    <div class="panel-head"><h3>Compare stocks</h3><span class="metric-sub">Pick up to 3 stocks to see every metric side by side</span></div>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;">
+      <div><label>Stock 1</label><select id="cmpStock1"></select></div>
+      <div><label>Stock 2</label><select id="cmpStock2"></select></div>
+      <div><label>Stock 3 (optional)</label><select id="cmpStock3"><option value="">&mdash; none &mdash;</option></select></div>
+      <div><button class="btn" id="cmpRunBtn" style="width:100%;padding:9px;">Compare</button></div>
+    </div>
+    <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
+  </section>
+  <div class="panel">
+    <h3>Volume profile</h3>
+    <p class="desc">Volume traded at each price level around the current price.</p>
+    <div class="chart-wrap" style="height:260px;"><canvas id="volumeChart"></canvas></div>
   </div>
-
+</div>
+<div class="vtab-pane" id="vtab-screener" data-vtab="screener" style="display:none;">
   <section id="sec-screener" class="panel">
     <div class="panel-head"><h3>Multi-stock screener</h3><span class="metric-sub" id="screenerCount"></span></div>
     <div class="filters">
@@ -454,17 +512,6 @@
       </table>
     </div>
   </section>
-
-  <section id="sec-watchlist" class="panel">
-    <div class="panel-head"><h3>Watchlist</h3>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span class="metric-sub">Click the &#9734; next to any stock's price to add it here</span>
-        <button class="btn" id="exportWatchlistBtn">Export CSV</button>
-      </div>
-    </div>
-    <div id="watchlistBody" class="metric-sub">No stocks watched yet.</div>
-  </section>
-
   <section id="sec-heatmap" class="panel">
     <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
     <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
@@ -476,25 +523,69 @@
       <div id="seasPicksBox" style="margin-top:10px;"></div>
     </div>
   </section>
-
-  <section id="sec-alerts" class="panel">
-    <div class="panel-head"><h3>Price alerts</h3><span class="metric-sub">Simpler than a paper position &mdash; just get notified when a price level is crossed, no target/SL required</span></div>
-    <div class="order-form" style="margin-top:0;">
-      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr auto;">
-        <div><label>Stock</label><select id="alertStock"></select></div>
-        <div><label>Condition</label><select id="alertCondition"><option value="above">Price goes above</option><option value="below">Price goes below</option></select></div>
-        <div><label>Price (&#8377;)</label><input id="alertPrice" type="number" step="0.01" placeholder="e.g. 1500"></div>
-        <div style="display:flex;align-items:end;"><button class="btn" id="addAlertBtn" style="width:100%;">Add alert</button></div>
+  <section id="sec-seasonality" class="panel">
+    <div class="panel-head"><h3>Seasonality</h3><span class="metric-sub">Month / quarter / year returns across past years &middot; real data</span></div>
+    <div id="seasStockBody"></div>
+  </section>
+</div>
+<div class="vtab-pane" id="vtab-derivatives" data-vtab="derivatives" style="display:none;">
+  <section id="sec-fno" class="panel">
+    <div class="panel-head"><h3>F&amp;O indices</h3>
+      <button class="btn scan-btn" id="fnoScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Refresh</button>
+    </div>
+    <p class="desc">PCR, max pain, IV, and OI across major F&amp;O indices &mdash; pulled from real Upstox option-chain data when <code>UPSTOX_ACCESS_TOKEN</code> is configured on the server (look for the <strong>REAL</strong> tag per row), otherwise falls back to a clearly-labeled <strong>SIMULATED</strong> row.</p>
+    <table>
+      <thead><tr><th>Index</th><th>Price</th><th>Change</th><th>PCR (OI)</th><th>Max pain</th><th>IV (ATM)</th><th>OI change</th></tr></thead>
+      <tbody id="fnoBody"></tbody>
+    </table>
+  </section>
+    <div class="panel">
+      <h3>F&amp;O snapshot</h3>
+      <p class="desc">Options-market context, entirely absent from the original single-stock view.</p>
+      <div class="grid cols-4" id="fnoGrid" style="margin-top:4px;"></div>
+    </div>
+  <section id="sec-options" class="panel">
+    <div class="panel-head"><h3>Options &amp; futures scanning</h3></div>
+    <p class="desc">Real Upstox option-chain data once <code>UPSTOX_ACCESS_TOKEN</code> is configured. The "signal" here is the standard OI-buildup classification traders use (Long/Short Buildup, Long Unwinding, Short Covering) &mdash; derived from price direction + open-interest direction together, since RSI/MACD-style indicators don't translate meaningfully to option premiums. The very first scan of any stock/expiry shows "No comparison yet" since there's nothing prior to compare against &mdash; scan again a few minutes later to see real classifications.</p>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr auto;">
+      <div><label>Underlying</label><select id="optUnderlying">
+        <option value="NIFTY">NIFTY 50</option>
+        <option value="BANKNIFTY">Bank Nifty</option>
+        <option value="FINNIFTY">Nifty Financial Services</option>
+        <option value="NIFTYIT">Nifty IT</option>
+        <option value="SENSEX">BSE Sensex</option>
+        <option disabled>&mdash; F&amp;O stocks &mdash;</option>
+      </select></div>
+      <div><label>Expiry</label><select id="optExpiry"><option value="">Scan to load expiries</option></select></div>
+      <div><button class="btn" id="optScanBtn" style="width:100%;padding:9px;">Scan chain</button></div>
+    </div>
+    <div id="optStatus" class="metric-sub" style="margin-bottom:10px;"></div>
+    <div style="overflow-x:auto;"><table id="optTable" style="display:none;">
+      <thead><tr><th>Strike</th><th>CE LTP</th><th>CE OI</th><th>CE Signal</th><th></th><th>PE LTP</th><th>PE OI</th><th>PE Signal</th><th></th></tr></thead>
+      <tbody id="optBody"></tbody>
+    </table></div>
+  </section>
+</div>
+<div class="vtab-pane" id="vtab-portfolio" data-vtab="portfolio" style="display:none;">
+  <section id="sec-watchlist" class="panel">
+    <div class="panel-head"><h3>Watchlist</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="metric-sub">Click the &#9734; next to any stock's price to add it here</span>
+        <button class="btn" id="exportWatchlistBtn">Export CSV</button>
       </div>
     </div>
+    <div id="watchlistBody" class="metric-sub">No stocks watched yet.</div>
+  </section>
+  <section id="sec-positions" class="panel">
+    <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
+    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup. Each position also gets an automatic one-time <strong>deviation warning</strong> (amber ⚠️) at the halfway point between entry and stop-loss, as an early heads-up before the hard stop actually hits.</p>
     <div style="overflow-x:auto;">
-    <table style="margin-top:14px;">
-      <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
-      <tbody id="alertsBody"></tbody>
+    <table>
+      <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
+      <tbody id="positionsBody"></tbody>
     </table>
     </div>
   </section>
-
   <section id="sec-portfolio" class="panel">
     <div class="panel-head"><h3>Portfolio</h3>
       <div style="display:flex;gap:8px;align-items:center;">
@@ -525,117 +616,23 @@
       </div>
     </div>
   </section>
-
-  <section id="sec-compare" class="panel">
-    <div class="panel-head"><h3>Compare stocks</h3><span class="metric-sub">Pick up to 3 stocks to see every metric side by side</span></div>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;">
-      <div><label>Stock 1</label><select id="cmpStock1"></select></div>
-      <div><label>Stock 2</label><select id="cmpStock2"></select></div>
-      <div><label>Stock 3 (optional)</label><select id="cmpStock3"><option value="">&mdash; none &mdash;</option></select></div>
-      <div><button class="btn" id="cmpRunBtn" style="width:100%;padding:9px;">Compare</button></div>
-    </div>
-    <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
-  </section>
-
-  <section id="sec-options" class="panel">
-    <div class="panel-head"><h3>Options &amp; futures scanning</h3></div>
-    <p class="desc">Real Upstox option-chain data once <code>UPSTOX_ACCESS_TOKEN</code> is configured. The "signal" here is the standard OI-buildup classification traders use (Long/Short Buildup, Long Unwinding, Short Covering) &mdash; derived from price direction + open-interest direction together, since RSI/MACD-style indicators don't translate meaningfully to option premiums. The very first scan of any stock/expiry shows "No comparison yet" since there's nothing prior to compare against &mdash; scan again a few minutes later to see real classifications.</p>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr auto;">
-      <div><label>Underlying</label><select id="optUnderlying">
-        <option value="NIFTY">NIFTY 50</option>
-        <option value="BANKNIFTY">Bank Nifty</option>
-        <option value="FINNIFTY">Nifty Financial Services</option>
-        <option value="NIFTYIT">Nifty IT</option>
-        <option value="SENSEX">BSE Sensex</option>
-        <option disabled>&mdash; F&amp;O stocks &mdash;</option>
-      </select></div>
-      <div><label>Expiry</label><select id="optExpiry"><option value="">Scan to load expiries</option></select></div>
-      <div><button class="btn" id="optScanBtn" style="width:100%;padding:9px;">Scan chain</button></div>
-    </div>
-    <div id="optStatus" class="metric-sub" style="margin-bottom:10px;"></div>
-    <div style="overflow-x:auto;"><table id="optTable" style="display:none;">
-      <thead><tr><th>Strike</th><th>CE LTP</th><th>CE OI</th><th>CE Signal</th><th></th><th>PE LTP</th><th>PE OI</th><th>PE Signal</th><th></th></tr></thead>
-      <tbody id="optBody"></tbody>
-    </table></div>
-  </section>
-
-  <section id="sec-priceaction" class="panel">
-    <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
-    <p class="desc">Pattern-based signals using real intraday OHLC data. All three strategies run on the currently selected stock. <strong>Signal</strong> shows the latest bar's reading. <strong>Backtest</strong> walks all historical bars forward individually without look-ahead — entries on confirmed closes, exits on stop-loss or target. Composite signal fires when at least 2 of 3 strategies agree.</p>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;margin-bottom:10px;">
-      <div><label>Stock</label><select id="paStock"></select></div>
-      <div><label>Strategy</label><select id="paStrategy">
-        <option value="all">All three (composite)</option>
-        <option value="5ema">5-EMA Breakout</option>
-        <option value="support-resistance">Support / Resistance</option>
-        <option value="trend-pullback">Trend Pullback</option>
-      </select></div>
-      <div><label>Lookback</label><select id="paRange">
-        <option value="6mo">6 months</option>
-        <option value="1y" selected>1 year</option>
-        <option value="2y">2 years</option>
-      </select></div>
-      <div style="display:flex;gap:6px;align-items:end;">
-        <button class="btn" id="paScanBtn" style="padding:9px;">Signal</button>
-        <button class="btn" id="paBacktestBtn" style="padding:9px;">Backtest</button>
+  <section id="sec-alerts" class="panel">
+    <div class="panel-head"><h3>Price alerts</h3><span class="metric-sub">Simpler than a paper position &mdash; just get notified when a price level is crossed, no target/SL required</span></div>
+    <div class="order-form" style="margin-top:0;">
+      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr auto;">
+        <div><label>Stock</label><select id="alertStock"></select></div>
+        <div><label>Condition</label><select id="alertCondition"><option value="above">Price goes above</option><option value="below">Price goes below</option></select></div>
+        <div><label>Price (&#8377;)</label><input id="alertPrice" type="number" step="0.01" placeholder="e.g. 1500"></div>
+        <div style="display:flex;align-items:end;"><button class="btn" id="addAlertBtn" style="width:100%;">Add alert</button></div>
       </div>
     </div>
-    <div id="paSignalOut" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
-    <div id="paComposite" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
-    <div class="grid cols-4" id="paStats" style="margin-bottom:14px;display:none;"></div>
-    <div style="overflow-x:auto;"><table id="paTable" style="display:none;margin-bottom:14px;">
-      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
-      <tbody id="paBody"></tbody>
-    </table></div>
-    <div id="paStatus" class="metric-sub"></div>
-  </section>
-
-
-  <section id="sec-patterns" class="panel">
-    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">17 classic patterns &middot; detected on real Upstox candles &middot; several can be active at once</span></div>
-    <p class="desc">Swing-point analysis finds every pattern that is <strong>forming</strong> or <strong>confirmed</strong> on the chart right now &mdash; overlapping patterns (e.g. a flag inside a triangle) are all listed. Click a row to draw it on the chart; click <strong>full logic</strong> for the complete strategy (how it forms, entry, stop, target, failure, volume).</p>
-    <div class="pat-controls">
-      <div><label>Symbol</label><input id="patSym" placeholder="e.g. RELIANCE, NIFTY" autocomplete="off"></div>
-      <div><label>Timeframe</label><select id="patTf"><option value="1D" selected>Daily (~1 year)</option><option value="1W">Weekly</option><option value="1h">Hourly</option></select></div>
-      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select></div>
-      <button class="btn" id="patGo" style="padding:9px;">Analyse</button>
-      <button class="btn" id="patScanBtn" style="padding:9px;" title="Scan every stock and index in the screener list on daily data">Scan all</button>
-    </div>
-    <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
-    <div id="patChart" style="width:100%;height:340px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;"></div>
-    <div id="patSummary" style="margin-bottom:6px;"></div>
-    <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status</th><th>Confidence</th><th>Levels</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
-    <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume and trend alignment &mdash; it is a ranking aid, not a probability of profit.</div>
-    <h4 style="margin:16px 0 4px;">Scan across all stocks</h4>
-    <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
-    <div id="patScanOut" style="overflow-x:auto;"></div>
-  </section>
-
-  <div class="grid cols-2b">
-    <section id="sec-news" class="panel">
-      <h3>News &amp; headlines</h3>
-      <div id="newsPanel"></div>
-    </section>
-    <div class="panel">
-      <h3>Sector peer comparison</h3>
-      <table>
-        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>Rev growth</th></tr></thead>
-        <tbody id="peersBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <section id="sec-fno" class="panel">
-    <div class="panel-head"><h3>F&amp;O indices</h3>
-      <button class="btn scan-btn" id="fnoScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Refresh</button>
-    </div>
-    <p class="desc">PCR, max pain, IV, and OI across major F&amp;O indices &mdash; pulled from real Upstox option-chain data when <code>UPSTOX_ACCESS_TOKEN</code> is configured on the server (look for the <strong>REAL</strong> tag per row), otherwise falls back to a clearly-labeled <strong>SIMULATED</strong> row.</p>
-    <table>
-      <thead><tr><th>Index</th><th>Price</th><th>Change</th><th>PCR (OI)</th><th>Max pain</th><th>IV (ATM)</th><th>OI change</th></tr></thead>
-      <tbody id="fnoBody"></tbody>
+    <div style="overflow-x:auto;">
+    <table style="margin-top:14px;">
+      <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
+      <tbody id="alertsBody"></tbody>
     </table>
+    </div>
   </section>
-
   <section id="sec-backtest" class="panel">
     <h3>Backtest a strategy</h3>
     <p class="desc">Runs against real daily closing prices via the local proxy when it's reachable (up to 2 years), otherwise a synthetic extended series. See the chat for a summary of what published backtests report for each strategy, and read the caveat about overfitting before trusting any win rate &mdash; including this tool's.</p>
@@ -671,24 +668,13 @@
     <div class="legend" id="btChartLegend"></div>
     <div id="btStatus" class="metric-sub"></div>
   </section>
-
-  <section id="sec-positions" class="panel">
-    <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
-    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup. Each position also gets an automatic one-time <strong>deviation warning</strong> (amber ⚠️) at the halfway point between entry and stop-loss, as an early heads-up before the hard stop actually hits.</p>
-    <div style="overflow-x:auto;">
-    <table>
-      <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
-      <tbody id="positionsBody"></tbody>
-    </table>
+    <div class="panel">
+      <h3>200-day backtest vs buy-and-hold</h3>
+      <p class="desc">The strategy's return is now benchmarked against simply holding the stock &mdash; a gap in the original design.</p>
+      <div class="chart-wrap" style="height:200px;"><canvas id="backtestChart"></canvas></div>
+      <div class="grid cols-4" id="backtestStats" style="margin-top:12px;"></div>
     </div>
-  </section>
-
-  <div class="panel">
-    <h3>Volume profile</h3>
-    <p class="desc">Volume traded at each price level around the current price.</p>
-    <div class="chart-wrap" style="height:260px;"><canvas id="volumeChart"></canvas></div>
-  </div>
-
+</div>
   <div class="footer-note">NSE + BSE Analytics Dashboard &mdash; all figures are simulated for demonstration. See the DATA INTEGRATION POINT in script.js to wire in a real market-data feed. For educational purposes only.</div>
 </div>
 </div>
@@ -1457,34 +1443,17 @@ function selectStock(symbol){
   document.getElementById('stockSearch').value='';
   document.getElementById('signalInfo').classList.remove('open');
   renderStockHead(d);
-  renderOverview(d);
-  renderPriceChart(d);
-  renderSignal(d);
-  renderBacktest(d);
-  renderSegments(d);
-  renderFourPanel(d);
-  renderMacro(d);
-  renderFno(d);
-  renderScreener();
-  renderNews(d);
-  renderPeers(d);
-  renderVolumeProfile(d);
-  renderPositions();
-  populateBacktestStockList();
-  populateAlertStockList();
-  populatePaStockList();
-  renderPriceAlerts();
-  renderPortfolio();
+  resetTabs(); // tabs render lazily: only the visible one now, the others when first opened
+  showTab(currentTab(),{noScroll:true,noHash:true});
   setLiveStatus('connecting');
   startLiveFeed(d);
-  renderSeasonalityInto(document.getElementById('seasStockBody'), d.symbol, d.name);
   // Upgrade signals/levels to REAL price history, then re-render dependent panels
   fetchScanHistory([d.symbol]).then(()=>{
     const hist=window.REAL_HIST[d.symbol];
     if(!hist || window.CURRENT!==d) return;
     applyRealHistory(d, hist);
-    renderStockHead(d); renderOverview(d);
-    renderSignal(d); renderFourPanel(d); renderScreener();
+    renderStockHead(d);
+    ['overview','fundamentals','screener'].forEach(t=>{ if(TAB_DONE[t]===d.symbol) runTab(t,d,true); });
   });
 }
 
@@ -2094,8 +2063,7 @@ document.getElementById('rail').addEventListener('click',(e)=>{
   btn.classList.add('active');
   if(btn.id==='homeBtn'){ showHome(); return; }
   if(window.IN_HOME_VIEW){ showStockView(); }
-  const target=document.getElementById(btn.dataset.target);
-  if(target) target.scrollIntoView({behavior:'smooth',block:'start'});
+  gotoSection(btn.dataset.target);
 });
 
 /* ============================================================
@@ -2103,6 +2071,61 @@ document.getElementById('rail').addEventListener('click',(e)=>{
    A neutral landing page (market overview + top movers + open
    tabs) instead of always defaulting into a specific stock.
    ============================================================ */
+/* ============================================================
+   VIEW TABS — each group of panels renders only when its tab is
+   opened (once per symbol), so nothing off-screen is fetched/drawn.
+   ============================================================ */
+const VTABS=['overview','chart','fundamentals','screener','derivatives','portfolio'];
+const SEC_TAB={'sec-overview':'overview','sec-signal':'overview','sec-news':'overview',
+  'sec-chart':'chart','sec-patterns':'chart','sec-priceaction':'chart',
+  'sec-fourpanel':'fundamentals','sec-compare':'fundamentals',
+  'sec-screener':'screener','sec-heatmap':'screener','sec-seasonality':'screener',
+  'sec-fno':'derivatives','sec-options':'derivatives',
+  'sec-watchlist':'portfolio','sec-positions':'portfolio','sec-portfolio':'portfolio','sec-alerts':'portfolio','sec-backtest':'portfolio'};
+const TAB_DONE={}; // tab -> symbol it was last rendered for
+function safe(fn){ try{ fn(); }catch(e){ console.error('tab render failed:',e); } }
+function resetTabs(){ VTABS.forEach(t=>{ delete TAB_DONE[t]; }); }
+function currentTab(){
+  let t=null;
+  try{ const m=/[#&]tab=(\w+)/.exec(location.hash); if(m) t=m[1]; }catch(e){}
+  if(!t){ try{ t=localStorage.getItem('vtab'); }catch(e){} }
+  return VTABS.includes(t)?t:(window.ACTIVE_VTAB||'overview');
+}
+function runTab(t,d,refresh){
+  const sym=d.symbol;
+  const J={
+    overview:()=>{ safe(()=>renderOverview(d)); safe(()=>renderSignal(d)); if(!refresh) safe(()=>renderNews(d)); },
+    chart:()=>{ if(!refresh){ safe(()=>renderPriceChart(d)); safe(()=>populatePaStockList()); } },
+    fundamentals:()=>{ safe(()=>renderFourPanel(d)); if(!refresh){ safe(()=>renderSegments(d)); safe(()=>renderMacro(d)); safe(()=>renderPeers(d)); safe(()=>renderVolumeProfile(d)); } },
+    screener:()=>{ safe(()=>renderScreener()); if(!refresh){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
+    derivatives:()=>{ safe(()=>renderFno(d)); safe(()=>renderFnoIndices()); },
+    portfolio:()=>{ safe(()=>renderBacktest(d)); safe(()=>renderPositions()); safe(()=>populateBacktestStockList()); safe(()=>populateAlertStockList()); safe(()=>renderPriceAlerts()); safe(()=>renderPortfolio()); safe(()=>renderWatchlist()); }
+  };
+  J[t]&&J[t](); TAB_DONE[t]=sym;
+}
+function showTab(t,opts){
+  opts=opts||{};
+  if(!VTABS.includes(t)) t='overview';
+  window.ACTIVE_VTAB=t;
+  document.querySelectorAll('.vtab-pane').forEach(p=>{ p.style.display=(p.dataset.vtab===t)?'block':'none'; });
+  document.querySelectorAll('#viewTabs .vt-btn').forEach(b=>b.classList.toggle('active',b.dataset.vtab===t));
+  try{ localStorage.setItem('vtab',t); }catch(e){}
+  if(!opts.noHash){ try{ history.replaceState(null,'',location.pathname+location.search+'#tab='+t); }catch(e){} }
+  const d=window.CURRENT;
+  if(d && TAB_DONE[t]!==d.symbol) runTab(t,d);
+  // charts sized while hidden need a nudge; pattern section checks visibility on scroll
+  setTimeout(()=>{ try{ window.dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('scroll')); }catch(e){} },30);
+  if(!opts.noScroll) window.scrollTo(0,0);
+}
+function gotoSection(id){
+  if(window.IN_HOME_VIEW){ showStockView(); }
+  const t=SEC_TAB[id];
+  if(t && window.ACTIVE_VTAB!==t) showTab(t,{noScroll:true});
+  setTimeout(()=>{ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },60);
+}
+document.addEventListener('click',(e)=>{ const b=e.target.closest('#viewTabs .vt-btn'); if(b) showTab(b.dataset.vtab); });
+window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location.hash); if(m&&m[1]!==window.ACTIVE_VTAB&&!window.IN_HOME_VIEW) showTab(m[1],{noHash:true}); });
+
 function showHome(){
   window.IN_HOME_VIEW = true;
   stopLiveFeed();
@@ -2823,7 +2846,7 @@ function renderHeatmap(){
 
   tiles.forEach(t=>{
     const tile = heatTile(t.avgChg, t.sector, `${t.count} stocks`, ()=>{
-      document.getElementById('sec-screener').scrollIntoView({behavior:'smooth'});
+      gotoSection('sec-screener');
       const sel=document.getElementById('screenerSector');
       sel.value = t.sector;
       renderScreener();
@@ -3436,8 +3459,7 @@ function refreshLiveDom(d){
   const lp=document.getElementById('livePrice'); if(lp) lp.textContent=fmt(d.price);
   const chg=document.getElementById('liveChg');
   if(chg){ chg.className='chg '+(d.changePct>=0?'up':'down'); chg.innerHTML=`${d.changePct>=0?'&#9650;':'&#9660;'} ${Math.abs(d.changePct).toFixed(2)}%`; }
-  renderOverview(d);
-  renderSignal(d);
+  if(window.ACTIVE_VTAB==='overview'){ renderOverview(d); renderSignal(d); }
   if(window.ProChart) ProChart.liveTick(d.price);
 }
 
@@ -3585,8 +3607,6 @@ async function hydrateFromServer(){
   }catch(e){ /* server unreachable — keep using whatever localStorage had */ }
 }
 hydrateFromServer();
-renderFnoIndices();
-renderHeatmap();
 renderScreener(); // populate the sector dropdown up front, so a heatmap-tile click works even before any stock is opened
 populatePortfolioStockList();
 populateCompareStockLists();
@@ -3809,7 +3829,7 @@ fetch('/api/fno-stocks',{cache:'no-store'}).then(r=>r.json()).then(j=>{ if(j.sym
 function gotoOptionsFor(sym){
   const sel=document.getElementById('optUnderlying');
   if(sel){ populateOptionsUnderlyingList(); if(![...sel.options].some(o=>o.value===sym)){ const o=document.createElement('option'); o.value=sym; o.textContent=sym; sel.appendChild(o); } sel.value=sym; }
-  document.getElementById('sec-options')?.scrollIntoView({behavior:'smooth'});
+  gotoSection('sec-options');
 }
 
 /* ============================================================
@@ -4902,7 +4922,7 @@ const PatternUI = (function(){
       if(t){ S.open[t.dataset.toggle]=!S.open[t.dataset.toggle]; render(); return; }
       const r=e.target.closest('.pat-row'); if(r) select(+r.dataset.i);
     });
-    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; load(a.dataset.sym); $('sec-patterns').scrollIntoView({behavior:'smooth',block:'start'}); } });
+    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; load(a.dataset.sym); gotoSection('sec-patterns'); } });
     // lazy: analyse the open stock the first time the section scrolls into view, and again when the stock changes
     let lastSym=null;
     const check=()=>{

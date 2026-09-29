@@ -2,6 +2,9 @@ services:
   - type: web
     name: nse-bse-dashboard
     runtime: node
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
     plan: free
     buildCommand: npm install
     startCommand: npm start

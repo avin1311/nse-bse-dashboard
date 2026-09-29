@@ -1224,7 +1224,7 @@ function stockOptionRows(filterText){
 }
 
 function selectStock(symbol){
-  let row = STOCKS.find(s=>s[0]===symbol);
+  let row = STOCKS.find(s=>s[0]===symbol) || INDEX_ROWS[symbol];
   if(!row){
     // Not in the curated fast-rendering list — check the full real universe.
     // Sector defaults to 'Other' (macro/segment lookups already have generic
@@ -1353,6 +1353,7 @@ function renderOverview(d){
     <div class="card"><div class="card-title">${l}</div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
 
   // Upgrade to real Upstox fundamentals in the background
+  if(isIndexSym(d.symbol)) return; // indices have no company fundamentals — keep the generated overview
   fetch(`/api/fundamentals/${encodeURIComponent(d.symbol)}`, {cache:'no-store'})
     .then(r=>r.json())
     .then(f=>{
@@ -1573,6 +1574,7 @@ function renderFourPanel(d){
 
 
 function upgradeShareholding(d){
+  if(isIndexSym(d.symbol)) return;
   fetch(`/api/shareholding/${encodeURIComponent(d.symbol)}`,{cache:'no-store'}).then(r=>r.json()).then(sh=>{
     if(sh.error || window.CURRENT?.symbol!==d.symbol) return;
     const C=sh.categories||{}, L=sh.latest||{};
@@ -2419,7 +2421,7 @@ function paBacktest(candles, stratKey){
 // ---- fetch OHLC candles from the existing /api/history endpoint ----
 async function paFetchCandles(symbol, range){
   try{
-    const resp=await fetch('/api/history/'+encodeURIComponent(symbol+'.NS')+'?range='+range, {cache:'no-store'});
+    const resp=await fetch('/api/history/'+encodeURIComponent(yahooSymbol(symbol))+'?range='+range, {cache:'no-store'});
     const data=await resp.json();
     if(!data.series||data.series.length<30) throw new Error('insufficient data');
     return data.series.map(p=>({time:p.t||0, open:p.o||p.c, high:p.h||p.c, low:p.l||p.c, close:p.c, volume:p.v||0}));
@@ -3113,7 +3115,10 @@ document.getElementById('btRun')?.addEventListener('click', async ()=>{
    feels alive. The badge next to the price always shows which mode
    is actually active — never claim "LIVE" silently on fake data.
    ============================================================ */
-function yahooSymbol(sym){ return sym+'.NS'; }
+const INDEX_YAHOO = {NIFTY:'^NSEI', BANKNIFTY:'^NSEBANK', NIFTYIT:'^CNXIT', SENSEX:'^BSESN'};
+const INDEX_ROWS = {NIFTY:['NIFTY','Nifty 50','Index',24175.7]};
+function isIndexSym(sym){ return !!INDEX_YAHOO[sym]; }
+function yahooSymbol(sym){ return INDEX_YAHOO[sym] || (sym+'.NS'); }
 
 async function fetchYahooChart(symbol){
   const resp = await fetch('/api/chart/'+encodeURIComponent(yahooSymbol(symbol))+'?range=1d&interval=5m', {cache:'no-store'});
@@ -3377,7 +3382,7 @@ updateStrategyDesc();
   const match = STOCKS.find(s=>s[0]===requested);
   if(match){ selectStock(match[0]); }
   else if(window.OPEN_TABS.length){ selectStock(window.OPEN_TABS[window.OPEN_TABS.length-1]); }
-  else { showHome(); }
+  else { selectStock('NIFTY'); }  // default page: Nifty 50 so no panel is ever blank
 })();
 refreshTickerLive();
 </script>

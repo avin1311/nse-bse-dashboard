@@ -1785,31 +1785,42 @@ function renderPeers(d){
   peersBody.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
 }
 
+function newsAgo(iso){
+  const t=Date.parse(iso); if(!t) return '';
+  const m=Math.round((Date.now()-t)/60000);
+  if(m<1) return 'just now'; if(m<60) return m+' min ago'; if(m<1440) return Math.round(m/60)+' h ago';
+  if(m<10080) return Math.round(m/1440)+' d ago';
+  return new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+}
+function newsEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function renderNews(d){
   const panel = document.getElementById('newsPanel');
-  panel.innerHTML = '<div class="metric-sub">Loading news…</div>';
-  // Fetch real news via our server-side RSS proxy
-  fetch(`/api/news/${encodeURIComponent(d.symbol)}`, {cache:'no-store'})
+  panel.innerHTML = '<div class="metric-sub">Loading latest news…</div>';
+  fetch(`/api/news/${encodeURIComponent(d.symbol)}?name=${encodeURIComponent(d.name||'')}`, {cache:'no-store'})
     .then(r=>r.json())
     .then(data=>{
+      if(window.CURRENT!==d) return;
       if(!data.items || !data.items.length) throw new Error('No news found');
-      panel.innerHTML = data.items.map(n=>`
+      const safeUrl=u=>/^https?:\/\//i.test(u)?u:'#';
+      const row=n=>`
         <div class="news-item">
-          <a href="${n.link}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;">
-            <p style="margin:0 0 4px;">${n.title}</p>
+          <a href="${newsEsc(safeUrl(n.link))}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;">
+            <p style="margin:0 0 4px;font-weight:600;">${newsEsc(n.title)}</p>
           </a>
+          ${n.description?`<div class="metric-sub" style="margin:0 0 4px;line-height:1.4;">${newsEsc(n.description)}</div>`:''}
           <div class="news-meta">
-            <span>${n.source||'ET Markets'}</span>&middot;
-            <span>${n.pubDate||'Today'}</span>&middot;
-            <span class="signal-chip ${n.sentiment==='Positive'?'sig-buy':n.sentiment==='Negative'?'sig-sell':'sig-hold'}">${n.sentiment||'Neutral'}</span>
+            <span>${newsEsc(n.source||'News')}</span>&middot;
+            <span>${newsAgo(n.pubDate)||'Today'}</span>&middot;
+            <span class="signal-chip ${n.sentiment==='Positive'?'sig-buy':n.sentiment==='Negative'?'sig-sell':'sig-hold'}" title="Rough keyword-based tone of the headline">${n.sentiment||'Neutral'}</span>
           </div>
-        </div>`).join('');
+        </div>`;
+      const st=data.items.filter(n=>n.scope!=='market'), mk=data.items.filter(n=>n.scope==='market');
+      panel.innerHTML = (st.length?st.map(row).join(''):'<div class="metric-sub">No recent headlines mention this stock.</div>')
+        + (mk.length?'<div class="metric-sub" style="margin:12px 0 2px;text-transform:uppercase;letter-spacing:.5px;">Latest market headlines</div>'+mk.map(row).join(''):'')
+        + `<div class="metric-sub" style="margin-top:8px;">Live from Google News, Economic Times and Moneycontrol &middot; refreshed every 15 min</div>`;
     })
     .catch(()=>{
-      // Fallback: simulated headlines
-      panel.innerHTML = d.news.map(n=>`
-        <div class="news-item"><p>${n.t}</p><div class="news-meta"><span>Simulated</span>&middot;<span>Today</span>&middot;
-          <span class="signal-chip ${n.s==='Positive'?'sig-buy':n.s==='Negative'?'sig-sell':'sig-hold'}">${n.s}</span></div></div>`).join('');
+      panel.innerHTML = '<div class="metric-sub">Couldn\'t load news right now (feeds unreachable). <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>';
     });
 }
 

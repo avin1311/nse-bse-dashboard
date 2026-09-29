@@ -169,43 +169,75 @@ function getSentiment(text) {
   return 'Neutral';
 }
 
+// ---- News: stock-specific headlines (Google News RSS) + market feeds (ET, Moneycontrol), newest first ----
+function decodeEnt(t){
+  return String(t||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'")
+    .replace(/&#(\d+);/g,(m,n)=>String.fromCharCode(+n)).replace(/&nbsp;/g,' ').replace(/&amp;/g,'&');
+}
+function stripTags(t){ return decodeEnt(t).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim(); }
+function parseNewsFeed(xml, defaultSource) {
+  const out = [];
+  const re = /<item>([\s\S]*?)<\/item>/g; let m;
+  while ((m = re.exec(xml)) !== null) {
+    const b = m[1];
+    const g = tag => { const x = b.match(new RegExp('<'+tag+'(?:\\s[^>]*)?>([\\s\\S]*?)</'+tag+'>')); return x ? x[1] : ''; };
+    let title = stripTags(g('title')); if (!title) continue;
+    let source = stripTags(g('source')) || defaultSource;
+    // Google News titles end with " - Publisher"
+    const dash = title.lastIndexOf(' - ');
+    if (dash > 20 && (!source || source === defaultSource || title.slice(dash+3) === source)) { source = title.slice(dash+3); title = title.slice(0, dash); }
+    else if (dash > 20 && title.slice(dash+3) === source) title = title.slice(0, dash);
+    const link = stripTags(g('link')) || stripTags(g('guid'));
+    const ts = Date.parse(g('pubDate')) || 0;
+    let desc = stripTags(g('description'));
+    if (desc.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) desc = '';   // Google repeats the headline
+    if (desc.length > 220) desc = desc.slice(0, 217).replace(/\s+\S*$/, '') + '…';
+    out.push({ title, link, ts, source, description: desc });
+  }
+  return out;
+}
+async function fetchFeed(url, source) {
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; dashboard)' }, signal: AbortSignal.timeout(7000) });
+    if (!r.ok) return [];
+    return parseNewsFeed(await r.text(), source);
+  } catch (e) { return []; }
+}
+const gnews = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q + ' when:7d')}&hl=en-IN&gl=IN&ceid=IN:en`;
+const NEWS_FEEDS_GENERAL = [
+  ['https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146842.cms', 'Economic Times'],
+  ['https://www.moneycontrol.com/rss/latestnews.xml', 'Moneycontrol'],
+  ['https://www.moneycontrol.com/rss/marketreports.xml', 'Moneycontrol']
+];
 app.get('/api/news/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
+  const name = String(req.query.name || '').replace(/[^\w &.\-]/g, '').trim().slice(0, 60);
+  const key = symbol + '|' + name;
   const now = Date.now();
-  if (newsCache[symbol] && now - newsCache[symbol].time < NEWS_TTL) {
-    return res.json(newsCache[symbol].data);
-  }
+  if (newsCache[key] && now - newsCache[key].time < NEWS_TTL) return res.json(newsCache[key].data);
   try {
-    const feeds = [
-      `https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146842.cms`,
-      `https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms`
-    ];
-    let allItems = [];
-    for (const url of feeds) {
-      try {
-        const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        if (!resp.ok) continue;
-        const xml = await resp.text();
-        const items = parseRSS(xml);
-        allItems = allItems.concat(items);
-      } catch (e) { continue; }
-    }
-    // Filter for relevance — look for company name or symbol in title/desc
-    const row = allItems;
-    const symbolLower = symbol.toLowerCase();
-    // Try to get the company name for better matching
-    const relevant = row.filter(item => {
-      const text = (item.title + ' ' + item.description).toLowerCase();
-      return text.includes(symbolLower) || text.includes(symbolLower.replace('ltd','').trim());
-    });
-    // If no symbol-specific news, return general market news
-    const finalItems = (relevant.length >= 3 ? relevant : allItems).slice(0, 8).map(item => ({
-      ...item,
-      sentiment: getSentiment(item.title + ' ' + item.description),
-      source: 'ET Markets'
-    }));
-    const result = { symbol, items: finalItems, cached: false };
-    newsCache[symbol] = { data: result, time: now };
+    const isIndex = /^(NIFTY|BANKNIFTY|FINNIFTY|SENSEX|MIDCPNIFTY|INDIAVIX|NIFTY\w*|BSE\w*)$/.test(symbol) && !name;
+    const q1 = isIndex ? `${symbol} Indian stock market` : `${name || symbol} share`;
+    const queries = [[gnews(q1), 'Google News']];
+    if (!isIndex) queries.push([gnews(`${symbol} NSE stock`), 'Google News']);
+    const [specific, general] = await Promise.all([
+      Promise.all(queries.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat()),
+      Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat())
+    ]);
+    const words = [symbol.toLowerCase(), ...(name ? name.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['limited','ltd','industries','india','corporation','company'].includes(w)) : [])];
+    const mentions = it => { const t = (it.title + ' ' + it.description).toLowerCase(); return words.some(w => t.includes(w)); };
+    const seen = new Set();
+    const uniq = arr => arr.filter(it => { const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
+    const spec = uniq(specific).sort((a, b) => b.ts - a.ts);
+    const gen = uniq(general).sort((a, b) => b.ts - a.ts);
+    const genRel = gen.filter(mentions);
+    let items = [...spec, ...genRel].sort((a, b) => b.ts - a.ts).slice(0, 15).map(i => ({ ...i, scope: 'stock' }));
+    // pad with the latest general market headlines if the stock itself has little news
+    if (items.length < 8) items = items.concat(gen.filter(g => !genRel.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
+    items = items.map(i => ({ ...i, pubDate: i.ts ? new Date(i.ts).toISOString() : '', sentiment: getSentiment(i.title + ' ' + i.description) }));
+    const result = { symbol, items, fetchedAt: new Date().toISOString() };
+    if (items.length) newsCache[key] = { data: result, time: now };
     res.json(result);
   } catch (e) {
     res.status(502).json({ error: e.message, items: [] });

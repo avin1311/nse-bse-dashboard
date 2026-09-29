@@ -58,6 +58,20 @@
   .metric-val{font-size:20px;font-weight:600;}
   .metric-sub{font-size:11px;color:var(--text3);margin-top:2px;}
 
+
+  .seas-tbl{border-collapse:collapse;font-size:11px;width:100%;min-width:640px;}
+  .seas-tbl th,.seas-tbl td{padding:4px 6px;text-align:center;border:1px solid var(--border);white-space:nowrap;}
+  .seas-tbl th{color:var(--text2);font-weight:600;background:var(--panel);}
+  .seas-tbl .sc-y{font-weight:600;color:var(--text2);background:var(--panel);}
+  .seas-tbl .sc-na{color:var(--text3);}
+  .seas-tbl .sc-now{color:var(--blue);box-shadow:inset 0 -2px 0 var(--blue);}
+  .seas-tbl .sc-foot td{font-weight:600;background:rgba(127,127,127,.06);}
+  .seas-sum{display:grid;gap:5px;font-size:12px;line-height:1.5;margin-bottom:10px;}
+  .seas-alert{border:1px solid var(--blue);border-radius:6px;padding:6px 10px;background:rgba(61,139,253,.08);}
+  #seasModal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 12px;}
+  .seas-modal-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;width:min(1000px,100%);}
+  .seas-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .fno-badge{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:4px;background:rgba(240,169,58,.18);color:var(--amber);border:1px solid rgba(240,169,58,.5);margin-left:5px;cursor:pointer;vertical-align:1px;}
   .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;}
   .panel h3{font-size:13px;margin:0 0 2px;font-weight:600;}
   .panel .desc{font-size:11.5px;color:var(--text3);margin:0 0 12px;}
@@ -300,6 +314,11 @@
   <div class="grid cols-4" id="fourPanel"></div>
   </section>
 
+  <section id="sec-seasonality" class="panel">
+    <div class="panel-head"><h3>Seasonality</h3><span class="metric-sub">Month / quarter / year returns across past years &middot; real data</span></div>
+    <div id="seasStockBody"></div>
+  </section>
+
   <div class="grid cols-2b">
     <div class="panel">
       <h3 id="macroTitle">Price vs macro driver</h3>
@@ -338,6 +357,7 @@
         <option value="all_three">All three (must all agree)</option>
       </select>
       <select id="screenerSector"><option value="all">All sectors</option></select>
+      <label class="toggle-mini" title="Only stocks/indices that have options &amp; futures"><input type="checkbox" id="fFnoOnly"> <span class="fno-badge" style="margin:0;cursor:default;">F&amp;O</span> only</label>
       <button class="btn" id="moreFiltersBtn">More filters &#9662;</button>
     </div>
     <div id="moreFiltersPanel" style="display:none;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
@@ -403,6 +423,13 @@
   <section id="sec-heatmap" class="panel">
     <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
     <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+      <h3 style="margin:0 0 4px;">Seasonality explorer</h3>
+      <p class="desc" style="margin-bottom:8px;">Click any <b>index tile</b> above, or pick any index/stock here, for its month-by-month, quarterly and yearly returns over past years (e.g. does it rise every Feb&ndash;Mar?).</p>
+      <div class="filters" style="margin-bottom:10px;"><select id="seasPick" style="min-width:220px;"></select><button class="btn scan-btn" id="seasOpenBtn">Open seasonality</button><button class="btn" id="seasSectorBtn">Sector / index seasonality</button><button class="btn" id="seasPicksBtn">Seasonal picks (this &amp; next month)</button></div>
+      <div id="seasSectorBox"></div>
+      <div id="seasPicksBox" style="margin-top:10px;"></div>
+    </div>
   </section>
 
   <section id="sec-alerts" class="panel">
@@ -1334,6 +1361,7 @@ function selectStock(symbol){
   renderPortfolio();
   setLiveStatus('connecting');
   startLiveFeed(d);
+  renderSeasonalityInto(document.getElementById('seasStockBody'), d.symbol, d.name);
   // Upgrade signals/levels to REAL price history, then re-render dependent panels
   fetchScanHistory([d.symbol]).then(()=>{
     const hist=window.REAL_HIST[d.symbol];
@@ -1890,6 +1918,7 @@ function renderScreener(){
   const maxDE=parseFloat(document.getElementById('fMaxDE').value);
   const minRevGrowth=parseFloat(document.getElementById('fMinRevGrowth').value);
   const dividendOnly=document.getElementById('fDividendOnly').checked;
+  const fnoOnly=document.getElementById('fFnoOnly')?.checked;
 
   const realN=all.filter(d=>d.realHistory).length;
   window.__screenerRealNote = realN ? `signals from <b>real price history</b> for ${realN}` : '<span style="color:var(--amber)">signals SIMULATED &mdash; press Scan now to load real price history</span>';
@@ -1898,7 +1927,8 @@ function renderScreener(){
 
   const hasFundFilter = !isNaN(minPromoter)||!isNaN(maxPE)||!isNaN(minROE)||!isNaN(maxDE)||!isNaN(minRevGrowth)||dividendOnly||mcap!=='all';
   let rows = all.filter(d=>{
-    if(d.sector==='Index' && hasFundFilter) return false; // company filters don't apply to indices
+    if(d.sector==='Index' && hasFundFilter) return false;
+    if(fnoOnly && !(window.FNO_SET&&window.FNO_SET.has(d.symbol))) return false; // company filters don't apply to indices
     if(!(d.symbol.includes(q)||d.name.toUpperCase().includes(q)||d.sector.toUpperCase().includes(q))) return false;
     // Horizon-combo filter: with a specific signal selected, every horizon in
     // the combo must show that exact signal (this is what makes "Intraday +
@@ -1922,12 +1952,13 @@ function renderScreener(){
   const body=document.getElementById('screenerBody');
   body.innerHTML = rows.map(d=>{
     const h = d.horizons[displayHorizon];
-    return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
+    return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong>${window.FNO_SET&&window.FNO_SET.has(d.symbol)?'<span class="fno-badge" data-fno="'+d.symbol+'" title="Options &amp; futures available — click to open the options scan">F&amp;O</span>':''}</td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
       <td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
       <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
       <td>${d.sector==='Index'?'&mdash;':fmt(d.volumeCr,2)+' Cr'}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
+  body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
 }
 document.getElementById('screenerHorizon')?.addEventListener('change', renderScreener);
 document.getElementById('moreFiltersBtn')?.addEventListener('click',()=>{
@@ -1940,7 +1971,7 @@ document.getElementById('clearFiltersBtn')?.addEventListener('click',()=>{
   document.getElementById('fDividendOnly').checked=false;
   renderScreener();
 });
-['fMinPrice','fMaxPrice','fMcap','fPromoter','fMaxPE','fMinROE','fMaxDE','fMinRevGrowth','fDividendOnly'].forEach(id=>{
+['fMinPrice','fMaxPrice','fMcap','fPromoter','fMaxPE','fMinROE','fMaxDE','fMinRevGrowth','fDividendOnly','fFnoOnly'].forEach(id=>{
   document.getElementById(id)?.addEventListener('input', renderScreener);
   document.getElementById(id)?.addEventListener('change', renderScreener);
 });
@@ -2683,7 +2714,8 @@ function renderHeatmap(){
   // Placeholder tiles for indices (show 0% until live data arrives)
   const indexPlaceholders = {};
   HEATMAP_INDICES.forEach(idx=>{
-    const tile = heatTile(0, idx.label, 'Loading…', null);
+    const symKey=(INDEX_LIST.find(r=>r[4]===idx.yahoo)||[])[0];
+    const tile = heatTile(0, idx.label, 'Loading…', symKey && symKey!=='INDIAVIX' ? ()=>openSeasonality(symKey, idx.label) : null);
     tile.id = 'hm-idx-' + idx.yahoo.replace(/[\^.]/g,'_');
     grid.appendChild(tile);
     indexPlaceholders[idx.yahoo] = tile;
@@ -2731,7 +2763,7 @@ function renderHeatmap(){
       tile.style.border = `1px solid ${border}`;
       tile.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:4px;">${idx.label}</div>
         <div style="font-size:18px;font-weight:700;" class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
-        <div class="metric-sub">₹${fmt(data.price,2)}</div>`;
+        <div class="metric-sub">₹${fmt(data.price,2)} &middot; 📅 seasonality</div>`;
     }catch(e){
       const tile = indexPlaceholders[idx.yahoo];
       if(tile){ const sub = tile.querySelector('.metric-sub'); if(sub) sub.textContent='Unavailable'; }
@@ -3517,6 +3549,208 @@ updateStrategyDesc();
   else if(window.OPEN_TABS.length){ selectStock(window.OPEN_TABS[window.OPEN_TABS.length-1]); }
   else { selectStock('NIFTY'); }  // default page: Nifty 50 so no panel is ever blank
 })();
+
+/* ============================================================
+   SEASONALITY  (real monthly closes from Yahoo, up to full history)
+   ============================================================ */
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+window.SEAS_CACHE = window.SEAS_CACHE || {};
+async function fetchSeasonality(list){
+  const need=list.filter(s=>!window.SEAS_CACHE[s]);
+  for(let i=0;i<need.length;i+=30){
+    const batch=need.slice(i,i+30);
+    try{
+      const resp=await fetch('/api/seasonality-batch?symbols='+encodeURIComponent(batch.map(yahooSymbol).join(',')),{cache:'no-store'});
+      const data=await resp.json();
+      batch.forEach(s=>{ const r=data[yahooSymbol(s)]; if(r && r.c) window.SEAS_CACHE[s]=r; else window.SEAS_CACHE[s]={error:(r&&r.error)||'no data'}; });
+    }catch(e){ batch.forEach(s=>{ window.SEAS_CACHE[s]={error:'server unreachable'}; }); }
+  }
+}
+function seasonCalc(m){
+  const now=new Date(); const curY=now.getUTCFullYear(), curM=now.getUTCMonth();
+  const rets={}; // year -> 12 slots
+  for(let i=1;i<m.c.length;i++){
+    const d=new Date((m.t[i]+43200)*1000); const y=d.getUTCFullYear(), mo=d.getUTCMonth();
+    if(y===curY && mo===curM) continue;             // skip the still-open month
+    if(!m.c[i]||!m.c[i-1]) continue;
+    (rets[y]=rets[y]||Array(12).fill(null))[mo]=(m.c[i]/m.c[i-1]-1)*100;
+  }
+  const years=Object.keys(rets).map(Number).sort((a,b)=>a-b);
+  const stats=MONTHS.map((_,mo)=>{
+    const vals=years.map(y=>({y,v:rets[y][mo]})).filter(x=>x.v!=null);
+    if(!vals.length) return {n:0};
+    const avg=vals.reduce((a,x)=>a+x.v,0)/vals.length;
+    const sorted=vals.map(x=>x.v).sort((a,b)=>a-b);
+    const med=sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2;
+    const win=vals.filter(x=>x.v>0).length/vals.length*100;
+    const best=vals.reduce((a,x)=>x.v>a.v?x:a), worst=vals.reduce((a,x)=>x.v<a.v?x:a);
+    return {n:vals.length,avg,med,win,best,worst};
+  });
+  const comp=arr=>{ const v=arr.filter(x=>x!=null); return v.length? (v.reduce((a,r)=>a*(1+r/100),1)-1)*100 : null; };
+  const quarters={}, yearly={};
+  years.forEach(y=>{
+    const r=rets[y];
+    quarters[y]=[0,1,2,3].map(q=>{ const seg=r.slice(q*3,q*3+3); return seg.every(x=>x!=null)?comp(seg):null; });
+    yearly[y]={v:comp(r), full:r.every(x=>x!=null)};
+  });
+  // seasonal windows: start month s, length L (may wrap into next year)
+  const windows=[];
+  for(let s=0;s<12;s++) for(let L=1;L<=6;L++){
+    const vals=[];
+    years.forEach(y=>{
+      const seg=[]; let ok=true;
+      for(let k=0;k<L;k++){ const mm=s+k, yy=y+Math.floor(mm/12); const rr=rets[yy]; if(!rr||rr[mm%12]==null){ok=false;break;} seg.push(rr[mm%12]); }
+      if(ok) vals.push(comp(seg));
+    });
+    if(vals.length>=6){
+      const avg=vals.reduce((a,b)=>a+b,0)/vals.length, win=vals.filter(v=>v>0).length/vals.length*100;
+      windows.push({s,L,n:vals.length,avg,win,e:(s+L-1)%12});
+    }
+  }
+  return {rets,years,stats,quarters,yearly,windows};
+}
+function seasWindowLabel(w){ return `${MONTHS[w.s]} → ${MONTHS[w.e]}`+(w.L>1?` (${w.L} months)`:''); }
+function seasBestWindows(sc){
+  const good=sc.windows.filter(w=>w.avg>1.5&&w.win>=65).sort((a,b)=>(b.win/100*b.avg/Math.sqrt(b.L))-(a.win/100*a.avg/Math.sqrt(a.L)));
+  const picked=[]; good.forEach(w=>{ if(picked.length<3 && !picked.some(p=>p.s===w.s||p.e===w.e)) picked.push(w); });
+  const bad=sc.windows.filter(w=>w.avg<-1.5&&w.win<=35).sort((a,b)=>(a.win/100*a.avg/Math.sqrt(a.L))-(b.win/100*b.avg/Math.sqrt(b.L)));
+  const avoid=[]; bad.forEach(w=>{ if(avoid.length<2 && !avoid.some(p=>p.s===w.s||p.e===w.e)) avoid.push(w); });
+  return {best:picked,avoid};
+}
+function seasCell(v,partial){
+  if(v==null) return '<td class="sc-na">–</td>';
+  const a=Math.min(1,Math.abs(v)/10);
+  const bg=v>=0?`rgba(38,194,129,${0.10+a*0.55})`:`rgba(239,83,80,${0.10+a*0.55})`;
+  return `<td style="background:${bg};">${v>=0?'+':''}${v.toFixed(1)}</td>`;
+}
+function seasHtml(sym,name,m,idxM){
+  const sc=seasonCalc(m); const S=sc.stats;
+  const nowM=new Date().getUTCMonth(), nextM=(nowM+1)%12;
+  const ic = idxM && sym!=='NIFTY' ? seasonCalc(idxM) : null;
+  const strong=S.map((x,i)=>({i,...x})).filter(x=>x.n>=6&&x.win>=70&&x.avg>1).sort((a,b)=>b.avg-a.avg);
+  const weak=S.map((x,i)=>({i,...x})).filter(x=>x.n>=6&&x.win<=30&&x.avg<-1).sort((a,b)=>a.avg-b.avg);
+  const fw=seasBestWindows(sc);
+  const yrsDesc=sc.years.slice().reverse();
+  let h=`<div class="seas-wrap"><div class="metric-sub" style="margin-bottom:8px;">${name} &middot; ${sc.years.length} years of monthly data (${sc.years[0]}–${sc.years[sc.years.length-1]}) &middot; current open month excluded</div>`;
+  // summary
+  h+='<div class="seas-sum">';
+  h+= strong.length? `<div>✅ <b>Strong months:</b> ${strong.slice(0,4).map(x=>`${MONTHS[x.i]} (${x.win.toFixed(0)}% up, avg ${x.avg>=0?'+':''}${x.avg.toFixed(1)}%, ${Math.round(x.win*x.n/100)}/${x.n} yrs)`).join(' &middot; ')}</div>` : '<div>No month has been consistently positive (≥70% of years and avg &gt;1%).</div>';
+  if(weak.length) h+=`<div>⚠️ <b>Weak months:</b> ${weak.slice(0,4).map(x=>`${MONTHS[x.i]} (${x.win.toFixed(0)}% up, avg ${x.avg.toFixed(1)}%)`).join(' &middot; ')}</div>`;
+  if(fw.best.length) h+=`<div>🎯 <b>Best seasonal windows to hold:</b> ${fw.best.map(w=>`${seasWindowLabel(w)}: avg ${w.avg>=0?'+':''}${w.avg.toFixed(1)}%, up in ${Math.round(w.win*w.n/100)}/${w.n} yrs`).join(' &middot; ')}</div>`;
+  if(fw.avoid.length) h+=`<div>🚫 <b>Historically weak windows:</b> ${fw.avoid.map(w=>`${seasWindowLabel(w)}: avg ${w.avg.toFixed(1)}%, up in ${Math.round(w.win*w.n/100)}/${w.n} yrs`).join(' &middot; ')}</div>`;
+  // seasonal alert
+  const ns=S[nextM], cs=S[nowM];
+  const opening=fw.best.find(w=>w.s===nextM), inWin=fw.best.find(w=>{ for(let k=0;k<w.L;k++) if((w.s+k)%12===nowM) return true; return false; });
+  if(opening) h+=`<div class="seas-alert">🔔 <b>Seasonal alert:</b> a historically strong window (${seasWindowLabel(opening)}) opens next month (${MONTHS[nextM]}).</div>`;
+  else if(inWin) h+=`<div class="seas-alert">🔔 <b>Seasonal alert:</b> ${MONTHS[nowM]} is inside a historically strong window (${seasWindowLabel(inWin)}).</div>`;
+  else if(ns.n>=6 && ns.win<=30 && ns.avg<-1) h+=`<div class="seas-alert" style="border-color:var(--red);">🔔 <b>Seasonal caution:</b> ${MONTHS[nextM]} has been weak (${ns.win.toFixed(0)}% up, avg ${ns.avg.toFixed(1)}%).</div>`;
+  h+='</div>';
+  // monthly grid
+  h+='<div style="overflow-x:auto;"><table class="seas-tbl"><thead><tr><th>Year</th>'+MONTHS.map((mo,i)=>`<th${i===nowM?' class="sc-now"':''}>${mo}</th>`).join('')+'<th>Year</th></tr></thead><tbody>';
+  yrsDesc.forEach(y=>{
+    h+=`<tr><td class="sc-y">${y}</td>`+sc.rets[y].map(v=>seasCell(v)).join('')+seasCell(sc.yearly[y].v)+'</tr>';
+  });
+  h+='</tbody><tfoot>';
+  h+='<tr class="sc-foot"><td>Avg %</td>'+S.map(x=>x.n?seasCell(x.avg):'<td>–</td>').join('')+'<td></td></tr>';
+  h+='<tr class="sc-foot"><td>Median %</td>'+S.map(x=>x.n?seasCell(x.med):'<td>–</td>').join('')+'<td></td></tr>';
+  h+='<tr class="sc-foot"><td>% yrs up</td>'+S.map(x=>x.n?`<td class="${x.win>=60?'up':x.win<=40?'down':''}">${x.win.toFixed(0)}%</td>`:'<td>–</td>').join('')+'<td></td></tr>';
+  h+='<tr class="sc-foot"><td>Best</td>'+S.map(x=>x.n?`<td title="${x.best.y}">${x.best.v.toFixed(0)}%</td>`:'<td>–</td>').join('')+'<td></td></tr>';
+  h+='<tr class="sc-foot"><td>Worst</td>'+S.map(x=>x.n?`<td title="${x.worst.y}">${x.worst.v.toFixed(0)}%</td>`:'<td>–</td>').join('')+'<td></td></tr>';
+  if(ic){
+    h+='<tr class="sc-foot"><td>Nifty avg</td>'+ic.stats.map(x=>x.n?seasCell(x.avg):'<td>–</td>').join('')+'<td></td></tr>';
+    h+='<tr class="sc-foot"><td title="Stock avg minus Nifty avg: positive = the stock\'s own seasonal strength, not just the market">vs Nifty</td>'+S.map((x,i)=>x.n&&ic.stats[i].n?seasCell(x.avg-ic.stats[i].avg):'<td>–</td>').join('')+'<td></td></tr>';
+  }
+  h+='</tfoot></table></div>';
+  // quarterly
+  h+='<div class="metric-sub" style="margin:12px 0 4px;font-weight:600;">Quarterly returns</div><div style="overflow-x:auto;"><table class="seas-tbl" style="max-width:420px;"><thead><tr><th>Year</th><th>Q1 (Jan–Mar)</th><th>Q2 (Apr–Jun)</th><th>Q3 (Jul–Sep)</th><th>Q4 (Oct–Dec)</th></tr></thead><tbody>';
+  yrsDesc.forEach(y=>{ h+=`<tr><td class="sc-y">${y}</td>`+sc.quarters[y].map(v=>seasCell(v)).join('')+'</tr>'; });
+  const qa=[0,1,2,3].map(q=>{ const v=sc.years.map(y=>sc.quarters[y][q]).filter(x=>x!=null); return v.length?{avg:v.reduce((a,b)=>a+b,0)/v.length,win:v.filter(x=>x>0).length/v.length*100}:null; });
+  h+='</tbody><tfoot><tr class="sc-foot"><td>Avg %</td>'+qa.map(x=>x?seasCell(x.avg):'<td>–</td>').join('')+'</tr><tr class="sc-foot"><td>% yrs up</td>'+qa.map(x=>x?`<td class="${x.win>=60?'up':x.win<=40?'down':''}">${x.win.toFixed(0)}%</td>`:'<td>–</td>').join('')+'</tr></tfoot></table></div>';
+  h+='<div class="metric-sub" style="margin-top:10px;line-height:1.5;">Seasonality is a historical tendency, not a forecast — with ~10–15 observations per month a pattern can be coincidence. Always check the “% yrs up” and number of years. Returns are price returns (dividends excluded). Educational only, not investment advice.</div></div>';
+  return h;
+}
+async function renderSeasonalityInto(el, sym, name){
+  if(!el) return;
+  el.innerHTML='<div class="metric-sub">Loading real monthly history…</div>';
+  const want=sym==='NIFTY'?['NIFTY']:[sym,'NIFTY'];
+  await fetchSeasonality(want);
+  const m=window.SEAS_CACHE[sym];
+  if(!m || !m.c){ el.innerHTML=`<div class="metric-sub" style="color:var(--amber)">Seasonality unavailable for ${sym}: ${(m&&m.error)||'no data'} (needs real monthly history from Yahoo — nothing is simulated here).</div>`; return; }
+  const im=window.SEAS_CACHE['NIFTY']; 
+  el.innerHTML=seasHtml(sym,name,m,im&&im.c?im:null);
+}
+function openSeasonality(sym,name){
+  let modal=document.getElementById('seasModal');
+  if(!modal){
+    modal=document.createElement('div'); modal.id='seasModal';
+    modal.innerHTML='<div class="seas-modal-box"><div class="seas-modal-head"><h3 id="seasModalTitle"></h3><button class="btn" id="seasModalClose">Close ✕</button></div><div id="seasModalBody"></div></div>';
+    document.body.appendChild(modal);
+    modal.addEventListener('click',e=>{ if(e.target===modal) modal.style.display='none'; });
+    modal.querySelector('#seasModalClose').addEventListener('click',()=>modal.style.display='none');
+  }
+  modal.style.display='flex';
+  document.getElementById('seasModalTitle').textContent='Seasonality — '+name;
+  renderSeasonalityInto(document.getElementById('seasModalBody'),sym,name);
+}
+function seasSymbolName(sym){ const r=STOCKS.find(s=>s[0]===sym)||INDEX_ROWS[sym]; return r?r[1]:sym; }
+
+// Sector / index seasonality grid (average return by month)
+async function renderSectorSeasonality(){
+  const box=document.getElementById('seasSectorBox'); if(!box) return;
+  box.innerHTML='<div class="metric-sub">Loading sector index history…</div>';
+  const idxs=INDEX_LIST.filter(r=>r[0]!=='INDIAVIX');
+  await fetchSeasonality(idxs.map(r=>r[0]));
+  const nowM=new Date().getUTCMonth();
+  let h='<div style="overflow-x:auto;"><table class="seas-tbl"><thead><tr><th>Index</th>'+MONTHS.map((mo,i)=>`<th${i===nowM?' class="sc-now"':''}>${mo}</th>`).join('')+'</tr></thead><tbody>';
+  idxs.forEach(r=>{
+    const m=window.SEAS_CACHE[r[0]];
+    if(!m||!m.c){ h+=`<tr><td class="sc-y">${r[1]}</td><td colspan="12" class="sc-na">no data</td></tr>`; return; }
+    const sc=seasonCalc(m);
+    h+=`<tr class="row-click" data-seas="${r[0]}"><td class="sc-y" style="text-align:left;cursor:pointer;">${r[1]}</td>`+sc.stats.map(x=>x.n?`<td style="background:${x.avg>=0?`rgba(38,194,129,${0.10+Math.min(1,Math.abs(x.avg)/5)*0.55})`:`rgba(239,83,80,${0.10+Math.min(1,Math.abs(x.avg)/5)*0.55})`};" title="${x.win.toFixed(0)}% of ${x.n} years up">${x.avg>=0?'+':''}${x.avg.toFixed(1)}</td>`:'<td class="sc-na">–</td>').join('')+'</tr>';
+  });
+  h+='</tbody></table></div><div class="metric-sub" style="margin-top:6px;">Average monthly return over full history. Hover a cell for the % of years it was up. Click a row for the full year-by-year view.</div>';
+  box.innerHTML=h;
+  box.querySelectorAll('tr[data-seas]').forEach(tr=>tr.addEventListener('click',()=>openSeasonality(tr.dataset.seas,seasSymbolName(tr.dataset.seas))));
+}
+
+// "Seasonal picks": stocks whose current / next month has historically been strong or weak
+async function renderSeasonalPicks(which){
+  const box=document.getElementById('seasPicksBox'); if(!box) return;
+  const btn=document.getElementById('seasPicksBtn');
+  const nowM=new Date().getUTCMonth(); const mo=which==='next'?(nowM+1)%12:nowM;
+  box.innerHTML='<div class="metric-sub">Loading monthly history for '+STOCKS.length+' stocks… (first time takes ~1 minute)</div>';
+  await fetchSeasonality(STOCKS.map(s=>s[0]));
+  const rows=[]; let ok=0;
+  STOCKS.forEach(s=>{ const m=window.SEAS_CACHE[s[0]]; if(!m||!m.c) return; ok++; const st=seasonCalc(m).stats[mo]; if(st.n>=7) rows.push({sym:s[0],name:s[1],...st}); });
+  const top=rows.filter(r=>r.win>=70&&r.avg>2).sort((a,b)=>(b.win*b.avg)-(a.win*a.avg)).slice(0,12);
+  const bot=rows.filter(r=>r.win<=30&&r.avg<-2).sort((a,b)=>(a.win*a.avg)-(b.win*b.avg)).slice(0,12);
+  const tbl=(list,cls)=>list.length?`<table class="seas-tbl" style="width:100%;"><thead><tr><th style="text-align:left;">Stock</th><th>Avg</th><th>% yrs up</th><th>Yrs</th></tr></thead><tbody>${list.map(r=>`<tr class="row-click" data-seas="${r.sym}"><td style="text-align:left;cursor:pointer;"><b>${r.sym}</b></td><td class="${cls}">${r.avg>=0?'+':''}${r.avg.toFixed(1)}%</td><td>${r.win.toFixed(0)}%</td><td>${r.n}</td></tr>`).join('')}</tbody></table>`:'<div class="metric-sub">None met the bar (≥70%/≤30% of years, avg beyond ±2%, ≥7 years).</div>';
+  box.innerHTML=`<div class="filters" style="margin-bottom:8px;"><button class="btn ${which==='next'?'':'active-tab'}" data-sp="this" style="${which==='next'?'':'border-color:var(--blue);color:var(--blue);'}">This month (${MONTHS[nowM]})</button><button class="btn" data-sp="next" style="${which==='next'?'border-color:var(--blue);color:var(--blue);':''}">Next month (${MONTHS[(nowM+1)%12]})</button><span class="metric-sub">${ok}/${STOCKS.length} stocks had usable history</span></div>
+  <div class="grid cols-2b"><div><div class="metric-sub" style="font-weight:600;color:var(--green);margin-bottom:4px;">Historically strong in ${MONTHS[mo]}</div>${tbl(top,'up')}</div><div><div class="metric-sub" style="font-weight:600;color:var(--red);margin-bottom:4px;">Historically weak in ${MONTHS[mo]}</div>${tbl(bot,'down')}</div></div>`;
+  box.querySelectorAll('tr[data-seas]').forEach(tr=>tr.addEventListener('click',()=>openSeasonality(tr.dataset.seas,seasSymbolName(tr.dataset.seas))));
+  box.querySelectorAll('button[data-sp]').forEach(b=>b.addEventListener('click',()=>renderSeasonalPicks(b.dataset.sp)));
+}
+function setupSeasonalityControls(){
+  const sel=document.getElementById('seasPick');
+  if(sel && !sel.dataset.done){
+    sel.dataset.done='1';
+    sel.innerHTML=INDEX_ROWS_LIST.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]} (index)</option>`).join('')+STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
+    document.getElementById('seasOpenBtn').addEventListener('click',()=>openSeasonality(sel.value,seasSymbolName(sel.value)));
+    document.getElementById('seasSectorBtn').addEventListener('click',renderSectorSeasonality);
+    document.getElementById('seasPicksBtn').addEventListener('click',()=>renderSeasonalPicks('this'));
+  }
+}
+
+/* ---------- F&O marker for the screener ---------- */
+window.FNO_SET = window.FNO_SET || new Set(['NIFTY','BANKNIFTY','NIFTYNXT50','SENSEX']);
+fetch('/api/fno-stocks',{cache:'no-store'}).then(r=>r.json()).then(j=>{ if(j.symbols){ j.symbols.forEach(s=>window.FNO_SET.add(s)); if(typeof renderScreener==='function') renderScreener(); } }).catch(()=>{});
+function gotoOptionsFor(sym){
+  const sel=document.getElementById('optUnderlying');
+  if(sel){ populateOptionsUnderlyingList(); if(![...sel.options].some(o=>o.value===sym)){ const o=document.createElement('option'); o.value=sym; o.textContent=sym; sel.appendChild(o); } sel.value=sym; }
+  document.getElementById('sec-options')?.scrollIntoView({behavior:'smooth'});
+}
+
+setupSeasonalityControls();
 refreshTickerLive();
 setTimeout(()=>{ try{ scanScreenerLive(); }catch(e){} }, 4000); // load real price history for signals in the background
 </script>

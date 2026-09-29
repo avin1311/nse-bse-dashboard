@@ -310,6 +310,58 @@ app.get('/api/scan-history', async (req, res) => {
   res.json(out);
 });
 
+
+// ============================================================
+// SEASONALITY: real monthly closes (max history), cached 12h
+// ============================================================
+const seasCache = {};
+const SEAS_TTL = 12 * 60 * 60 * 1000;
+async function getSeasonality(sym) {
+  const c = seasCache[sym];
+  if (c && Date.now() - c.time < SEAS_TTL) return c.data;
+  const parsed = await getChartData(sym, 'max', '1mo');
+  if (!parsed || !parsed.series || parsed.series.length < 14) throw new Error('insufficient monthly history');
+  const data = { t: parsed.series.map(p => p.t), c: parsed.series.map(p => p.c) };
+  seasCache[sym] = { data, time: Date.now() };
+  return data;
+}
+app.get('/api/seasonality-batch', async (req, res) => {
+  const symbols = (req.query.symbols || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 40);
+  if (!symbols.length) return res.status(400).json({ error: 'symbols required' });
+  const out = {};
+  let i = 0;
+  async function worker() {
+    while (i < symbols.length) {
+      const sym = symbols[i++];
+      try { out[sym] = await getSeasonality(sym); } catch (e) { out[sym] = { error: e.message }; }
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, worker));
+  res.json(out);
+});
+
+// ============================================================
+// F&O-ENABLED UNDERLYINGS (from Upstox NSE instruments file), cached 24h
+// ============================================================
+const FNO_FALLBACK = ['RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','SBIN','BHARTIARTL','ITC','LT','KOTAKBANK','AXISBANK','HINDUNILVR','BAJFINANCE','MARUTI','SUNPHARMA','TITAN','ASIANPAINT','ULTRACEMCO','NESTLEIND','WIPRO','HCLTECH','TECHM','POWERGRID','NTPC','ONGC','COALINDIA','TATAMOTORS','TATASTEEL','JSWSTEEL','HINDALCO','ADANIENT','ADANIPORTS','M&M','BAJAJFINSV','DRREDDY','CIPLA','DIVISLAB','EICHERMOT','HEROMOTOCO','BPCL','GRASIM','INDUSINDBK','BRITANNIA','APOLLOHOSP','TATACONSUM','SBILIFE','HDFCLIFE','BAJAJ-AUTO','UPL','VOLTAS','PIDILITIND','DLF','GAIL','IOC','VEDL','SAIL','PNB','BANKBARODA','CANBK','IDFCFIRSTB','FEDERALBNK','AUBANK','BANDHANBNK','TATAPOWER','TATACHEM','TVSMOTOR','ASHOKLEY','BHEL','BEL','HAL','IRCTC','ZOMATO','PAYTM','NAUKRI','DMART','SIEMENS','ABB','HAVELLS','CROMPTON','GODREJCP','DABUR','MARICO','COLPAL','LUPIN','AUROPHARMA','TORNTPHARM','ALKEM','BIOCON','MCX','CHOLAFIN','MUTHOOTFIN','MANAPPURAM','LICHSGFIN','RECLTD','PFC','INDIGO','JUBLFOOD','PAGEIND','TRENT','BERGEPAINT','ACC','AMBUJACEM','SHREECEM','INDHOTEL','LTIM','PERSISTENT','COFORGE','MPHASIS','OFSS'];
+let fnoCache = { data: null, time: 0, source: null };
+app.get('/api/fno-stocks', async (req, res) => {
+  if (fnoCache.data && Date.now() - fnoCache.time < 24 * 60 * 60 * 1000) return res.json({ symbols: fnoCache.data, source: fnoCache.source });
+  try {
+    const list = await fetchRawInstrumentFile('NSE');
+    const set = new Set();
+    list.forEach(r => {
+      if (r.segment === 'NSE_FO' && ['CE', 'PE', 'FUT'].includes(r.instrument_type) && r.underlying_symbol && r.underlying_type !== 'INDEX') set.add(r.underlying_symbol);
+    });
+    if (set.size < 50) throw new Error('too few F&O underlyings found (' + set.size + ')');
+    fnoCache = { data: Array.from(set), time: Date.now(), source: 'upstox' };
+  } catch (e) {
+    console.warn('F&O list from Upstox failed, using built-in list:', e.message);
+    fnoCache = { data: FNO_FALLBACK, time: Date.now() - 23 * 60 * 60 * 1000, source: 'fallback' }; // retry in ~1h
+  }
+  res.json({ symbols: fnoCache.data, source: fnoCache.source });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================

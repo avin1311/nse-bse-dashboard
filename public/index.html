@@ -1022,24 +1022,83 @@ function labelFromScore(score){
 // consistent price series plus the stock's fundamentals, and attaches a
 // target + stop-loss to each — reusing the same support/resistance/analyst
 // levels shown elsewhere on the page so numbers never disagree across panels.
+
+// Proper ATR-based Supertrend (used when real high/low history is available)
+function computeSupertrendHL(hi,lo,cl,period,mult){
+  const n=cl.length; const atr=[]; let prevAtr=null;
+  for(let i=0;i<n;i++){
+    const tr = i===0 ? hi[i]-lo[i] : Math.max(hi[i]-lo[i], Math.abs(hi[i]-cl[i-1]), Math.abs(lo[i]-cl[i-1]));
+    prevAtr = prevAtr==null ? tr : (prevAtr*(period-1)+tr)/period;
+    atr.push(prevAtr);
+  }
+  let fu=null, fl=null, trend=true; const line=[];
+  for(let i=0;i<n;i++){
+    const mid=(hi[i]+lo[i])/2;
+    const bu=mid+mult*atr[i], bl=mid-mult*atr[i];
+    const pu=fu, pl=fl;
+    fu = (pu==null || bu<pu || cl[i-1]>pu) ? bu : pu;
+    fl = (pl==null || bl>pl || cl[i-1]<pl) ? bl : pl;
+    if(trend && cl[i]<fl) trend=false; else if(!trend && cl[i]>fu) trend=true;
+    line.push(trend? fl : fu);
+  }
+  return {trendLine:line, bull:trend};
+}
+// Trend-following composite score for REAL price history: price vs EMAs,
+// EMA cross, ATR Supertrend, MACD and RSI (RSI only tempers extremes; it is
+// no longer allowed to flip a falling stock into a "strong buy").
+function realTrendScore(closes, rsi, stBull, macdBull, fastP, slowP){
+  const eF=ema(closes,fastP), eS=ema(closes,slowP);
+  const last=closes[closes.length-1];
+  let s=50;
+  s += last>eF[eF.length-1] ? 8 : -8;
+  s += eF[eF.length-1]>eS[eS.length-1] ? 8 : -8;
+  s += stBull ? 12 : -12;
+  s += macdBull ? 8 : -8;
+  if(rsi>=50) s += Math.min(rsi-50,20)*0.5 - (rsi>75 ? 8 : 0);
+  else s -= Math.min(50-rsi,20)*0.5 - (rsi<25 ? 14 : 0); // deeply oversold: soften, don't flip
+  return Math.max(2,Math.min(98,Math.round(s)));
+}
+
 function buildHorizons(d){
   const closes=d.prices;
   const intradayCloses = closes.slice(-10);
   const rsiIntraday = computeRSI(intradayCloses, 6);
   const macdIntraday = computeMACD(intradayCloses, 5, 13, 5);
   const stIntraday = computeSupertrend(intradayCloses, 0.6);
-  const scoreIntraday = scoreFromIndicators(rsiIntraday, stIntraday.bull, macdIntraday.bull);
+  let scoreIntraday = scoreFromIndicators(rsiIntraday, stIntraday.bull, macdIntraday.bull);
 
   const rsiSwing = computeRSI(closes, 14);
   const macdSwing = computeMACD(closes, 12, 26, 9);
-  const stSwing = computeSupertrend(closes, 0.15);
-  const scoreSwing = scoreFromIndicators(rsiSwing, stSwing.bull, macdSwing.bull);
+  let stSwing = computeSupertrend(closes, 0.15);
+  let scoreSwing = scoreFromIndicators(rsiSwing, stSwing.bull, macdSwing.bull);
+  if(d.realHistory && d.histHL){
+    const H=d.histHL.h, L=d.histHL.l;
+    stSwing = computeSupertrendHL(H,L,closes,10,3);
+    scoreSwing = realTrendScore(closes, rsiSwing, stSwing.bull, macdSwing.bull, 20, 50);
+    const n30=closes.slice(-30), h30=H.slice(-30), l30=L.slice(-30);
+    const stI=computeSupertrendHL(h30,l30,n30,5,1.5);
+    Object.assign(stIntraday,{bull:stI.bull});
+    scoreIntraday = realTrendScore(n30, rsiIntraday, stI.bull, macdIntraday.bull, 5, 10);
+  }
 
-  // Long-term: fundamentals-driven rather than short-window technicals
+  // Long-term: fundamentals-driven rather than short-window technicals.
+  // With REAL history loaded it is trend-driven instead (6-month momentum,
+  // price vs its 100-day average, and distance from the 52-week high).
   let scoreLong = 50;
-  scoreLong += Math.max(-20,Math.min(20, d.upside*0.7));
-  scoreLong += Math.max(-12,Math.min(12,(d.revGrowth-8)*0.6));
-  scoreLong += Math.max(-10,Math.min(10,(d.roe-12)*0.5));
+  if(d.realHistory && closes.length>=60){
+    const last=closes[closes.length-1];
+    const back=closes[Math.max(0,closes.length-126)];
+    const mom=(last/back-1)*100;
+    const win=closes.slice(-100); const sma=win.reduce((a,b)=>a+b,0)/win.length;
+    const hi=Math.max(...closes);
+    scoreLong += Math.max(-22,Math.min(22, mom*0.9));
+    scoreLong += last>sma ? 12 : -12;
+    scoreLong += Math.max(-10,Math.min(6, -(hi-last)/hi*100*0.4+4));
+  } else {
+    scoreLong += Math.max(-20,Math.min(20, d.upside*0.7));
+    scoreLong += Math.max(-12,Math.min(12,(d.revGrowth-8)*0.6));
+    scoreLong += Math.max(-10,Math.min(10,(d.roe-12)*0.5));
+  }
   scoreLong = Math.max(2,Math.min(98,Math.round(scoreLong)));
 
   function withTargets(score, tight){
@@ -1275,6 +1334,13 @@ function selectStock(symbol){
   renderPortfolio();
   setLiveStatus('connecting');
   startLiveFeed(d);
+  // Upgrade signals/levels to REAL price history, then re-render dependent panels
+  fetchScanHistory([d.symbol]).then(()=>{
+    const hist=window.REAL_HIST[d.symbol];
+    if(!hist || window.CURRENT!==d) return;
+    applyRealHistory(d, hist);
+    renderSignal(d); renderFourPanel(d); renderScreener();
+  });
 }
 
 window.WATCHLIST = window.WATCHLIST || [];
@@ -1700,11 +1766,52 @@ function renderVolumeProfile(d){
   });
 }
 
+
+// ---- REAL-HISTORY SIGNALS -------------------------------------------------
+window.REAL_HIST = window.REAL_HIST || {};   // symbol -> {c,h,l,v,t}
+function applyRealHistory(d, hist, livePrice){
+  if(!hist || !hist.c || hist.c.length<30) return d;
+  const closes=hist.c.slice();
+  if(livePrice) closes[closes.length-1]=livePrice; // last bar = live price
+  d.prices=closes;
+  d.price=closes[closes.length-1];
+  d.prevClose=closes[closes.length-2];
+  d.changePct=(d.price/d.prevClose-1)*100;
+  const rh=hist.h.slice(-20), rl=hist.l.slice(-20);
+  const hi20=Math.max(...rh), lo20=Math.min(...rl);
+  d.support1=lo20; d.support2=lo20*0.97; d.resistance1=hi20; d.resistance2=hi20*1.03;
+  d.wk52High=Math.max(...hist.h); d.wk52Low=Math.min(...hist.l);
+  d.realHistory=true; d.histHL={h:hist.h.slice(), l:hist.l.slice()};
+  const st=computeSupertrend(closes,0.15); d.trendLine=st.trendLine;
+  d.horizons=buildHorizons(d);
+  const sw=d.horizons.swing;
+  d.rsi=sw.rsi; d.supertrendBull=sw.supertrendBull; d.macdBull=sw.macdBull; d.macdHist=sw.macdHist;
+  d.score=sw.score; d.signal=sw.signal; d.signalLabel=sw.signalLabel;
+  return d;
+}
+async function fetchScanHistory(symbols){ // symbols = app symbols (RELIANCE, NIFTY...)
+  const need=symbols.filter(s=>!window.REAL_HIST[s]);
+  for(let i=0;i<need.length;i+=40){
+    const batch=need.slice(i,i+40);
+    try{
+      const resp=await fetch('/api/scan-history?symbols='+encodeURIComponent(batch.map(yahooSymbol).join(',')),{cache:'no-store'});
+      const data=await resp.json();
+      batch.forEach(s=>{ const r=data[yahooSymbol(s)]; if(r && r.c) window.REAL_HIST[s]=r; });
+    }catch(e){}
+  }
+}
+
 window.SCREENER_LIVE = window.SCREENER_LIVE || {}; // symbol -> {price, prevClose}
 function signalCounts(){
   return STOCKS.concat(INDEX_ROWS_LIST).map(s=>{
     const d = generateStockData(s[0],s[1],s[2],s[3]);
     const live = window.SCREENER_LIVE[s[0]];
+    const hist = window.REAL_HIST[s[0]];
+    if(hist){
+      applyRealHistory(d, hist, live && live.price);
+      if(live && live.prevClose) d.changePct = (d.price/live.prevClose-1)*100;
+      return d;
+    }
     if(live && live.price){
       d.price = live.price;
       if(live.prevClose) d.changePct = (d.price/live.prevClose-1)*100;
@@ -1716,6 +1823,7 @@ function signalCounts(){
 async function scanScreenerLive(){
   const btn=document.getElementById('screenerScanBtn');
   if(btn) btn.textContent='Scanning\u2026';
+  try{ await fetchScanHistory(STOCKS.concat(INDEX_ROWS_LIST).map(s=>s[0])); }catch(e){}
   try{
     const symbols = STOCKS.concat(INDEX_ROWS_LIST).map(s=>yahooSymbol(s[0])).join(',');
     const resp = await fetch('/api/quotes?symbols='+encodeURIComponent(symbols), {cache:'no-store'});
@@ -1783,6 +1891,8 @@ function renderScreener(){
   const minRevGrowth=parseFloat(document.getElementById('fMinRevGrowth').value);
   const dividendOnly=document.getElementById('fDividendOnly').checked;
 
+  const realN=all.filter(d=>d.realHistory).length;
+  window.__screenerRealNote = realN ? `signals from <b>real price history</b> for ${realN}` : '<span style="color:var(--amber)">signals SIMULATED &mdash; press Scan now to load real price history</span>';
   document.getElementById('screenerRsiHeader').textContent = 'RSI ('+HORIZON_LABELS[displayHorizon]+')';
   document.getElementById('screenerSignalHeader').textContent = combo.length>1 ? 'Signal ('+combo.map(h=>HORIZON_LABELS[h]).join('+')+' agree)' : 'Signal ('+HORIZON_LABELS[displayHorizon]+')';
 
@@ -1808,7 +1918,7 @@ function renderScreener(){
     return true;
   });
   rows.sort((a,b)=>b.horizons[displayHorizon].score-a.horizons[displayHorizon].score);
-  document.getElementById('screenerCount').textContent=`${rows.length} of ${all.length} stocks &mdash; click a row to open it`;
+  document.getElementById('screenerCount').innerHTML=`${rows.length} of ${all.length} &mdash; ${window.__screenerRealNote}`;
   const body=document.getElementById('screenerBody');
   body.innerHTML = rows.map(d=>{
     const h = d.horizons[displayHorizon];
@@ -3408,6 +3518,7 @@ updateStrategyDesc();
   else { selectStock('NIFTY'); }  // default page: Nifty 50 so no panel is ever blank
 })();
 refreshTickerLive();
+setTimeout(()=>{ try{ scanScreenerLive(); }catch(e){} }, 4000); // load real price history for signals in the background
 </script>
 </body>
 </html>

@@ -277,6 +277,39 @@ app.get('/api/history/:symbol', async (req, res) => {
   }
 });
 
+
+// ============================================================
+// REAL DAILY HISTORY FOR SIGNALS (batched, cached 30 min)
+// The screener/stock signals are computed from these real closes
+// instead of the seeded demo price series.
+// ============================================================
+const scanHistCache = {};
+const SCAN_HIST_TTL = 30 * 60 * 1000;
+async function getScanHistory(sym) {
+  const c = scanHistCache[sym];
+  if (c && Date.now() - c.time < SCAN_HIST_TTL) return c.data;
+  const parsed = await getChartData(sym, '1y', '1d');
+  if (!parsed || !parsed.series || parsed.series.length < 30) throw new Error('insufficient history');
+  const ser = parsed.series.slice(-250);
+  const data = { c: ser.map(p => p.c), h: ser.map(p => p.h), l: ser.map(p => p.l), v: ser.map(p => p.v), t: ser.map(p => p.t) };
+  scanHistCache[sym] = { data, time: Date.now() };
+  return data;
+}
+app.get('/api/scan-history', async (req, res) => {
+  const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 60);
+  if (!symbols.length) return res.status(400).json({ error: 'symbols required' });
+  const out = {};
+  let i = 0;
+  async function worker() {
+    while (i < symbols.length) {
+      const sym = symbols[i++];
+      try { out[sym] = await getScanHistory(sym); } catch (e) { out[sym] = { error: e.message }; }
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, worker));
+  res.json(out);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================

@@ -4175,16 +4175,16 @@ const PatternEngine = (function(){
     cont:{name:'Continuation Pattern',bias:'Neutral',
       brief:'Sharp move, then a tight pause that usually resolves in the same direction.',
       full:{what:'A strong impulse ("pole") followed by a shallow, low-range pause. Buyers (or sellers) are digesting the move rather than reversing it.',
-        form:'Impulse of at least ~6% (or 3&times; ATR) in under 30 bars, then 5+ bars of consolidation whose range is under 60% of the impulse and that retraces no more than 61.8% of it.',
+        form:'Impulse of at least ~8% (or 4&times; ATR) in under 25 bars, then 5&ndash;25 bars of consolidation that is quieter than the impulse, whose range is under 50% of it and that retraces no more than 50%.',
         entry:'Enter on a close beyond the consolidation high (uptrend) or low (downtrend), ideally on above-average volume.',
         stop:'Opposite side of the consolidation.',
         target:'Measured move: impulse height projected from the breakout level.',
-        fail:'A close through the far side of the pause, or a retrace deeper than 61.8%, cancels the setup.',
+        fail:'A close through the far side of the pause, or a retrace deeper than 50%, cancels the setup.',
         vol:'Volume should shrink during the pause and expand on the breakout.'}},
     dtop:{name:'Double Top',bias:'Bearish',
       brief:'Two similar highs with a dip between; a close under the dip confirms a reversal down.',
       full:{what:'Price fails twice at nearly the same resistance, showing buyers cannot push through. It is a bearish reversal after an advance.',
-        form:'Prior uptrend (&ge;6%). Two swing highs within ~1.5&ndash;4% of each other, at least 8 bars apart, with a pullback low (the neckline) between them.',
+        form:'Prior uptrend (net advance into the first top of at least ~8%, scaled up for volatile stocks). Two swing highs within ~1.5&ndash;4% of each other, 10&ndash;70 bars apart, with a pullback low (the neckline) between them that is no deeper than 25%.',
         entry:'Short/exit when price closes below the neckline (the low between the tops).',
         stop:'Just above the higher top.',
         target:'Top &minus; neckline height, projected down from the neckline.',
@@ -4193,7 +4193,7 @@ const PatternEngine = (function(){
     dbot:{name:'Double Bottom',bias:'Bullish',
       brief:'Two similar lows with a bounce between; a close above the bounce high confirms a reversal up.',
       full:{what:'Price finds support twice at almost the same level, showing sellers are exhausted. A bullish reversal after a decline.',
-        form:'Prior downtrend (&ge;6%). Two swing lows within ~1.5&ndash;4% of each other, at least 8 bars apart, with a rally high (neckline) between them.',
+        form:'Prior downtrend (net decline into the first low of at least ~8%, scaled up for volatile stocks). Two swing lows within ~1.5&ndash;4% of each other, 10&ndash;70 bars apart, with a rally high (neckline) between them that is no deeper than 25%.',
         entry:'Buy when price closes above the neckline (the high between the bottoms).',
         stop:'Just below the lower bottom.',
         target:'Neckline + (neckline &minus; bottom), projected up.',
@@ -4215,7 +4215,7 @@ const PatternEngine = (function(){
     hs:{name:'Head and Shoulders',bias:'Bearish',
       brief:'Left shoulder, higher head, right shoulder; a close under the neckline confirms a top.',
       full:{what:'The classic bearish reversal: three peaks, the middle one highest. Each rally is weaker than the last.',
-        form:'Prior uptrend. Head at least ~2% above both shoulders; shoulders within ~5&ndash;6% of each other; two troughs form the neckline (may slope).',
+        form:'Prior uptrend. Head at least ~3% above both shoulders; shoulders within ~5&ndash;6% of each other; two troughs form the neckline (may slope).',
         entry:'Close below the neckline.',stop:'Above the right shoulder.',
         target:'Head &minus; neckline (measured at the head) projected down from the break.',
         fail:'Price closing back above the right shoulder.',
@@ -4223,14 +4223,14 @@ const PatternEngine = (function(){
     ihs:{name:'Inverted Head and Shoulders',bias:'Bullish',
       brief:'Left shoulder, lower head, right shoulder; a close above the neckline confirms a bottom.',
       full:{what:'The bullish mirror of head &amp; shoulders: three troughs, the middle deepest, after a decline.',
-        form:'Prior downtrend. Head at least ~2% below both shoulders; shoulders within ~5&ndash;6%; two rally highs form the neckline.',
+        form:'Prior downtrend. Head at least ~3% below both shoulders; shoulders within ~5&ndash;6%; two rally highs form the neckline.',
         entry:'Close above the neckline.',stop:'Below the right shoulder.',
         target:'Neckline &minus; head depth projected up from the break.',
         fail:'A close back under the right shoulder.',vol:'Volume should pick up on the breakout.'}},
     cup:{name:'Cup and Handle',bias:'Bullish',
       brief:'Rounded U-shaped base plus a small pullback (handle); a close above the rim triggers.',
       full:{what:'A base where price rounds out after a drop and returns to the prior high, then dips slightly (handle) before breaking out.',
-        form:'Cup 25&ndash;200 bars long, 10&ndash;50% deep, rounded (parabolic fit) with rims within ~10%. Handle pulls back no more than half the cup depth and stays in the upper half of the cup.',
+        form:'Cup 30&ndash;200 bars long, 10&ndash;50% deep, clearly rounded (parabolic fit R&sup2; &ge; 0.7) with rims within ~10%. Handle pulls back no more than half the cup depth and stays in the upper half of the cup.',
         entry:'Close above the rim (highest of the two rims).',stop:'Below the handle low.',
         target:'Rim + cup depth.',fail:'Handle falls below the cup midpoint, or a V-shaped cup (no rounding).',
         vol:'Volume dries up in the handle and expands on the breakout.'}},
@@ -4243,14 +4243,14 @@ const PatternEngine = (function(){
     bflag:{name:'Bullish Flag',bias:'Bullish',
       brief:'Sharp rally (pole) then a small downward-sloping channel; breakout above it resumes up.',
       full:{what:'A brief, orderly pullback after a fast rally. The flag is a small parallel channel that drifts down.',
-        form:'Pole &ge; max(8%, 3.5&times;ATR) within 30 bars; 5&ndash;30 flag bars sloping flat-to-down, retracing under 50% of the pole, roughly parallel edges.',
+        form:'Pole &ge; max(10%, 5&times;ATR) within 25 bars; 5&ndash;28 flag bars sloping flat-to-down, retracing under 45% of the pole, roughly parallel edges.',
         entry:'Close above the flag&apos;s upper line.',stop:'Below the flag low.',
         target:'Pole height added to the breakout.',fail:'A close below the lower line or retrace over 50%.',
         vol:'Falling volume in the flag, rising on breakout.'}},
     brflag:{name:'Bearish Flag',bias:'Bearish',
       brief:'Sharp drop (pole) then a small upward-sloping channel; breakdown below it resumes down.',
       full:{what:'A brief relief bounce after a fast fall, drifting up in a small parallel channel.',
-        form:'Pole down &ge; max(8%, 3.5&times;ATR) within 30 bars; 5&ndash;30 bars flat-to-up, retracing under 50% of the pole.',
+        form:'Pole down &ge; max(10%, 5&times;ATR) within 25 bars; 5&ndash;28 bars flat-to-up, retracing under 45% of the pole.',
         entry:'Close below the lower line.',stop:'Above the flag high.',
         target:'Pole height subtracted from the breakdown.',fail:'A close above the upper line.',vol:'Low volume in the bounce, heavy on breakdown.'}},
     brect:{name:'Bullish Rectangle',bias:'Bullish',
@@ -4274,7 +4274,7 @@ const PatternEngine = (function(){
     bsym:{name:'Bullish Symmetrical Triangle',bias:'Bullish',
       brief:'Lower highs and higher lows squeezing after an uptrend; upside break continues it.',
       full:{what:'Volatility contracts as both highs and lows converge; in an uptrend the break usually goes with the trend.',
-        form:'Falling upper line and rising lower line, 2+ touches each, width shrinking by 25%+; prior uptrend.',
+        form:'Falling upper line and rising lower line, 5+ swing touches in total (each line anchored near both ends), width shrinking by 25%+; prior uptrend.',
         entry:'Close above the upper line.',stop:'Below the lower line.',
         target:'Widest part of the triangle added to the breakout.',fail:'Close below the lower line.',
         vol:'Volume contracts into the apex, expands on the break.'}},
@@ -4292,13 +4292,13 @@ const PatternEngine = (function(){
     asc:{name:'Bullish Ascending Triangle',bias:'Bullish',
       brief:'Flat resistance with rising lows; buyers keep coming, breakout above resistance is the trigger.',
       full:{what:'Sellers defend one price while buyers pay higher each dip &mdash; pressure builds under resistance.',
-        form:'Flat upper line (2+ touches), rising lower line (2+ touches), width shrinking 25%+.',
+        form:'Flat upper line, steadily rising lower line, 5+ swing touches in total, width shrinking 25%+.',
         entry:'Close above the flat resistance.',stop:'Below the latest higher low.',
         target:'Triangle height added to the breakout.',fail:'Close below the rising support.',vol:'Expansion on the breakout.'}},
     desc:{name:'Bearish Descending Triangle',bias:'Bearish',
       brief:'Flat support with falling highs; sellers keep coming, breakdown below support is the trigger.',
       full:{what:'Buyers defend one price while sellers offer lower each rally.',
-        form:'Flat lower line (2+ touches), falling upper line (2+ touches), width shrinking 25%+.',
+        form:'Flat lower line, steadily falling upper line, 5+ swing touches in total, width shrinking 25%+.',
         entry:'Close below the flat support.',stop:'Above the latest lower high.',
         target:'Triangle height subtracted from the breakdown.',fail:'Close above the falling resistance.',vol:'Expansion on the breakdown.'}}
   };
@@ -4365,7 +4365,7 @@ const PatternEngine = (function(){
 
   // ---------- top-type reversal patterns (double/triple top, H&S) ; mirrored => bottoms ----------
   function detTops(ctx){
-    const {C,P,n,tolEq}=ctx, out=[]; const bull=ctx.s<0; const H=(k)=>P[k], last=n-1;
+    const {C,P,n,tolEq,minTrend}=ctx, out=[]; const bull=ctx.s<0; const H=(k)=>P[k], last=n-1;
     const isH=k=>k>=0&&P[k]&&P[k].type==='H', isL=k=>k>=0&&P[k]&&P[k].type==='L';
     function finish(key,tops,neckFn,stopLevel,hgtPair,neckStartI,fit,extraLines,note){
       const lastTop=tops[tops.length-1], hi=Math.max(...tops.map(t=>t.p));
@@ -4374,7 +4374,7 @@ const PatternEngine = (function(){
       // invalidation: close above highest top before the break
       const inv=firstAfter(C,lastTop.i+1,(c,j)=>c.c>hi*1.01);
       if(inv>=0 && (brk<0 || inv<brk)){
-        if(last-inv>40) return;
+        if(last-inv>25||key==='dtop'||key==='dbot') return; // only triple tops/bottoms & H&S report failures; a failed double is just a breakout
         out.push(mk(ctx,{key,failed:true,brk:null,i0:tops[0].i,i1:inv,entry:null,stop:null,target:null,fit:0.5,aligned:false,vol:null,
           note:'Price closed beyond the '+(ctx.s<0?'bottoms':'tops')+' instead of breaking the neckline, so this reversal failed. Read it as a range/continuation in the direction of the break.',
           lines:[{i1:neckStartI,p1:neckFn(neckStartI),i2:inv,p2:neckFn(inv),label:'Neckline'}].concat(extraLines)}));
@@ -4400,7 +4400,7 @@ const PatternEngine = (function(){
         const h1=P[k-2],h2=P[k],l=P[k-1];
         const diff=Math.abs(h1.p-h2.p)/Math.max(h1.p,h2.p);
         const tripleAhead=isL(k-3)&&isH(k-4)&&Math.abs(P[k-4].p-h1.p)/h1.p<=tolEq&&P[k-4].i<h1.i;
-        if(diff<=tolEq && h2.i-h1.i>=8 && riseBefore(C,h1.i,40)>=0.06 && !tripleAhead){
+        if(diff<=tolEq && h2.i-h1.i>=10 && h2.i-h1.i<=70 && (Math.min(h1.p,h2.p)-l.p)/Math.min(h1.p,h2.p)<=0.25 && riseBefore(C,h1.i,40)>=minTrend && !tripleAhead){
           const hgt=Math.min(h1.p,h2.p)-l.p, neck=l.p;
           finish(bull?'dbot':'dtop',[h1,h2],()=>neck,0,[Math.max(h1.p,h2.p),neck],h1.i,1-diff/tolEq,
             [{i1:h1.i,p1:h1.p,i2:h2.i,p2:h2.p,label:bull?'Bottoms':'Tops',dash:true}],
@@ -4412,7 +4412,7 @@ const PatternEngine = (function(){
         const a=P[k-4],b=P[k-2],c=P[k], l1=P[k-3], l2=P[k-1];
         const mx=Math.max(a.p,b.p,c.p), mn=Math.min(a.p,b.p,c.p), spread=(mx-mn)/mx;
         const lspread=Math.abs(l1.p-l2.p)/Math.max(l1.p,l2.p);
-        if(spread<=tolEq*1.2 && lspread<=tolEq*2.5 && b.i-a.i>=6 && c.i-b.i>=6 && riseBefore(C,a.i,40)>=0.06){
+        if(spread<=tolEq*1.2 && lspread<=tolEq*2.5 && b.i-a.i>=6 && c.i-b.i>=6 && riseBefore(C,a.i,40)>=minTrend){
           const neck=Math.min(l1.p,l2.p);
           finish(bull?'tbot':'ttop',[a,b,c],()=>neck,0,[mx,neck],a.i,1-spread/(tolEq*1.2),
             [{i1:a.i,p1:a.p,i2:c.i,p2:c.p,label:bull?'Bottoms':'Tops',dash:true}],'Three peaks within '+(spread*100).toFixed(1)+'%.');
@@ -4424,7 +4424,7 @@ const PatternEngine = (function(){
         const shDiff=Math.abs(ls.p-rs.p)/hd.p, headUp=(hd.p-Math.max(ls.p,rs.p))/hd.p;
         const tilt=Math.abs(t1.p-t2.p)/Math.max(t1.p,t2.p);
         const tl=(hd.i-ls.i)/Math.max(1,(rs.i-hd.i));
-        if(hd.p>ls.p&&hd.p>rs.p&&headUp>=0.02&&shDiff<=0.06&&tilt<=0.08&&tl>=0.4&&tl<=2.5&&riseBefore(C,ls.i,40)>=0.06){
+        if(hd.p>ls.p&&hd.p>rs.p&&headUp>=Math.max(0.03,0.7*ctx.dev)&&shDiff<=0.06&&tilt<=0.08&&tl>=0.4&&tl<=2.5&&riseBefore(C,ls.i,40)>=minTrend){
           const slope=(t2.p-t1.p)/(t2.i-t1.i);
           const neckFn=j=>t1.p+slope*(j-t1.i);
           const height=[hd.p,neckFn(hd.i)];
@@ -4443,12 +4443,12 @@ const PatternEngine = (function(){
     const {C,P,n}=ctx, out=[]; const last=n-1;
     for(let x=0;x<P.length;x++){ const a=P[x]; if(a.type!=='H') continue;
       for(let y=x+1;y<P.length;y++){ const c=P[y]; if(c.type!=='H') continue;
-        const w=c.i-a.i; if(w<25||w>200) continue;
+        const w=c.i-a.i; if(w<30||w>200) continue;
         if(c.p<a.p*0.9||c.p>a.p*1.03) continue;
         let lowI=a.i, low=Infinity; for(let j=a.i;j<=c.i;j++) if(C[j].l<low){low=C[j].l;lowI=j;}
         const rim=Math.min(a.p,c.p), depth=(rim-low)/rim; if(depth<0.10||depth>0.5) continue;
         const pos=(lowI-a.i)/w; if(pos<0.25||pos>0.75) continue;
-        const q=quadFit(C.slice(a.i,c.i+1).map(z=>z.c)); if(!q||q.a<=0||q.r2<0.55||q.vertex<0.2||q.vertex>0.8) continue;
+        const q=quadFit(C.slice(a.i,c.i+1).map(z=>z.c)); if(!q||q.a<=0||q.r2<0.7||q.vertex<0.2||q.vertex>0.8) continue;
         // no bar inside the cup may close far above the rims
         const rimMax=Math.max(a.p,c.p); let bad=false; for(let j=a.i;j<=c.i;j++) if(C[j].c>rimMax*1.03){bad=true;break;} if(bad) continue;
         // handle
@@ -4483,13 +4483,18 @@ const PatternEngine = (function(){
   // ---------- flags & generic continuation (up orientation; mirrored = bearish) ----------
   function detFlags(ctx){
     const {C,P,n,atrPct}=ctx, out=[]; const bull=ctx.s>0; const last=n-1;
-    for(let k=0;k+1<P.length;k++){
-      const B=P[k],T=P[k+1]; if(B.type!=='L'||T.type!=='H') continue;
+    for(let k=0;k<P.length;k++){
+      const T=P[k]; if(T.type!=='H') continue;
+      // pole base = lowest low in the 30 bars before the top (robust to drifting pivots)
+      let bi=Math.max(0,T.i-30), bl=Infinity; for(let j=Math.max(0,T.i-30);j<T.i;j++) if(C[j].l<bl){bl=C[j].l;bi=j;}
+      if(bl===Infinity) continue;
+      { const thr=bl+0.2*(T.p-bl); for(let j=T.i-1;j>=bi;j--){ if(C[j].l<=thr){ bi=j; break; } } } // impulse really starts at the last bar still near the base
+      const B={i:bi,p:bl,type:'L'};
       const poleAbs=T.p-B.p, rise=poleAbs/B.p, pb=T.i-B.i;
-      if(pb<3||pb>30) continue;
+      if(pb<3||pb>25) continue;
       // ---- flag ----
-      if(rise>=Math.max(0.08,3.5*atrPct) && rise/pb>=0.004){
-        const start=T.i+1; const maxE=Math.min(last,T.i+35);
+      if(rise>=Math.max(0.10,5*atrPct) && rise/pb>=0.005){
+        const start=T.i+1; const maxE=Math.min(last,T.i+28);
         let brk=-1, e=maxE, ok=false, chan=null;
         for(let j=start+5;j<=maxE;j++){
           const ch=channel(C,start,j-1); if(!ch) break;
@@ -4502,7 +4507,7 @@ const PatternEngine = (function(){
           let mnL=Infinity,mxH=-Infinity; for(let j=start;j<=e;j++){mnL=Math.min(mnL,C[j].l);mxH=Math.max(mxH,C[j].h);}
           const retr=(T.p-mnL)/poleAbs, sM=(chan.sH+chan.sL)/2, w0=chan.up(start)-chan.lo(start), w1=chan.up(e)-chan.lo(e);
           const ratio=w0>0?w1/w0:1;
-          if(retr<=0.5 && sM<=0.0004 && sM>=-0.012 && (mxH-mnL)<=0.5*poleAbs && ratio>=0.5 && ratio<=1.5 && (brk>=0? last-brk<=20 : last-T.i<=35)){
+          if(retr<=0.45 && sM<=0.0004 && sM>=-0.012 && (mxH-mnL)<=0.5*poleAbs && ratio>=0.5 && ratio<=1.5 && (brk>=0? last-brk<=15 : last-T.i<=28)){
             const fit=clamp(1-chan.dev/0.25,0,1)*0.6+clamp(1-retr/0.5,0,1)*0.4;
             const bLevel=brk>=0?chan.up(brk):chan.up(last);
             out.push(mk(ctx,{key:bull?'bflag':'brflag',brk:brk>=0?brk:null,i0:B.i,i1:brk>=0?brk:last,entry:bLevel,stop:mnL*0.995,hgt:[T.p,B.p],tdir:1,
@@ -4514,8 +4519,8 @@ const PatternEngine = (function(){
         }
       }
       // ---- generic continuation ----
-      if(rise>=Math.max(0.06,3*atrPct)){
-        const start=T.i+1; if(last-T.i<5||last-T.i>40) continue;
+      if(rise>=Math.max(0.08,4*atrPct)){
+        const start=T.i+1; if(last-T.i<5||last-T.i>30) continue;
         let brk=firstAfter(C,start+2,(z)=>z.c>T.p*1.001 && false);
         // consolidation = bars after T until first close above the running consolidation high (breakout)
         let cHi=-Infinity, cLo=Infinity, bIdx=-1;
@@ -4526,7 +4531,9 @@ const PatternEngine = (function(){
         const e=bIdx>=0?bIdx-1:last; if(e-start+1<5) continue;
         cHi=-Infinity;cLo=Infinity; for(let j=start;j<=e;j++){cHi=Math.max(cHi,C[j].h);cLo=Math.min(cLo,C[j].l);}
         const retr=(T.p-cLo)/poleAbs;
-        if(retr<=0.618 && (cHi-cLo)<=0.6*poleAbs && (bIdx<0 || last-bIdx<=20)){
+        let pr=0,pn=0; for(let j=Math.max(0,B.i);j<=T.i;j++){pr+=C[j].h-C[j].l;pn++;} let cr=0,cn=0; for(let j=start;j<=e;j++){cr+=C[j].h-C[j].l;cn++;}
+        const calm=cn>0&&pn>0&&(cr/cn)<=0.85*(pr/pn); // the pause must be quieter than the impulse
+        if(calm && retr<=0.5 && (cHi-cLo)<=0.5*poleAbs && e-start+1<=25 && (bIdx<0 || last-bIdx<=15)){
           const fit=clamp(1-retr/0.618,0,1)*0.5+clamp(1-(cHi-cLo)/(0.6*poleAbs),0,1)*0.5;
           out.push(mk(ctx,{key:'cont',bias:bull?'Bullish':'Bearish',brk:bIdx>=0?bIdx:null,i0:B.i,i1:bIdx>=0?bIdx:last,entry:Math.max(cHi,T.p),stop:cLo*0.995,hgt:[T.p,B.p],tdir:1,
             fit,aligned:true,vol:bIdx>=0?volRatio(C,bIdx):null,
@@ -4551,7 +4558,7 @@ const PatternEngine = (function(){
 
   // ---------- pivot channels: rectangle, symmetrical / ascending / descending triangles ----------
   function detChannels(ctx){
-    const {C,P,n,dev}=ctx, out=[]; const last=n-1; const tl=Math.max(0.012,dev*0.4);
+    const {C,P,n,dev}=ctx, out=[]; const last=n-1; const tl=Math.max(0.01,dev*0.3);
     const idx=[]; for(let k=0;k<P.length;k++) if(P[k].i>=last-140) idx.push(k);
     for(let ai=0;ai<idx.length;ai++) for(let bi=ai+3;bi<idx.length&&bi<=ai+9;bi++){
       const seg=idx.slice(ai,bi+1).map(k=>P[k]);
@@ -4560,14 +4567,18 @@ const PatternEngine = (function(){
       const a=seg[0], b=seg[seg.length-1]; const L=b.i-a.i; if(L<15) continue;
       const rh=linreg(hs.map(p=>p.i),hs.map(p=>p.p)), rl=linreg(ls.map(p=>p.i),ls.map(p=>p.p));
       const up=j=>rh.m*j+rh.b, lo=j=>rl.m*j+rl.b;
+      // each line must be anchored by touches near BOTH ends of the pattern (no long unsupported stretches)
+      { const gapMax=0.35*L; let bad=false;
+        for(const arr of [hs,ls]){ if(arr[0].i-a.i>gapMax||b.i-arr[arr.length-1].i>gapMax){bad=true;break;} }
+        if(bad) continue; }
       const px=C[b.i].c; let ok=true;
       for(const p of hs) if(Math.abs(p.p-up(p.i))/px>tl){ok=false;break;} if(!ok) continue;
       for(const p of ls) if(Math.abs(p.p-lo(p.i))/px>tl){ok=false;break;} if(!ok) continue;
       // price must respect the lines between first and last pivot
       for(let j=a.i;j<=b.i;j++){ if(C[j].c>up(j)*(1+tl*0.7)||C[j].c<lo(j)*(1-tl*0.7)){ok=false;break;} } if(!ok) continue;
       const w0=up(a.i)-lo(a.i), w1=up(b.i)-lo(b.i); if(w0<=0||w1<=0) continue;
-      const height0=w0, hp=w0/px; if(hp<0.03) continue;
-      const moveH=rh.m*L/px, moveL=rl.m*L/px, flatT=0.025, slopeT=0.03;
+      const height0=w0, hp=w0/px; if(hp<Math.max(0.04,2*ctx.atrPct)) continue;
+      const moveH=rh.m*L/px, moveL=rl.m*L/px, flatT=0.025, slopeT=0.04;
       const flatH=Math.abs(moveH)<=flatT, flatL=Math.abs(moveL)<=flatT;
       const shrink=w1/w0;
       let kind=null;
@@ -4576,9 +4587,14 @@ const PatternEngine = (function(){
       else if(flatH&&moveL>=slopeT&&shrink<=0.75) kind='asc';
       else if(flatL&&moveH<=-slopeT&&shrink<=0.75) kind='desc';
       if(!kind) continue;
+      const inc=arr=>arr.every((q,i)=>i===0||q.p>arr[i-1].p), dec=arr=>arr.every((q,i)=>i===0||q.p<arr[i-1].p);
+      if(hs.length+ls.length<5) continue;
+      if(kind==='sym'&&!(dec(hs)&&inc(ls))) continue;
+      if(kind==='asc'&&!inc(ls)) continue;
+      if(kind==='desc'&&!dec(hs)) continue;
       // breakout
       let brk=-1, dirBrk=0;
-      for(let j=b.i+1;j<=last;j++){ if(C[j].c>up(j)*1.002){brk=j;dirBrk=1;break;} if(C[j].c<lo(j)*0.998){brk=j;dirBrk=-1;break;} }
+      for(let j=b.i+1;j<=last;j++){ if(C[j].c>up(j)*1.006){brk=j;dirBrk=1;break;} if(C[j].c<lo(j)*0.994){brk=j;dirBrk=-1;break;} }
       if(brk>=0 ? last-brk>20 : last-b.i>25) continue;
       // don't keep forming triangles whose apex is already behind us
       if(brk<0&&kind!=='rect'&&(up(last)-lo(last))<=0) continue;
@@ -4596,7 +4612,7 @@ const PatternEngine = (function(){
       const long=bias==='Bullish', short=bias==='Bearish';
       const entry=brk>=0?(dirBrk>0?upEnd:loEnd):(short?loEnd:upEnd);
       const target=short||(bias==='Neutral'&&false)?entry-height0:entry+height0;
-      const stop=short?upEnd:loEnd;
+      const stop=short?Math.max(hs[hs.length-1].p,entry*1.01):(long?Math.min(ls[ls.length-1].p,entry*0.99):loEnd); // last swing on the far side, never closer than 1%
       const touches=hs.length+ls.length;
       const fit=clamp(1-(hs.reduce((s,p)=>s+Math.abs(p.p-up(p.i)),0)+ls.reduce((s,p)=>s+Math.abs(p.p-lo(p.i)),0))/touches/px/tl,0,1)*0.6+clamp((touches-4)/4,0,1)*0.4;
       const aligned=(bias==='Bullish'&&prior>=0.04)||(bias==='Bearish'&&prior<=-0.04)||kind==='asc'||kind==='desc';
@@ -4629,16 +4645,16 @@ const PatternEngine = (function(){
     const C0=(candles||[]).filter(x=>x&&x.h>0&&x.l>0&&x.c>0).map(x=>({t:x.t,o:x.o||x.c,h:x.h,l:x.l,c:x.c,v:x.v||0}));
     if(C0.length<40) return {patterns:[],bars:C0.length,reason:'Need at least 40 bars of history.'};
     const A=atrArr(C0,14), atrPct=A[A.length-1]/C0[C0.length-1].c;
-    const dev=clamp(1.8*atrPct,0.03,0.08), tolEq=clamp(dev*0.6,0.015,0.04);
+    const dev=clamp(2.4*atrPct,0.04,0.09), tolEq=clamp(dev*0.5,0.012,0.03), minTrend=Math.max(0.08,1.5*dev);
     const res=[];
     const K=C0[0].c*C0[0].c;
     const run=(C,s)=>{
-      const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),dev,tolEq,atrPct};
+      const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),dev,tolEq,atrPct,minTrend};
       res.push(...detTops(ctx),...detFlags(ctx));
       if(s>0) res.push(...detCup(ctx));
     };
     run(C0,1); run(mirror(C0,K),-1);
-    const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,dev),dev,tolEq,atrPct};
+    const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,Math.max(0.025,dev*0.6)),dev,tolEq,atrPct,minTrend}; // finer swings: triangle apexes contract below the main swing size
     res.push(...detChannels(ch));
     const patterns=dedupe(res).sort((a,b)=>(a.brk!=null?1:0)-(b.brk!=null?1:0)||b.conf-a.conf);
     return {patterns,bars:C0.length,dev,atrPct};
@@ -4698,7 +4714,7 @@ const PatternUI = (function(){
     const row=(k,v)=>'<div class="pat-x-row"><b>'+k+'</b><span>'+v+'</span></div>';
     return '<div class="pat-x">'+row('What it is',f.what)+row('How it forms',f.form)+row('Entry',f.entry)+row('Stop-loss',f.stop)+row('Target',f.target)+row('Fails when',f.fail)+row('Volume',f.vol)+
       (p.note?row('This chart',esc(p.note)):'')+
-      '<div class="metric-sub" style="margin-top:6px;">Detected by rule-based swing-point analysis &mdash; a screening aid, not a trade instruction. Confirm on the chart before acting.</div></div>';
+      '<div class="metric-sub" style="margin-top:6px;">Detected by rule-based swing-point analysis (thresholds scale with the stock&apos;s volatility) &mdash; a screening aid, not a trade instruction. Confirm on the chart before acting.</div></div>';
   }
 
   function render(){

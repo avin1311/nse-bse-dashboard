@@ -303,7 +303,7 @@
   <div class="grid cols-2" style="grid-template-columns:1fr;">
     <section id="sec-chart" class="panel">
       <div class="panel-head"><h3>Chart</h3>
-        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Our chart: live Upstox/Yahoo data, drawing tools, indicators, strategies with backtest">Pro chart</button><button class="pc-btn" data-mode="tv" title="Full TradingView chart: 100+ indicators, all drawing tools, templates">TradingView (full)</button></div>
+        <div class="pc-group" id="chartModeBtns"><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="TradingView's embeddable widget is not licensed for NSE/BSE data, so this opens the full TradingView chart in a new tab" style="text-decoration:none;">Open in TradingView ↗</a></div>
       </div>
       <div id="proChartRoot"></div>
       <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
@@ -3765,7 +3765,7 @@ const ProChart = (function(){
   }
 
   /* ---------- state ---------- */
-  const S = { d:null, sym:null, tf:lsGet('pcTf','5m'), type:lsGet('pcType','candles'), log:false, vol:lsGet('pcVol',true), mode:lsGet('pcMode','pro'),
+  const S = { d:null, sym:null, tf:lsGet('pcTf','5m'), type:lsGet('pcType','candles'), log:false, vol:lsGet('pcVol',true), mode:'pro',
               candles:[], indicators:lsGet('pcInds',[{t:'ema',p:20},{t:'ema',p:50}]), strat:null, stratParams:{}, drawings:[], tool:'cursor', sel:null, pending:null,
               upd:[], chart:null, main:null, volS:null, indSeries:{}, panes:{}, root:null, ro:null, lastRecalc:0, color:'#f0a93a', markers:[] };
   const root = ()=>document.getElementById('proChartRoot');
@@ -3893,6 +3893,7 @@ const ProChart = (function(){
     const r=root(); if(!r) return;
     if(typeof LightweightCharts==='undefined'){ r.innerHTML='<div class="metric-sub" style="padding:40px;text-align:center;">Loading chart library…</div>'; setTimeout(()=>{ if(window.CURRENT===d) mount(d); },800); return; }
     buildUI(); applyMode();
+    const lk=document.getElementById('tvOpenLink'); if(lk) lk.href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent(tvSymbol(S.sym));
     if(S.mode==='tv') return;
     reload();
   }

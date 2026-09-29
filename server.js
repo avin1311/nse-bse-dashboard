@@ -978,32 +978,29 @@ async function getUpstoxFundamentals(symbol) {
   const ratios = ratiosData.status === 'fulfilled' ? ratiosData.value : null;
   const profile = profileData.status === 'fulfilled' ? profileData.value : null;
 
+  // Real Upstox schema: key-ratios = [{name:'P/E', company_value:'20.15', sector_value:'12.46'}, ...]
+  // (values are strings, some with a % sign)
+  const pr = v => { if (v == null) return null; const n = parseFloat(String(v).replace(/[%,]/g, '')); return isNaN(n) ? null : n; };
+  const byName = {};
+  if (Array.isArray(ratios)) ratios.forEach(r => { if (r && r.name) byName[String(r.name).trim().toUpperCase()] = r; });
+  const cv = n => pr(byName[n]?.company_value);
+  const sv = n => pr(byName[n]?.sector_value);
+  if (!Array.isArray(ratios) && !profile) throw new Error('Upstox fundamentals unavailable for ' + symbol);
+
   const result = {
     symbol,
     isin,
-    // Key ratios
-    pe: ratios?.pe_ratio?.company ?? null,
-    peSector: ratios?.pe_ratio?.sector ?? null,
-    pb: ratios?.pb_ratio?.company ?? null,
-    pbSector: ratios?.pb_ratio?.sector ?? null,
-    roe: ratios?.roe?.company ?? null,
-    roeSector: ratios?.roe?.sector ?? null,
-    roce: ratios?.roce?.company ?? null,
-    roceSector: ratios?.roce?.sector ?? null,
-    roa: ratios?.roa?.company ?? null,
-    evEbitda: ratios?.ev_ebitda?.company ?? null,
-    debtEquity: ratios?.debt_to_equity?.company ?? null,
-    currentRatio: ratios?.current_ratio?.company ?? null,
-    eps: ratios?.eps ?? null,
-    dividendYield: ratios?.dividend_yield ?? null,
-    // Company profile
-    marketCap: profile?.market_cap ?? null,
+    pe: cv('P/E'), peSector: sv('P/E'),
+    pb: cv('P/B'), pbSector: sv('P/B'),
+    roe: cv('ROE'), roeSector: sv('ROE'),
+    roce: cv('ROCE'), roceSector: sv('ROCE'),
+    roa: cv('ROA'), roaSector: sv('ROA'),
+    evEbitda: cv('EV/EBITDA'), evEbitdaSector: sv('EV/EBITDA'),
+    // Not provided by Upstox's fundamentals API -> client falls back to simulated
+    marketCap: null, debtEquity: null, currentRatio: null, eps: null, dividendYield: null,
     sector: profile?.sector ?? null,
-    industry: profile?.industry ?? null,
-    description: profile?.description ?? null,
-    founded: profile?.founded ?? null,
-    employees: profile?.total_employees ?? null,
-    website: profile?.website ?? null,
+    description: profile?.company_profile ?? null,
+    sectorMarketCapInr: profile?.sector_market_cap_inr?.formatted ?? null,
     source: 'upstox'
   };
 
@@ -1018,6 +1015,40 @@ app.get('/api/fundamentals/:symbol', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message, symbol: req.params.symbol });
   }
+});
+
+
+// ============================================================
+// REAL SHAREHOLDING PATTERN (Upstox /fundamentals/{isin}/share-holdings)
+// ============================================================
+const shareholdingCache = {};
+async function getUpstoxShareholding(symbol) {
+  const now = Date.now();
+  if (shareholdingCache[symbol] && now - shareholdingCache[symbol].time < FUNDAMENTALS_TTL) return shareholdingCache[symbol].data;
+  const instrumentKey = HARDCODED_EQ_KEYS[symbol] || (universeCache.data && universeCache.data.find(s => s.symbol === symbol)?.instrument_key);
+  const isin = isinFromKey(instrumentKey);
+  if (!isin) throw new Error('No ISIN found for ' + symbol);
+  const rows = await upstoxGet(`/fundamentals/${isin}/share-holdings`);
+  if (!Array.isArray(rows) || !rows.length) throw new Error('No shareholding data for ' + symbol);
+  const categories = {};
+  rows.forEach(r => {
+    if (!r || !r.category || !Array.isArray(r.history)) return;
+    const pt = p => { const d = new Date('1 ' + p); return isNaN(d) ? 0 : d.getTime(); };
+    categories[r.category] = r.history.map(h => ({ period: h.period, value: Number(h.value) })).sort((a, b) => pt(a.period) - pt(b.period));
+  });
+  const latest = {};
+  Object.keys(categories).forEach(k => {
+    const h = categories[k];
+    latest[k] = h.length ? h[h.length - 1].value : null;
+  });
+  const data = { symbol, isin, categories, latest, source: 'upstox' };
+  shareholdingCache[symbol] = { data, time: now };
+  return data;
+}
+
+app.get('/api/shareholding/:symbol', async (req, res) => {
+  try { res.json(await getUpstoxShareholding(req.params.symbol)); }
+  catch (e) { res.status(502).json({ error: e.message, symbol: req.params.symbol }); }
 });
 
 app.get('/api/upstox/fno/:index', async (req, res) => {

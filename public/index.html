@@ -72,6 +72,27 @@
   .seas-modal-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;width:min(1000px,100%);}
   .seas-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
   .fno-badge{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:4px;background:rgba(240,169,58,.18);color:var(--amber);border:1px solid rgba(240,169,58,.5);margin-left:5px;cursor:pointer;vertical-align:1px;}
+
+  .pc-top{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:8px;}
+  .pc-group{display:flex;gap:4px;align-items:center;flex-wrap:wrap;}
+  .pc-btn{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 9px;border-radius:6px;font-size:12px;cursor:pointer;}
+  .pc-btn:hover{border-color:var(--blue);} .pc-btn.on{border-color:var(--blue);color:var(--blue);background:rgba(61,139,253,.10);}
+  .pc-sel,.pc-num{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;}
+  .pc-num{width:64px;} .pc-color{width:30px;height:26px;padding:0;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;}
+  .pc-panel{background:rgba(127,127,127,.06);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;}
+  .pc-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px;}
+  .pc-chips{display:flex;flex-wrap:wrap;gap:6px;} .pc-chip{border:1px solid;border-radius:14px;padding:2px 10px;font-size:12px;} .pc-chip b{cursor:pointer;margin-left:6px;color:var(--text3);}
+  .pc-body{display:flex;gap:6px;align-items:stretch;}
+  .pc-tools{display:flex;flex-direction:column;gap:4px;} .pc-tool{width:34px;height:34px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;font-size:14px;}
+  .pc-tool:hover{border-color:var(--blue);} .pc-tool.on{border-color:var(--blue);color:var(--blue);background:rgba(61,139,253,.12);}
+  .pc-stage{position:relative;flex:1;min-width:0;}
+  .pc-main{width:100%;} .pc-canvas{position:absolute;left:0;top:0;pointer-events:none;z-index:5;}
+  .pc-legend{position:absolute;left:8px;top:6px;z-index:6;font-size:11.5px;color:var(--text);pointer-events:none;text-shadow:0 0 4px var(--bg,#0b0f17);}
+  .pc-legend span{color:var(--text3);}
+  .pc-pane{position:relative;border-top:1px solid var(--border);} .pc-pane-lbl{position:absolute;left:8px;top:2px;font-size:11px;color:var(--text2);z-index:4;}
+  .pc-res{margin-top:10px;} .pc-stats{font-size:12.5px;margin-bottom:6px;line-height:1.6;}
+  #sec-chart.pc-full{background:var(--bg,#0b0f17);padding:12px;overflow:auto;}
+  @media(max-width:700px){.pc-tools{flex-direction:row;flex-wrap:wrap;position:absolute;bottom:-44px;} .pc-body{margin-bottom:46px;}}
   .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;}
   .panel h3{font-size:13px;margin:0 0 2px;font-weight:600;}
   .panel .desc{font-size:11.5px;color:var(--text3);margin:0 0 12px;}
@@ -279,11 +300,13 @@
   <div class="grid cols-6" id="overviewGrid"></div>
   </section>
 
-  <div class="grid cols-2">
+  <div class="grid cols-2" style="grid-template-columns:1fr;">
     <section id="sec-chart" class="panel">
-      <div class="panel-head"><h3>Price chart with Supertrend</h3></div>
-      <p class="desc">Intraday close price with Supertrend overlay &mdash; green points trade above trend, red below. Uses real Yahoo Finance data when the local proxy server is running (see the status badge next to the price above), otherwise falls back to a simulated feed.</p>
-      <div class="chart-wrap" style="height:340px;"><div id="priceChart" style="width:100%;height:100%;"></div></div>
+      <div class="panel-head"><h3>Chart</h3>
+        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Our chart: live Upstox/Yahoo data, drawing tools, indicators, strategies with backtest">Pro chart</button><button class="pc-btn" data-mode="tv" title="Full TradingView chart: 100+ indicators, all drawing tools, templates">TradingView (full)</button></div>
+      </div>
+      <div id="proChartRoot"></div>
+      <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
     </section>
     <section id="sec-signal" class="panel">
       <div class="panel-head">
@@ -1485,58 +1508,8 @@ function syntheticCandlesFromCloses(prices){
   return candles;
 }
 function renderPriceChart(d){
-  const container=document.getElementById('priceChart');
-  if(!container) return;
-  if(charts.price && typeof charts.price.remove==='function'){ charts.price.remove(); charts.price=null; }
-  // Guard: if LightweightCharts hasn't loaded yet (slow CDN on first visit),
-  // show a placeholder and retry once the library is available.
-  if(typeof LightweightCharts==='undefined'){
-    container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:13px;">Loading chart library…</div>';
-    setTimeout(()=>{ if(window.CURRENT===d) renderPriceChart(d); }, 800);
-    return;
-  }
-  const chart = LightweightCharts.createChart(container, {
-    layout:{background:{color:'transparent'}, textColor:'#8a94a6'},
-    grid:{vertLines:{color:'#1f2733'}, horzLines:{color:'#1f2733'}},
-    rightPriceScale:{borderColor:'#1f2733'},
-    timeScale:{borderColor:'#1f2733', timeVisible:true, secondsVisible:false},
-    crosshair:{mode:LightweightCharts.CrosshairMode.Normal}
-  });
-  const candleSeries = chart.addCandlestickSeries({
-    upColor:'#26c281', downColor:'#ef5350', borderVisible:false,
-    wickUpColor:'#26c281', wickDownColor:'#ef5350'
-  });
-  const volumeSeries = chart.addHistogramSeries({
-    priceFormat:{type:'volume'}, priceScaleId:'', color:'#3d8bfd'
-  });
-  volumeSeries.priceScale().applyOptions({scaleMargins:{top:0.82, bottom:0}});
-  const supertrendSeries = chart.addLineSeries({color:'#f0a93a', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, crosshairMarkerVisible:false});
-
-  function paint(candles, trendVals){
-    candleSeries.setData(candles.map(c=>({time:c.time, open:c.open, high:c.high, low:c.low, close:c.close})));
-    if(candles[0] && candles[0].volume!=null){
-      volumeSeries.setData(candles.map(c=>({time:c.time, value:c.volume, color:c.close>=c.open?'rgba(38,194,129,.4)':'rgba(239,83,80,.4)'})));
-    }
-    if(trendVals) supertrendSeries.setData(candles.map((c,i)=>({time:c.time, value:trendVals[i]})));
-    chart.timeScale().fitContent();
-    charts.priceCandles = candles;
-    charts.priceCandleSeries = candleSeries;
-    charts.priceSupertrendSeries = supertrendSeries;
-  }
-
-  const fallbackCandles = syntheticCandlesFromCloses(d.prices);
-  paint(fallbackCandles, d.trendLine);
-
-  fetchYahooChart(d.symbol).then(q=>{
-    if(!q.series || q.series.length<10) throw new Error('insufficient real series');
-    if(window.CURRENT !== d) return;
-    const candles = q.series.map(p=>({time:Math.floor(p.t), open:p.o, high:p.h, low:p.l, close:p.c, volume:p.v}));
-    const closes = candles.map(c=>c.close);
-    const st = computeSupertrend(closes, 0.15);
-    paint(candles, st.trendLine);
-  }).catch(()=>{ /* stays on synthetic fallback */ });
-
-  charts.price = chart;
+  ProChart.mount(d);
+  charts.price={remove(){ ProChart.destroy(); }};
 }
 
 function renderSignal(d){
@@ -3353,16 +3326,7 @@ function refreshLiveDom(d){
   if(chg){ chg.className='chg '+(d.changePct>=0?'up':'down'); chg.innerHTML=`${d.changePct>=0?'&#9650;':'&#9660;'} ${Math.abs(d.changePct).toFixed(2)}%`; }
   renderOverview(d);
   renderSignal(d);
-  if(charts.priceCandleSeries && charts.priceCandles && charts.priceCandles.length){
-    const last = charts.priceCandles[charts.priceCandles.length-1];
-    last.close = d.price;
-    last.high = Math.max(last.high, d.price);
-    last.low = Math.min(last.low, d.price);
-    charts.priceCandleSeries.update(last);
-    if(charts.priceSupertrendSeries && d.trendLine && d.trendLine.length){
-      charts.priceSupertrendSeries.update({time:last.time, value:d.trendLine[d.trendLine.length-1]});
-    }
-  }
+  if(window.ProChart) ProChart.liveTick(d.price);
 }
 
 // ============================================================
@@ -3749,6 +3713,376 @@ function gotoOptionsFor(sym){
   if(sel){ populateOptionsUnderlyingList(); if(![...sel.options].some(o=>o.value===sym)){ const o=document.createElement('option'); o.value=sym; o.textContent=sym; sel.appendChild(o); } sel.value=sym; }
   document.getElementById('sec-options')?.scrollIntoView({behavior:'smooth'});
 }
+
+/* ============================================================
+   PRO CHART — drawing tools, indicators, strategies, timeframes,
+   plus an embedded full TradingView chart (toggle).
+   ============================================================ */
+const ProChart = (function(){
+  const IST = 19800;
+  const TF = {'1m':{r:'5d',i:'1m',l:'1m'},'5m':{r:'5d',i:'5m',l:'5m'},'15m':{r:'1mo',i:'15m',l:'15m'},'30m':{r:'1mo',i:'30m',l:'30m'},
+              '1h':{r:'6mo',i:'60m',l:'1h'},'1D':{r:'2y',i:'1d',l:'1D'},'1W':{r:'5y',i:'1wk',l:'1W'},'1M':{r:'max',i:'1mo',l:'1M'}};
+  const COLORS = ['#f0a93a','#3d8bfd','#a970ff','#26c281','#ef5350','#22d3ee','#ec4899','#84cc16'];
+  const lsGet=(k,def)=>{ try{ const v=localStorage.getItem(k); return v==null?def:JSON.parse(v); }catch(e){ return def; } };
+  const lsSet=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
+
+  /* ---------- indicator math ---------- */
+  const M = {
+    sma(v,p){ const o=[]; let s=0; for(let i=0;i<v.length;i++){ s+=v[i]; if(i>=p) s-=v[i-p]; o.push(i>=p-1?s/p:null);} return o; },
+    ema(v,p){ const o=[],k=2/(p+1); let e=null; for(let i=0;i<v.length;i++){ if(v[i]==null){o.push(null);continue;} if(i<p-1){o.push(null);continue;} if(e==null){ let s=0; for(let j=i-p+1;j<=i;j++) s+=v[j]; e=s/p; } else e=v[i]*k+e*(1-k); o.push(e);} return o; },
+    rsi(c,p){ const o=Array(c.length).fill(null); if(c.length<=p) return o; let g=0,l=0; for(let i=1;i<=p;i++){ const d=c[i]-c[i-1]; if(d>=0) g+=d; else l-=d; } g/=p; l/=p; o[p]=l===0?100:100-100/(1+g/l);
+      for(let i=p+1;i<c.length;i++){ const d=c[i]-c[i-1]; g=(g*(p-1)+(d>0?d:0))/p; l=(l*(p-1)+(d<0?-d:0))/p; o[i]=l===0?100:100-100/(1+g/l);} return o; },
+    macd(c,f,s,sg){ const ef=M.ema(c,f), es=M.ema(c,s); const line=c.map((_,i)=>ef[i]!=null&&es[i]!=null?ef[i]-es[i]:null);
+      const idx=[],vals=[]; line.forEach((v,i)=>{ if(v!=null){idx.push(i);vals.push(v);} }); const sv=M.ema(vals,sg); const sig=Array(c.length).fill(null); idx.forEach((ix,k)=>sig[ix]=sv[k]);
+      const hist=line.map((v,i)=>v!=null&&sig[i]!=null?v-sig[i]:null); return {line,sig,hist}; },
+    atr(h,l,c,p){ const o=[]; let a=null; for(let i=0;i<c.length;i++){ const tr=i===0?h[i]-l[i]:Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])); a=a==null?tr:(a*(p-1)+tr)/p; o.push(i>=p-1?a:null);} return o; },
+    supertrend(h,l,c,p,m){ const at=M.atr(h,l,c,p); const line=[],dir=[]; let fu=null,fl=null,up=true;
+      for(let i=0;i<c.length;i++){ if(at[i]==null){line.push(null);dir.push(null);continue;} const mid=(h[i]+l[i])/2, bu=mid+m*at[i], bl=mid-m*at[i]; const pu=fu,pl=fl;
+        fu=(pu==null||bu<pu||c[i-1]>pu)?bu:pu; fl=(pl==null||bl>pl||c[i-1]<pl)?bl:pl; if(up&&c[i]<fl) up=false; else if(!up&&c[i]>fu) up=true; line.push(up?fl:fu); dir.push(up?1:-1);} return {line,dir}; },
+    bb(c,p,k){ const mid=M.sma(c,p); const up=[],lo=[]; for(let i=0;i<c.length;i++){ if(mid[i]==null){up.push(null);lo.push(null);continue;} let s=0; for(let j=i-p+1;j<=i;j++) s+=(c[j]-mid[i])**2; const sd=Math.sqrt(s/p); up.push(mid[i]+k*sd); lo.push(mid[i]-k*sd);} return {mid,up,lo}; },
+    vwap(C){ const o=[]; let pv=0,vv=0,day=null; C.forEach(x=>{ const d=Math.floor(x.time/86400); if(d!==day){day=d;pv=0;vv=0;} const tp=(x.high+x.low+x.close)/3; pv+=tp*(x.volume||0); vv+=(x.volume||0); o.push(vv>0?pv/vv:null); }); return o; }
+  };
+
+  /* ---------- strategies (long-only, evaluated on the loaded candles) ---------- */
+  const cross=(a,b,i)=>a[i]!=null&&b[i]!=null&&a[i-1]!=null&&b[i-1]!=null;
+  const STRATS = {
+    ema:{name:'EMA crossover', params:[['fast',9],['slow',21]], run(C,p){ const c=C.map(x=>x.close), f=M.ema(c,p.fast), s=M.ema(c,p.slow), sg=[]; for(let i=1;i<c.length;i++){ if(!cross(f,s,i)) continue; if(f[i-1]<=s[i-1]&&f[i]>s[i]) sg.push({i,side:'buy'}); else if(f[i-1]>=s[i-1]&&f[i]<s[i]) sg.push({i,side:'sell'}); } return sg; }},
+    st:{name:'Supertrend', params:[['period',10],['mult',3]], run(C,p){ const st=M.supertrend(C.map(x=>x.high),C.map(x=>x.low),C.map(x=>x.close),p.period,p.mult), sg=[]; for(let i=1;i<C.length;i++){ if(st.dir[i]==null||st.dir[i-1]==null) continue; if(st.dir[i]===1&&st.dir[i-1]===-1) sg.push({i,side:'buy'}); if(st.dir[i]===-1&&st.dir[i-1]===1) sg.push({i,side:'sell'}); } return sg; }},
+    rsi:{name:'RSI reversion', params:[['period',14],['buy',30],['sell',65]], run(C,p){ const r=M.rsi(C.map(x=>x.close),p.period), sg=[]; for(let i=1;i<C.length;i++){ if(r[i]==null||r[i-1]==null) continue; if(r[i-1]<p.buy&&r[i]>=p.buy) sg.push({i,side:'buy'}); if(r[i-1]<p.sell&&r[i]>=p.sell) sg.push({i,side:'sell'}); } return sg; }},
+    macd:{name:'MACD crossover', params:[['fast',12],['slow',26],['signal',9]], run(C,p){ const m=M.macd(C.map(x=>x.close),p.fast,p.slow,p.signal), sg=[]; for(let i=1;i<C.length;i++){ if(!cross(m.line,m.sig,i)) continue; if(m.line[i-1]<=m.sig[i-1]&&m.line[i]>m.sig[i]) sg.push({i,side:'buy'}); else if(m.line[i-1]>=m.sig[i-1]&&m.line[i]<m.sig[i]) sg.push({i,side:'sell'}); } return sg; }},
+    bb:{name:'Bollinger reversion', params:[['period',20],['k',2]], run(C,p){ const c=C.map(x=>x.close), b=M.bb(c,p.period,p.k), sg=[]; for(let i=1;i<c.length;i++){ if(b.lo[i]==null||b.lo[i-1]==null) continue; if(c[i-1]>=b.lo[i-1]&&c[i]<b.lo[i]) sg.push({i,side:'buy'}); if(c[i-1]<b.mid[i-1]&&c[i]>=b.mid[i]) sg.push({i,side:'sell'}); } return sg; }}
+  };
+  function backtest(C,signals){
+    const trades=[]; let pos=null;
+    signals.forEach(s=>{ if(s.side==='buy'&&!pos) pos={i:s.i,p:C[s.i].close}; else if(s.side==='sell'&&pos){ trades.push({i0:pos.i,i1:s.i,p0:pos.p,p1:C[s.i].close,ret:(C[s.i].close/pos.p-1)*100}); pos=null; } });
+    let open=null; if(pos){ const last=C[C.length-1].close; open={i0:pos.i,p0:pos.p,p1:last,ret:(last/pos.p-1)*100}; }
+    const all=open?trades.concat([{...open,i1:C.length-1,open:true}]):trades;
+    let eq=1,peak=1,dd=0; all.forEach(t=>{ eq*=1+t.ret/100; peak=Math.max(peak,eq); dd=Math.min(dd,(eq/peak-1)*100); });
+    const wins=all.filter(t=>t.ret>0), losses=all.filter(t=>t.ret<=0);
+    const gw=wins.reduce((a,t)=>a+t.ret,0), gl=-losses.reduce((a,t)=>a+t.ret,0);
+    return {trades:all, n:all.length, win:all.length?wins.length/all.length*100:0, total:(eq-1)*100, bh:(C[C.length-1].close/C[0].close-1)*100, dd,
+            avgWin:wins.length?gw/wins.length:0, avgLoss:losses.length?-gl/losses.length:0, pf:gl>0?gw/gl:(gw>0?Infinity:0)};
+  }
+
+  /* ---------- state ---------- */
+  const S = { d:null, sym:null, tf:lsGet('pcTf','5m'), type:lsGet('pcType','candles'), log:false, vol:lsGet('pcVol',true), mode:lsGet('pcMode','pro'),
+              candles:[], indicators:lsGet('pcInds',[{t:'ema',p:20},{t:'ema',p:50}]), strat:null, stratParams:{}, drawings:[], tool:'cursor', sel:null, pending:null,
+              upd:[], chart:null, main:null, volS:null, indSeries:{}, panes:{}, root:null, ro:null, lastRecalc:0, color:'#f0a93a', markers:[] };
+  const root = ()=>document.getElementById('proChartRoot');
+
+  function barSec(){ const c=S.candles; if(c.length<3) return 300; const d=[]; for(let i=Math.max(1,c.length-30);i<c.length;i++) d.push(c[i].time-c[i-1].time); d.sort((a,b)=>a-b); return d[Math.floor(d.length/2)]||300; }
+  function tToIdx(t){ const c=S.candles,n=c.length; if(!n) return 0; if(t>=c[n-1].time) return n-1+(t-c[n-1].time)/barSec(); if(t<=c[0].time) return (t-c[0].time)/barSec(); let lo=0,hi=n-1; while(hi-lo>1){ const m=(lo+hi)>>1; if(c[m].time<=t) lo=m; else hi=m; } return lo+(t-c[lo].time)/(c[hi].time-c[lo].time); }
+  function idxToT(ix){ const c=S.candles,n=c.length; if(ix>=n-1) return c[n-1].time+(ix-(n-1))*barSec(); if(ix<=0) return c[0].time+ix*barSec(); const lo=Math.floor(ix); return c[lo].time+(ix-lo)*(c[lo+1].time-c[lo].time); }
+  const X=t=>S.chart.timeScale().logicalToCoordinate(tToIdx(t));
+  const Y=p=>S.main.priceToCoordinate(p);
+
+  /* ---------- data ---------- */
+  function heikin(C){ const o=[]; C.forEach((x,i)=>{ const cl=(x.open+x.high+x.low+x.close)/4; const op=i?(o[i-1].open+o[i-1].close)/2:(x.open+x.close)/2; o.push({time:x.time,open:op,close:cl,high:Math.max(x.high,op,cl),low:Math.min(x.low,op,cl),volume:x.volume}); }); return o; }
+  async function loadCandles(){
+    const tf=TF[S.tf]; let cs=null;
+    try{
+      const resp=await fetch('/api/chart/'+encodeURIComponent(yahooSymbol(S.sym))+'?range='+tf.r+'&interval='+tf.i,{cache:'no-store'});
+      const data=await resp.json(); if(!resp.ok||data.error||!data.series||data.series.length<5) throw new Error('no data');
+      const seen=new Set(); cs=[]; data.series.forEach(p=>{ const t=Math.floor(p.t)+IST; if(seen.has(t)) return; seen.add(t); cs.push({time:t,open:p.o,high:p.h,low:p.l,close:p.c,volume:p.v||0}); });
+      cs.sort((a,b)=>a.time-b.time); S.real=true;
+    }catch(e){ S.real=false; cs=syntheticCandlesFromCloses(S.d.prices).map(x=>({...x,volume:0})); }
+    S.candles=cs;
+  }
+
+  /* ---------- UI skeleton ---------- */
+  function buildUI(){
+    const r=root(); if(!r) return;
+    r.innerHTML=`
+    <div class="pc-top">
+      <div class="pc-group" id="pcTfs">${Object.keys(TF).map(k=>`<button class="pc-btn" data-tf="${k}">${TF[k].l}</button>`).join('')}</div>
+      <div class="pc-group"><select id="pcType" class="pc-sel"><option value="candles">Candles</option><option value="heikin">Heikin-Ashi</option><option value="bars">Bars</option><option value="line">Line</option><option value="area">Area</option></select>
+        <button class="pc-btn" id="pcLog">Log</button><button class="pc-btn" id="pcVol">Volume</button></div>
+      <div class="pc-group"><button class="pc-btn" id="pcIndBtn">Indicators ▾</button><button class="pc-btn" id="pcStratBtn">Strategies ▾</button></div>
+      <div class="pc-group"><input type="color" id="pcColor" value="${S.color}" title="Drawing colour" class="pc-color"><button class="pc-btn" id="pcDelSel" title="Delete selected drawing (Del)">🗑 Selected</button><button class="pc-btn" id="pcClear">Clear all</button></div>
+      <div class="pc-group" style="margin-left:auto;"><button class="pc-btn" id="pcShot" title="Save chart as image">📷</button><button class="pc-btn" id="pcFull" title="Fullscreen">⛶</button></div>
+    </div>
+    <div class="pc-panel" id="pcIndPanel" style="display:none;"></div>
+    <div class="pc-panel" id="pcStratPanel" style="display:none;"></div>
+    <div class="pc-body">
+      <div class="pc-tools" id="pcTools">${[['cursor','↖','Cursor / select'],['trend','╱','Trend line'],['ray','↗','Ray'],['hline','―','Horizontal line'],['vline','│','Vertical line'],['rect','▭','Rectangle'],['fib','Fib','Fibonacci retracement'],['measure','↔','Measure']].map(([k,ic,t])=>`<button class="pc-tool" data-tool="${k}" title="${t}">${ic}</button>`).join('')}</div>
+      <div class="pc-stage">
+        <div class="pc-legend" id="pcLegend"></div>
+        <div id="pcMain" class="pc-main"></div>
+        <canvas id="pcCanvas" class="pc-canvas"></canvas>
+        <div id="pcPanes"></div>
+      </div>
+    </div>
+    <div id="pcResults"></div>
+    <div class="metric-sub" id="pcNote" style="margin-top:6px;"></div>`;
+    r.querySelectorAll('[data-tf]').forEach(b=>b.addEventListener('click',()=>{ S.tf=b.dataset.tf; lsSet('pcTf',S.tf); reload(); }));
+    r.querySelector('#pcType').value=S.type;
+    r.querySelector('#pcType').addEventListener('change',e=>{ S.type=e.target.value; lsSet('pcType',S.type); rebuildMain(); });
+    r.querySelector('#pcLog').addEventListener('click',()=>{ S.log=!S.log; applyScale(); markBtns(); });
+    r.querySelector('#pcVol').addEventListener('click',()=>{ S.vol=!S.vol; lsSet('pcVol',S.vol); paintVolume(); markBtns(); });
+    r.querySelector('#pcIndBtn').addEventListener('click',()=>togglePanel('pcIndPanel'));
+    r.querySelector('#pcStratBtn').addEventListener('click',()=>togglePanel('pcStratPanel'));
+    r.querySelector('#pcColor').addEventListener('input',e=>{ S.color=e.target.value; if(S.sel!=null&&S.drawings[S.sel]){ S.drawings[S.sel].color=S.color; saveDrawings(); redraw(); } });
+    r.querySelector('#pcDelSel').addEventListener('click',deleteSelected);
+    r.querySelector('#pcClear').addEventListener('click',()=>{ if(!S.drawings.length||confirm('Delete all drawings on this symbol?')){ S.drawings=[]; S.sel=null; saveDrawings(); redraw(); } });
+    r.querySelector('#pcFull').addEventListener('click',toggleFull);
+    r.querySelector('#pcShot').addEventListener('click',screenshot);
+    r.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>{ setTool(b.dataset.tool); }));
+    renderIndPanel(); renderStratPanel(); markBtns();
+  }
+  function togglePanel(id){ ['pcIndPanel','pcStratPanel'].forEach(p=>{ const e=document.getElementById(p); e.style.display=(p===id&&e.style.display==='none')?'block':'none'; }); }
+  function markBtns(){
+    const r=root(); if(!r) return;
+    r.querySelectorAll('[data-tf]').forEach(b=>b.classList.toggle('on',b.dataset.tf===S.tf));
+    r.querySelector('#pcLog').classList.toggle('on',S.log); r.querySelector('#pcVol').classList.toggle('on',S.vol);
+    r.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===S.tool));
+    const n=document.getElementById('pcNote'); if(n) n.innerHTML=(S.real?'Real Yahoo Finance data':'<span style="color:var(--amber)">Simulated fallback — real data unavailable</span>')+' &middot; times in IST &middot; scroll = zoom, drag = pan, drag the price/time axis to scale &middot; drawings are saved per symbol in this browser. Educational only.';
+  }
+
+  /* ---------- indicators panel ---------- */
+  const IND_DEFS={sma:{n:'SMA',ov:true,def:50},ema:{n:'EMA',ov:true,def:20},bb:{n:'Bollinger Bands',ov:true,def:20},vwap:{n:'VWAP (intraday)',ov:true,def:0},st:{n:'Supertrend (ATR)',ov:true,def:10},rsi:{n:'RSI',ov:false,def:14},macd:{n:'MACD',ov:false,def:12}};
+  function renderIndPanel(){
+    const p=document.getElementById('pcIndPanel'); if(!p) return;
+    p.innerHTML=`<div class="pc-row"><select id="pcIndType" class="pc-sel">${Object.keys(IND_DEFS).map(k=>`<option value="${k}">${IND_DEFS[k].n}</option>`).join('')}</select>
+      <input id="pcIndP" type="number" class="pc-num" value="20" min="2" max="500" title="Period"><input id="pcIndM" type="number" class="pc-num" value="3" step="0.5" title="Multiplier / std-dev" style="display:none;">
+      <button class="pc-btn on" id="pcIndAdd">+ Add</button></div>
+      <div class="pc-chips">${S.indicators.map((x,i)=>`<span class="pc-chip" style="border-color:${COLORS[i%COLORS.length]}">${indLabel(x)} <b data-rm="${i}">✕</b></span>`).join('')||'<span class="metric-sub">No indicators yet.</span>'}</div>`;
+    const ty=p.querySelector('#pcIndType'), pe=p.querySelector('#pcIndP'), me=p.querySelector('#pcIndM');
+    const sync=()=>{ const t=ty.value; pe.value=IND_DEFS[t].def||''; pe.style.display=(t==='vwap')?'none':''; me.style.display=(t==='st'||t==='bb')?'':'none'; me.value=t==='bb'?2:3; if(t==='macd'){pe.title='Fast (slow 26, signal 9)';} };
+    ty.addEventListener('change',sync); sync();
+    p.querySelector('#pcIndAdd').addEventListener('click',()=>{ const t=ty.value; const x={t,p:parseInt(pe.value)||IND_DEFS[t].def}; if(t==='st'||t==='bb') x.m=parseFloat(me.value)||(t==='bb'?2:3); S.indicators.push(x); lsSet('pcInds',S.indicators); renderIndPanel(); rebuildIndicators(); });
+    p.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{ S.indicators.splice(+b.dataset.rm,1); lsSet('pcInds',S.indicators); renderIndPanel(); rebuildIndicators(); }));
+  }
+  const indLabel=x=>x.t==='vwap'?'VWAP':x.t==='st'?`Supertrend(${x.p},${x.m})`:x.t==='bb'?`BB(${x.p},${x.m})`:x.t==='macd'?`MACD(${x.p},26,9)`:`${IND_DEFS[x.t].n}(${x.p})`;
+
+  /* ---------- strategies panel ---------- */
+  function renderStratPanel(){
+    const p=document.getElementById('pcStratPanel'); if(!p) return;
+    const cur=S.strat;
+    p.innerHTML=`<div class="pc-row"><select id="pcStratSel" class="pc-sel"><option value="">— choose a strategy —</option>${Object.keys(STRATS).map(k=>`<option value="${k}" ${cur===k?'selected':''}>${STRATS[k].name}</option>`).join('')}</select>
+      <span id="pcStratParams">${cur?STRATS[cur].params.map(([n,d])=>`<label class="metric-sub">${n} <input class="pc-num" data-sp="${n}" type="number" step="any" value="${S.stratParams[n]!=null?S.stratParams[n]:d}"></label>`).join(' '):''}</span>
+      <button class="pc-btn on" id="pcStratRun">Run on chart</button><button class="pc-btn" id="pcStratCmp">Compare all</button><button class="pc-btn" id="pcStratOff">Hide signals</button></div>
+      <div class="metric-sub">Long-only: buy on the buy signal, exit on the sell signal, evaluated on the candles currently loaded (change the timeframe to test other horizons). No brokerage/slippage; educational, not advice.</div><div id="pcCmp"></div>`;
+    p.querySelector('#pcStratSel').addEventListener('change',e=>{ S.strat=e.target.value||null; S.stratParams={}; renderStratPanel(); });
+    p.querySelector('#pcStratRun').addEventListener('click',runStrategy);
+    p.querySelector('#pcStratOff').addEventListener('click',()=>{ S.markers=[]; S.main&&S.main.setMarkers&&S.main.setMarkers([]); document.getElementById('pcResults').innerHTML=''; });
+    p.querySelector('#pcStratCmp').addEventListener('click',compareAll);
+  }
+  function readParams(k){ const o={}; STRATS[k].params.forEach(([n,d])=>{ const el=document.querySelector(`[data-sp="${n}"]`); const v=el?parseFloat(el.value):d; o[n]=isNaN(v)?d:v; }); return o; }
+  function runStrategy(){
+    const k=S.strat; if(!k){ return; }
+    const p=readParams(k); S.stratParams=p; const C=S.candles;
+    const sg=STRATS[k].run(C,p); const bt=backtest(C,sg);
+    S.markers=sg.map(s=>({time:C[s.i].time,position:s.side==='buy'?'belowBar':'aboveBar',color:s.side==='buy'?'#26c281':'#ef5350',shape:s.side==='buy'?'arrowUp':'arrowDown',text:s.side==='buy'?'B':'S'})).sort((a,b)=>a.time-b.time);
+    try{ S.main.setMarkers(S.markers); }catch(e){}
+    const fmtT=t=>{ const d=new Date(t*1000); return d.toISOString().slice(0,S.tf.match(/m|h/)?16:10).replace('T',' '); };
+    const rows=bt.trades.slice(-12).reverse().map(t=>`<tr><td>${fmtT(C[t.i0].time)}</td><td>${fmt(t.p0,2)}</td><td>${t.open?'open':fmtT(C[t.i1].time)}</td><td>${fmt(t.p1,2)}</td><td class="${t.ret>=0?'up':'down'}">${t.ret>=0?'+':''}${t.ret.toFixed(2)}%</td></tr>`).join('');
+    document.getElementById('pcResults').innerHTML=`<div class="pc-res"><div class="pc-stats"><b>${STRATS[k].name}</b> on ${S.sym} (${TF[S.tf].l}, ${C.length} bars) &mdash; trades <b>${bt.n}</b> &middot; win rate <b>${bt.win.toFixed(0)}%</b> &middot; strategy <b class="${bt.total>=0?'up':'down'}">${bt.total>=0?'+':''}${bt.total.toFixed(1)}%</b> vs buy&amp;hold <b class="${bt.bh>=0?'up':'down'}">${bt.bh>=0?'+':''}${bt.bh.toFixed(1)}%</b> &middot; max drawdown <b class="down">${bt.dd.toFixed(1)}%</b> &middot; profit factor <b>${isFinite(bt.pf)?bt.pf.toFixed(2):'∞'}</b></div>
+      <div style="overflow-x:auto;"><table class="seas-tbl" style="min-width:0;max-width:520px;"><thead><tr><th>Entry</th><th>Price</th><th>Exit</th><th>Price</th><th>Return</th></tr></thead><tbody>${rows||'<tr><td colspan=5 class="sc-na">No completed trades</td></tr>'}</tbody></table></div></div>`;
+  }
+  function compareAll(){
+    const C=S.candles; const rows=Object.keys(STRATS).map(k=>{ const p={}; STRATS[k].params.forEach(([n,d])=>p[n]=d); const bt=backtest(C,STRATS[k].run(C,p)); return {k,bt}; }).sort((a,b)=>b.bt.total-a.bt.total);
+    document.getElementById('pcCmp').innerHTML=`<table class="seas-tbl" style="min-width:0;margin-top:8px;"><thead><tr><th style="text-align:left;">Strategy (default params)</th><th>Trades</th><th>Win %</th><th>Return</th><th>Max DD</th><th>vs B&amp;H</th></tr></thead><tbody>${rows.map(({k,bt})=>`<tr><td style="text-align:left;">${STRATS[k].name}</td><td>${bt.n}</td><td>${bt.win.toFixed(0)}%</td><td class="${bt.total>=0?'up':'down'}">${bt.total.toFixed(1)}%</td><td class="down">${bt.dd.toFixed(1)}%</td><td class="${bt.total-bt.bh>=0?'up':'down'}">${(bt.total-bt.bh>=0?'+':'')+(bt.total-bt.bh).toFixed(1)}%</td></tr>`).join('')}</tbody></table><div class="metric-sub">Buy &amp; hold over the same bars: ${(C[C.length-1].close/C[0].close*100-100).toFixed(1)}%</div>`;
+  }
+
+  /* ---------- chart build ---------- */
+  function chartOpts(h){ return {height:h,layout:{background:{color:'transparent'},textColor:'#8a94a6'},grid:{vertLines:{color:'#1a212c'},horzLines:{color:'#1a212c'}},rightPriceScale:{borderColor:'#1f2733'},timeScale:{borderColor:'#1f2733',timeVisible:true,secondsVisible:false},crosshair:{mode:LightweightCharts.CrosshairMode.Normal}}; }
+  function mainHeight(){ return document.fullscreenElement? Math.max(360,window.innerHeight-330) : 560; }
+  function mount(d){
+    S.d=d; S.sym=d.symbol; S.sel=null; S.pending=null; S.markers=[]; S.tool='cursor'; S.drawings=lsGet('pcDraw_'+d.symbol,[]);
+    destroyInner();
+    const r=root(); if(!r) return;
+    if(typeof LightweightCharts==='undefined'){ r.innerHTML='<div class="metric-sub" style="padding:40px;text-align:center;">Loading chart library…</div>'; setTimeout(()=>{ if(window.CURRENT===d) mount(d); },800); return; }
+    buildUI(); applyMode();
+    if(S.mode==='tv') return;
+    reload();
+  }
+  async function reload(){
+    const d=S.d; if(!d) return; markBtns();
+    await loadCandles(); if(window.CURRENT!==d) return;
+    buildChart(); markBtns();
+  }
+  function destroyInner(){
+    try{ if(S.ro) S.ro.disconnect(); }catch(e){} S.ro=null;
+    try{ if(S.chart) S.chart.remove(); }catch(e){} S.chart=null; S.main=null; S.volS=null; S.indSeries={};
+    Object.values(S.panes).forEach(p=>{ try{ p.chart.remove(); }catch(e){} }); S.panes={};
+  }
+  function buildChart(){
+    const host=document.getElementById('pcMain'); if(!host) return;
+    destroyInner(); host.innerHTML=''; document.getElementById('pcPanes').innerHTML='';
+    host.style.height=mainHeight()+'px';
+    S.chart=LightweightCharts.createChart(host,{...chartOpts(mainHeight()),width:host.clientWidth||800});
+    S.volS=S.chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',color:'#3d8bfd'});
+    try{ S.chart.priceScale('vol').applyOptions({scaleMargins:{top:0.85,bottom:0}}); }catch(e){}
+    makeMain(); paintVolume(); applyScale(); rebuildIndicators(true);
+    S.chart.timeScale().fitContent();
+    try{ const n=S.candles.length; S.chart.timeScale().setVisibleLogicalRange({from:Math.max(0,n-140),to:n+8}); }catch(e){}
+    S.chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{ syncPanes(r); redraw(); });
+    S.chart.subscribeCrosshairMove(p=>{ legend(p); });
+    S.ro=new ResizeObserver(()=>resize()); S.ro.observe(host.parentElement);
+    setupCanvas(); redraw(); legend(null);
+    if(S.markers.length) try{ S.main.setMarkers(S.markers); }catch(e){}
+  }
+  function makeMain(){
+    if(S.main){ try{ S.chart.removeSeries(S.main); }catch(e){} }
+    const C=S.type==='heikin'?heikin(S.candles):S.candles; const t=S.type;
+    if(t==='line') { S.main=S.chart.addLineSeries({color:'#3d8bfd',lineWidth:2}); S.main.setData(C.map(x=>({time:x.time,value:x.close}))); }
+    else if(t==='area') { S.main=S.chart.addAreaSeries({lineColor:'#3d8bfd',topColor:'rgba(61,139,253,.35)',bottomColor:'rgba(61,139,253,0)'}); S.main.setData(C.map(x=>({time:x.time,value:x.close}))); }
+    else if(t==='bars') { S.main=S.chart.addBarSeries({upColor:'#26c281',downColor:'#ef5350'}); S.main.setData(C.map(x=>({time:x.time,open:x.open,high:x.high,low:x.low,close:x.close}))); }
+    else { S.main=S.chart.addCandlestickSeries({upColor:'#26c281',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26c281',wickDownColor:'#ef5350'}); S.main.setData(C.map(x=>({time:x.time,open:x.open,high:x.high,low:x.low,close:x.close}))); }
+  }
+  function rebuildMain(){ if(!S.chart) return; makeMain(); if(S.markers.length) try{ S.main.setMarkers(S.markers); }catch(e){} redraw(); }
+  function paintVolume(){ if(!S.volS) return; if(!S.vol||!S.real){ S.volS.setData([]); return; } S.volS.setData(S.candles.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'rgba(38,194,129,.35)':'rgba(239,83,80,.35)'}))); }
+  function applyScale(){ if(!S.chart) return; try{ S.chart.priceScale('right').applyOptions({mode:S.log?LightweightCharts.PriceScaleMode.Logarithmic:LightweightCharts.PriceScaleMode.Normal}); }catch(e){} }
+  const clean=(t,arr)=>t.map((x,i)=>arr[i]!=null?{time:x.time,value:arr[i]}:null).filter(Boolean);
+  function reg(series,fn){ S.upd.push([series,fn]); series.setData(fn()); }
+  function rebuildIndicators(skipRedraw){
+    if(!S.chart) return;
+    Object.values(S.indSeries).flat().forEach(s=>{ try{ S.chart.removeSeries(s); }catch(e){} }); S.indSeries={}; S.upd=[];
+    Object.values(S.panes).forEach(p=>{ try{ p.chart.remove(); }catch(e){} }); S.panes={}; const pw=document.getElementById('pcPanes'); if(pw) pw.innerHTML='';
+    const cl=()=>S.candles.map(x=>x.close), hi=()=>S.candles.map(x=>x.high), lo=()=>S.candles.map(x=>x.low);
+    S.indicators.forEach((x,i)=>{
+      const col=COLORS[i%COLORS.length]; const key='i'+i; const line=(color,w,style)=>S.chart.addLineSeries({color,lineWidth:w||1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,lineStyle:style||0});
+      if(x.t==='sma'||x.t==='ema'){ const s=line(col); reg(s,()=>clean(S.candles,M[x.t](cl(),x.p))); S.indSeries[key]=[s]; }
+      else if(x.t==='bb'){ const a=line(col,1),m=line(col,1,2),z=line(col,1); const b=()=>M.bb(cl(),x.p,x.m||2); reg(a,()=>clean(S.candles,b().up)); reg(m,()=>clean(S.candles,b().mid)); reg(z,()=>clean(S.candles,b().lo)); S.indSeries[key]=[a,m,z]; }
+      else if(x.t==='vwap'){ if(/m|h/.test(S.tf)){ const s=line('#22d3ee',1.5); reg(s,()=>clean(S.candles,M.vwap(S.candles))); S.indSeries[key]=[s]; } }
+      else if(x.t==='st'){ const up=line('#26c281',2),dn=line('#ef5350',2); const st=()=>M.supertrend(hi(),lo(),cl(),x.p,x.m||3);
+        reg(up,()=>{ const t=st(); return S.candles.map((k,j)=>t.dir[j]===1?{time:k.time,value:t.line[j]}:{time:k.time}); }); reg(dn,()=>{ const t=st(); return S.candles.map((k,j)=>t.dir[j]===-1?{time:k.time,value:t.line[j]}:{time:k.time}); }); S.indSeries[key]=[up,dn]; }
+      else if(x.t==='rsi'||x.t==='macd'){ addPane(key,x); }
+    });
+    if(!skipRedraw) redraw();
+    legend(null);
+  }
+  function addPane(key,x){
+    const wrap=document.getElementById('pcPanes'); const div=document.createElement('div'); div.className='pc-pane'; div.innerHTML=`<div class="pc-pane-lbl">${indLabel(x)}</div><div class="pc-pane-c"></div>`; wrap.appendChild(div);
+    const host=div.querySelector('.pc-pane-c'); const ch=LightweightCharts.createChart(host,{...chartOpts(140),width:wrap.clientWidth||800,timeScale:{borderColor:'#1f2733',timeVisible:true,secondsVisible:false,visible:false}});
+    const cl=()=>S.candles.map(k=>k.close);
+    if(x.t==='rsi'){ const s=ch.addLineSeries({color:'#a970ff',lineWidth:1.5,priceLineVisible:false}); reg(s,()=>clean(S.candles,M.rsi(cl(),x.p))); [30,70].forEach(v=>s.createPriceLine({price:v,color:'#5b6472',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:''})); }
+    else { const m=()=>M.macd(cl(),x.p,26,9); const hs=ch.addHistogramSeries({priceLineVisible:false}); reg(hs,()=>{ const q=m(); return S.candles.map((k,i)=>q.hist[i]!=null?{time:k.time,value:q.hist[i],color:q.hist[i]>=0?'rgba(38,194,129,.6)':'rgba(239,83,80,.6)'}:{time:k.time}); });
+      const a=ch.addLineSeries({color:'#3d8bfd',lineWidth:1.5,priceLineVisible:false}), b=ch.addLineSeries({color:'#f0a93a',lineWidth:1.5,priceLineVisible:false}); reg(a,()=>clean(S.candles,m().line)); reg(b,()=>clean(S.candles,m().sig)); }
+    S.panes[key]={chart:ch,host};
+    ch.timeScale().subscribeVisibleLogicalRangeChange(r=>{ if(S._syncing||!r||!S.chart) return; S._syncing=true; try{ S.chart.timeScale().setVisibleLogicalRange(r); }catch(e){} S._syncing=false; });
+    try{ const r=S.chart.timeScale().getVisibleLogicalRange(); if(r) ch.timeScale().setVisibleLogicalRange(r); }catch(e){}
+  }
+  function syncPanes(r){ if(S._syncing||!r) return; S._syncing=true; Object.values(S.panes).forEach(p=>{ try{ p.chart.timeScale().setVisibleLogicalRange(r); }catch(e){} }); S._syncing=false; }
+  function resize(){
+    const host=document.getElementById('pcMain'); if(!host||!S.chart) return; const w=host.parentElement.clientWidth; host.style.height=mainHeight()+'px';
+    S.chart.applyOptions({width:w,height:mainHeight()}); Object.values(S.panes).forEach(p=>p.chart.applyOptions({width:w})); setupCanvas(); redraw();
+  }
+  function legend(p){
+    const el=document.getElementById('pcLegend'); if(!el) return; const C=S.candles; if(!C.length) return;
+    let bar=null; if(p&&p.time){ bar=C.find(x=>x.time===p.time); } if(!bar) bar=C[C.length-1];
+    const prev=C[Math.max(0,C.indexOf(bar)-1)]; const ch=bar.close-prev.close, chp=prev.close?ch/prev.close*100:0; const up=bar.close>=bar.open;
+    el.innerHTML=`<b>${S.sym}</b> &middot; ${TF[S.tf].l} &nbsp; <span>O</span> ${fmt(bar.open,2)} <span>H</span> ${fmt(bar.high,2)} <span>L</span> ${fmt(bar.low,2)} <span>C</span> <b class="${up?'up':'down'}">${fmt(bar.close,2)}</b> <span class="${ch>=0?'up':'down'}">${ch>=0?'+':''}${fmt(ch,2)} (${chp>=0?'+':''}${chp.toFixed(2)}%)</span>${bar.volume?` &nbsp; <span>Vol</span> ${(bar.volume/1e5).toFixed(2)}L`:''}`+
+      S.indicators.filter(x=>x.t==='sma'||x.t==='ema').map((x,i)=>{ const idx=S.indicators.indexOf(x); const s=S.indSeries['i'+idx]; if(!s||!p||!p.seriesData) return `<span style="color:${COLORS[idx%COLORS.length]}"> ${indLabel(x)}</span>`; const v=p.seriesData.get(s[0]); return `<span style="color:${COLORS[idx%COLORS.length]}"> ${indLabel(x)} ${v&&v.value!=null?fmt(v.value,2):''}</span>`; }).join('');
+  }
+  function liveTick(price){
+    if(!S.chart||!S.main||!S.candles.length) return;
+    const last=S.candles[S.candles.length-1]; last.close=price; last.high=Math.max(last.high,price); last.low=Math.min(last.low,price);
+    try{ if(S.type==='line'||S.type==='area') S.main.update({time:last.time,value:price}); else if(S.type!=='heikin') S.main.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close}); }catch(e){}
+    const now=Date.now(); if(now-S.lastRecalc>4000){ S.lastRecalc=now; S.upd.forEach(([se,fn])=>{ try{ se.setData(fn()); }catch(e){} }); }
+    legend(null);
+  }
+
+  /* ---------- drawing tools ---------- */
+  const NEED={trend:2,ray:2,hline:1,vline:1,rect:2,fib:2,measure:2};
+  function setTool(t){ S.tool=t; S.pending=null; const cv=document.getElementById('pcCanvas'); if(cv) cv.style.pointerEvents=t==='cursor'?'none':'auto'; if(cv) cv.style.cursor=t==='cursor'?'default':'crosshair'; markBtns(); redraw(); }
+  function saveDrawings(){ lsSet('pcDraw_'+S.sym,S.drawings); }
+  function deleteSelected(){ if(S.sel!=null&&S.drawings[S.sel]){ S.drawings.splice(S.sel,1); S.sel=null; saveDrawings(); redraw(); } }
+  function setupCanvas(){
+    const cv=document.getElementById('pcCanvas'), host=document.getElementById('pcMain'); if(!cv||!host) return;
+    const dpr=window.devicePixelRatio||1; const w=host.clientWidth, h=host.clientHeight; cv.style.width=w+'px'; cv.style.height=h+'px'; cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); cv._dpr=dpr;
+    if(!cv._bound){ cv._bound=true;
+      cv.addEventListener('mousedown',onDown); cv.addEventListener('mousemove',onMove);
+      host.addEventListener('mousedown',onHostDown,true);
+      host.addEventListener('wheel',()=>setTimeout(redraw,30),{passive:true}); host.addEventListener('mouseup',()=>setTimeout(redraw,30)); host.addEventListener('mousemove',()=>{ if(S.tool==='cursor') redraw(); });
+    }
+    if(!S._winBound){ S._winBound=true;
+      window.addEventListener('mousemove',onDrag); window.addEventListener('mouseup',()=>{ if(S.drag){ S.drag=null; saveDrawings(); } });
+      window.addEventListener('keydown',e=>{ if(!S.chart||/INPUT|SELECT|TEXTAREA/.test((e.target||{}).tagName||'')) return; if(e.key==='Delete'||e.key==='Backspace'){ if(S.sel!=null){ e.preventDefault(); deleteSelected(); } } if(e.key==='Escape'){ S.pending=null; setTool('cursor'); } });
+    }
+  }
+  function ptFromEvent(e){ const cv=document.getElementById('pcCanvas'); const rc=cv.getBoundingClientRect(); const x=e.clientX-rc.left,y=e.clientY-rc.top; let lg=S.chart.timeScale().coordinateToLogical(x); const p=S.main.coordinateToPrice(y); if(lg==null||p==null) return null; return {t:idxToT(lg),p,x,y}; }
+  function onDown(e){
+    if(S.tool==='cursor') return; const pt=ptFromEvent(e); if(!pt) return;
+    if(!S.pending) S.pending={type:S.tool,color:S.color,pts:[]};
+    S.pending.pts.push({t:pt.t,p:pt.p});
+    if(S.pending.pts.length>=NEED[S.pending.type]){ S.drawings.push({type:S.pending.type,color:S.pending.color,pts:S.pending.pts}); S.sel=S.drawings.length-1; S.pending=null; saveDrawings(); setTool('cursor'); }
+    redraw();
+  }
+  function onMove(e){ if(S.pending){ const pt=ptFromEvent(e); S.hover=pt; redraw(); } }
+  // hit-testing in cursor mode (canvas has pointer-events:none, so listen on the host in capture phase)
+  function segDist(px,py,a,b){ const dx=b.x-a.x,dy=b.y-a.y; const l=dx*dx+dy*dy; let t=l?((px-a.x)*dx+(py-a.y)*dy)/l:0; t=Math.max(0,Math.min(1,t)); return Math.hypot(px-(a.x+t*dx),py-(a.y+t*dy)); }
+  function screenPts(d){ return d.pts.map(p=>({x:X(p.t),y:Y(p.p)})); }
+  function hit(px,py){
+    for(let i=S.drawings.length-1;i>=0;i--){ const d=S.drawings[i]; const sp=screenPts(d); if(sp.some(p=>p.x==null||p.y==null)) continue; const W=document.getElementById('pcCanvas').clientWidth;
+      for(let k=0;k<sp.length;k++) if(Math.hypot(px-sp[k].x,py-sp[k].y)<9) return {i,handle:k};
+      let dist=1e9;
+      if(d.type==='hline') dist=Math.abs(py-sp[0].y); else if(d.type==='vline') dist=Math.abs(px-sp[0].x);
+      else if(d.type==='ray'){ const a=sp[0],b=sp[1]; const dx=b.x-a.x||1e-6, k2=(b.y-a.y)/dx; dist=segDist(px,py,a,{x:a.x+(dx>0?W:-W)*2,y:a.y+k2*(dx>0?W:-W)*2}); }
+      else if(d.type==='rect'||d.type==='fib'||d.type==='measure'){ const x0=Math.min(sp[0].x,sp[1].x),x1=Math.max(sp[0].x,sp[1].x),y0=Math.min(sp[0].y,sp[1].y),y1=Math.max(sp[0].y,sp[1].y); if(d.type==='fib'){ dist=(px>=x0-4&&px<=x1+4&&py>=y0-4&&py<=y1+4)?0:1e9; } else dist=(px>=x0&&px<=x1&&py>=y0&&py<=y1)?0:Math.min(Math.abs(px-x0),Math.abs(px-x1),Math.abs(py-y0),Math.abs(py-y1)); }
+      else dist=segDist(px,py,sp[0],sp[1]);
+      if(dist<7) return {i,handle:-1};
+    }
+    return null;
+  }
+  function onHostDown(e){
+    if(S.tool!=='cursor'||!S.chart) return; const rc=document.getElementById('pcCanvas').getBoundingClientRect(); const px=e.clientX-rc.left,py=e.clientY-rc.top;
+    const h=hit(px,py);
+    if(h){ e.stopPropagation(); e.preventDefault(); S.sel=h.i; S.drag={i:h.i,handle:h.handle,px,py,orig:JSON.parse(JSON.stringify(S.drawings[h.i].pts))}; const c=document.getElementById('pcColor'); if(c) c.value=S.drawings[h.i].color; redraw(); }
+    else if(S.sel!=null){ S.sel=null; redraw(); }
+  }
+  function onDrag(e){
+    if(!S.drag) return; const rc=document.getElementById('pcCanvas').getBoundingClientRect(); const px=e.clientX-rc.left,py=e.clientY-rc.top; const d=S.drawings[S.drag.i]; if(!d) return;
+    const mv=(o,dx,dy)=>{ const x0=X(o.t), y0=Y(o.p); if(x0==null||y0==null) return o; const lg=S.chart.timeScale().coordinateToLogical(x0+dx); const p=S.main.coordinateToPrice(y0+dy); return {t:lg==null?o.t:idxToT(lg), p:p==null?o.p:p}; };
+    if(S.drag.handle>=0){ d.pts[S.drag.handle]=mv(S.drag.orig[S.drag.handle],px-S.drag.px,py-S.drag.py); }
+    else d.pts=S.drag.orig.map(o=>mv(o,px-S.drag.px,py-S.drag.py));
+    redraw();
+  }
+  function redraw(){
+    const cv=document.getElementById('pcCanvas'); if(!cv||!S.chart||!S.main) return; const ctx=cv.getContext('2d'); const dpr=cv._dpr||1; const W=cv.clientWidth,H=cv.clientHeight;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+    const all=S.drawings.map((d,i)=>({d,i,sel:i===S.sel}));
+    if(S.pending&&S.hover){ all.push({d:{type:S.pending.type,color:S.pending.color,pts:S.pending.pts.concat([{t:S.hover.t,p:S.hover.p}]).slice(0,NEED[S.pending.type]===1?1:2)},i:-1,sel:false,ghost:true}); }
+    all.forEach(({d,sel,ghost})=>{
+      const sp=screenPts(d); if(sp.some(p=>p.x==null||p.y==null)) { if(!(d.type==='hline'&&sp[0]&&sp[0].y!=null)&&!(d.type==='vline'&&sp[0]&&sp[0].x!=null)) return; }
+      ctx.save(); ctx.strokeStyle=d.color; ctx.fillStyle=d.color; ctx.lineWidth=sel?2.5:1.6; ctx.globalAlpha=ghost?0.6:1; ctx.font='11px system-ui,sans-serif';
+      const a=sp[0], b=sp[1];
+      if(d.type==='hline'){ ctx.beginPath(); ctx.moveTo(0,a.y); ctx.lineTo(W,a.y); ctx.stroke(); ctx.fillText(fmt(d.pts[0].p,2),W-70,a.y-4); }
+      else if(d.type==='vline'){ ctx.beginPath(); ctx.moveTo(a.x,0); ctx.lineTo(a.x,H); ctx.stroke(); }
+      else if(d.type==='trend'&&b){ ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+      else if(d.type==='ray'&&b){ const dx=b.x-a.x||1e-6,k=(b.y-a.y)/dx,L=(dx>0?1:-1)*W*3; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x+L,a.y+k*L); ctx.stroke(); }
+      else if(d.type==='rect'&&b){ ctx.globalAlpha=(ghost?0.6:1)*0.12; ctx.fillRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y)); ctx.globalAlpha=ghost?0.6:1; ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y)); }
+      else if(d.type==='fib'&&b){ const lv=[0,0.236,0.382,0.5,0.618,0.786,1]; const p0=d.pts[0].p,p1=d.pts[1].p; const x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x);
+        lv.forEach(l=>{ const price=p1+(p0-p1)*l; const y=Y(price); if(y==null) return; ctx.globalAlpha=0.9; ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(Math.max(x1,x0+60),y); ctx.stroke(); ctx.fillText((l*100).toFixed(1)+'%  '+fmt(price,2),x0+4,y-3); });
+        ctx.globalAlpha=0.5; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+      else if(d.type==='measure'&&b){ const dp=d.pts[1].p-d.pts[0].p, pc=dp/d.pts[0].p*100, bars=Math.round(tToIdx(d.pts[1].t)-tToIdx(d.pts[0].t)); const col=dp>=0?'#26c281':'#ef5350'; ctx.fillStyle=col; ctx.strokeStyle=col; ctx.globalAlpha=0.12; ctx.fillRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y)); ctx.globalAlpha=1; ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y)); ctx.fillStyle=col; ctx.fillText(`${dp>=0?'+':''}${fmt(dp,2)} (${pc>=0?'+':''}${pc.toFixed(2)}%)  ${bars} bars`,Math.min(a.x,b.x)+4,Math.min(a.y,b.y)-5); }
+      ctx.restore();
+      if(sel){ ctx.save(); ctx.fillStyle='#fff'; ctx.strokeStyle=d.color; sp.forEach(p=>{ if(p.x==null||p.y==null) return; ctx.beginPath(); ctx.arc(p.x,p.y,5,0,7); ctx.fill(); ctx.stroke(); }); ctx.restore(); }
+    });
+  }
+
+  /* ---------- fullscreen / screenshot / TradingView ---------- */
+  function toggleFull(){ const sec=document.getElementById('sec-chart'); if(!document.fullscreenElement){ (sec.requestFullscreen||function(){}).call(sec); } else document.exitFullscreen(); }
+  document.addEventListener('fullscreenchange',()=>{ document.getElementById('sec-chart')?.classList.toggle('pc-full',!!document.fullscreenElement); setTimeout(resize,150); });
+  function screenshot(){
+    try{ const cv=S.chart.takeScreenshot(); const a=document.createElement('a'); a.href=cv.toDataURL('image/png'); a.download=S.sym+'_'+S.tf+'.png'; a.click(); }catch(e){ alert('Screenshot not supported in this browser.'); }
+  }
+  const TV_INDEX={NIFTY:'NSE:NIFTY',BANKNIFTY:'NSE:BANKNIFTY',NIFTYIT:'NSE:CNXIT',NIFTYFMCG:'NSE:CNXFMCG',NIFTYPHARMA:'NSE:CNXPHARMA',NIFTYAUTO:'NSE:CNXAUTO',NIFTYMETAL:'NSE:CNXMETAL',NIFTYREALTY:'NSE:CNXREALTY',NIFTYENERGY:'NSE:CNXENERGY',NIFTYINFRA:'NSE:CNXINFRA',NIFTYPSUBANK:'NSE:CNXPSUBANK',NIFTYMIDCAP:'NSE:CNXMIDCAP',NIFTYSMALLCAP:'NSE:CNXSMALLCAP',NIFTYNXT50:'NSE:NIFTYJR',SENSEX:'BSE:SENSEX',INDIAVIX:'NSE:INDIAVIX'};
+  const tvSymbol=s=>TV_INDEX[s]||('NSE:'+s.replace(/[&-]/g,'_'));
+  function loadTV(cb){ if(window.TradingView&&window.TradingView.widget) return cb(); const s=document.createElement('script'); s.src='https://s3.tradingview.com/tv.js'; s.onload=cb; s.onerror=()=>{ const t=document.getElementById('tvWidgetRoot'); if(t) t.innerHTML='<div class="metric-sub" style="padding:30px;">Could not load TradingView (blocked or offline). Use the built-in chart instead.</div>'; }; document.head.appendChild(s); }
+  function applyMode(){
+    const pro=document.getElementById('proChartRoot'), tv=document.getElementById('tvWidgetRoot'); if(!pro||!tv) return;
+    document.querySelectorAll('#chartModeBtns [data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===S.mode));
+    const inner=pro.querySelectorAll('.pc-top,.pc-panel,.pc-body,#pcResults,#pcNote');
+    if(S.mode==='tv'){ inner.forEach(e=>e.style.display='none'); tv.style.display='block'; tv.innerHTML=''; const sym=tvSymbol(S.sym); tv.style.height=(document.fullscreenElement?window.innerHeight-90:760)+'px';
+      loadTV(()=>{ try{ new TradingView.widget({container_id:'tvWidgetRoot',autosize:true,symbol:sym,interval:'D',timezone:'Asia/Kolkata',theme:'dark',style:'1',locale:'en',toolbar_bg:'#0b0f17',enable_publishing:false,allow_symbol_change:true,withdateranges:true,hide_side_toolbar:false,details:true,hotlist:false,calendar:false,studies:['RSI@tv-basicstudies','MASimple@tv-basicstudies'],save_image:true}); }catch(e){ tv.innerHTML='<div class="metric-sub" style="padding:30px;">TradingView failed to start.</div>'; } }); }
+    else { tv.style.display='none'; tv.innerHTML=''; inner.forEach(e=>{ e.style.display=''; }); ['pcIndPanel','pcStratPanel'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; }); }
+  }
+  function setMode(m){ S.mode=m; lsSet('pcMode',m); applyMode(); if(m==='pro'){ if(S.chart) resize(); else reload(); } }
+  return {mount, liveTick, setMode, _M:M, _STRATS:STRATS, _backtest:backtest, destroy:destroyInner, _S:S};
+})();
+window.ProChart=ProChart;
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('#chartModeBtns [data-mode]'); if(b) ProChart.setMode(b.dataset.mode); });
 
 setupSeasonalityControls();
 refreshTickerLive();

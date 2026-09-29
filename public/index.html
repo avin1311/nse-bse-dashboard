@@ -4644,7 +4644,7 @@ const PatternEngine = (function(){
    ============================================================ */
 const PatternUI = (function(){
   const $=id=>document.getElementById(id);
-  const S={sym:null,tf:'1D',candles:[],res:null,chart:null,series:null,extra:[],priceLines:[],sel:null,filter:'all',open:{},loading:false,src:''};
+  const S={hover:null,sym:null,tf:'1D',candles:[],res:null,chart:null,series:null,extra:[],priceLines:[],sel:null,filter:'all',open:{},loading:false,src:''};
   const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const biasCls=b=>b==='Bullish'?'up':b==='Bearish'?'down':'';
   const barTime=(C,i)=>C[Math.max(0,Math.min(C.length-1,i))].t;
@@ -4711,7 +4711,7 @@ const PatternUI = (function(){
       const st=p.status==='Confirmed'?'<span class="badge badge-'+(p.bias==='Bearish'?'sell':'buy')+'">Confirmed'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':'<span class="badge badge-hold">Forming</span>';
       const volTxt=p.vol!=null?'<div class="metric-sub">Breakout vol '+p.vol.toFixed(1)+'&times; avg'+(p.vol>=1.3?' &#10003;':'')+'</div>':'';
       const dist=p.distPct!=null?'<div class="metric-sub">Price '+(p.distPct>=0?'+':'')+p.distPct.toFixed(1)+'% vs entry</div>':'';
-      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b><div class="metric-sub">'+(S.sel===i?'shown on chart':'click to show on chart')+'</div></td>'+
+      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b><div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
         '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+volTxt+'</td>'+
         '<td><div class="pat-conf"><i style="width:'+p.conf+'%"></i></div>'+p.conf+'%</td>'+
         '<td>'+lv+dist+'</td>'+
@@ -4739,18 +4739,33 @@ const PatternUI = (function(){
     if(!S.candles.length||!ensureChart()) return;
     try{ S.chart.applyOptions({timeScale:{timeVisible:S.tf==='1h'}}); }catch(e){}
     S.series.setData(S.candles.map(c=>({time:c.t,open:c.o,high:c.h,low:c.l,close:c.c})));
+    overlay(S.res&&S.res.patterns[S.sel],false);
+  }
+  // draws one pattern's formation; hover=true uses a bright, thick, labelled style so it stands out
+  function overlay(p,hover){
+    if(!S.chart) return;
     clearOverlay();
-    const p=S.res&&S.res.patterns[S.sel]; if(p){
-      const C=S.candles;
-      p.lines.forEach(l=>{
-        const a=barTime(C,l.i1), b=barTime(C,l.i2); if(a===b) return;
-        const ls=S.chart.addLineSeries({color:p.bias==='Bearish'?'#ef5350':p.bias==='Bullish'?'#26c281':'#f0a93a',lineWidth:2,lineStyle:l.dash?2:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
-        ls.setData([{time:Math.min(a,b),value:l.p1},{time:Math.max(a,b),value:l.p2}]); S.extra.push(ls);
-      });
-      const pl=(price,color,title)=>{ if(price) S.priceLines.push(S.series.createPriceLine({price,color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title})); };
-      pl(p.entry,'#3d8bfd','Entry'); pl(p.stop,'#ef5350','Stop'); pl(p.target,'#26c281','Target');
-      try{ const from=barTime(C,Math.max(0,p.i0-15)); S.chart.timeScale().setVisibleRange({from,to:C[C.length-1].t}); }catch(e){}
-    } else { try{ S.chart.timeScale().fitContent(); }catch(e){} }
+    try{ S.series.setMarkers([]); }catch(e){}
+    if(!p){ if(!hover){ try{ S.chart.timeScale().fitContent(); }catch(e){} } return; }
+    const C=S.candles;
+    const base=p.bias==='Bearish'?'#ef5350':p.bias==='Bullish'?'#26c281':'#f0a93a';
+    const color=hover?'#ffd400':base;
+    const marks=[];
+    p.lines.forEach(l=>{
+      const a=barTime(C,l.i1), b=barTime(C,l.i2); if(a===b) return;
+      const ls=S.chart.addLineSeries({color,lineWidth:hover?3:2,lineStyle:l.dash?2:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+      ls.setData([{time:Math.min(a,b),value:l.p1},{time:Math.max(a,b),value:l.p2}]); S.extra.push(ls);
+      if(hover&&l.label) marks.push({time:Math.min(a,b),position:l.p1>=l.p2?'aboveBar':'belowBar',color:'#ffd400',shape:'circle',text:l.label});
+    });
+    if(hover){
+      marks.sort((x,y)=>x.time-y.time);
+      // one marker per bar time (library requirement): merge labels
+      const m={}; marks.forEach(k=>{ if(m[k.time]) m[k.time].text+=' / '+k.text; else m[k.time]=k; });
+      try{ S.series.setMarkers(Object.values(m).sort((x,y)=>x.time-y.time)); }catch(e){}
+    }
+    const pl=(price,c,title)=>{ if(price) S.priceLines.push(S.series.createPriceLine({price,color:c,lineWidth:1,lineStyle:2,axisLabelVisible:true,title})); };
+    pl(p.entry,'#3d8bfd','Entry'); pl(p.stop,'#ef5350','Stop'); pl(p.target,'#26c281','Target');
+    try{ const from=barTime(C,Math.max(0,p.i0-15)); S.chart.timeScale().setVisibleRange({from,to:C[C.length-1].t}); }catch(e){}
   }
   function select(i){ S.sel=i; render(); drawChart(); }
 
@@ -4782,6 +4797,11 @@ const PatternUI = (function(){
     $('patTf').addEventListener('change',()=>{ S.chart&&(S.chart.remove(),S.chart=null); load(S.sym); });
     $('patFilter').addEventListener('change',e=>{ S.filter=e.target.value; render(); });
     $('patScanBtn').addEventListener('click',scan);
+    $('patBody').addEventListener('mouseover',e=>{
+      const r=e.target.closest('.pat-row'); if(!r||!S.res) return; const i=+r.dataset.i; if(S.hover===i) return;
+      S.hover=i; overlay(S.res.patterns[i],true); $('patChart').scrollIntoView&&0;
+    });
+    $('patBody').addEventListener('mouseleave',()=>{ if(S.hover==null||!S.res) return; S.hover=null; overlay(S.res.patterns[S.sel],false); });
     $('patBody').addEventListener('click',e=>{
       const t=e.target.closest('[data-toggle]');
       if(t){ S.open[t.dataset.toggle]=!S.open[t.dataset.toggle]; render(); return; }

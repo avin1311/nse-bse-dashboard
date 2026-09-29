@@ -303,7 +303,7 @@
   <div class="grid cols-2" style="grid-template-columns:1fr;">
     <section id="sec-chart" class="panel">
       <div class="panel-head"><h3>Chart</h3>
-        <div class="pc-group" id="chartModeBtns"><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="TradingView's embeddable widget is not licensed for NSE/BSE data, so this opens the full TradingView chart in a new tab" style="text-decoration:none;">Open in TradingView ↗</a></div>
+        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Upstox real data: drawing tools, indicators, strategies, backtest">Upstox chart</button><button class="pc-btn" data-mode="tv" title="Embedded TradingView chart">TradingView</button><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="Open the full TradingView chart in a new tab (works for every NSE/BSE symbol)" style="text-decoration:none;">Open on tradingview.com ↗</a></div>
       </div>
       <div id="proChartRoot"></div>
       <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
@@ -1390,6 +1390,7 @@ function selectStock(symbol){
     const hist=window.REAL_HIST[d.symbol];
     if(!hist || window.CURRENT!==d) return;
     applyRealHistory(d, hist);
+    renderStockHead(d); renderOverview(d);
     renderSignal(d); renderFourPanel(d); renderScreener();
   });
 }
@@ -1467,7 +1468,7 @@ function renderOverview(d){
     ["Beta",fmt(d.beta,2),`D/E ${fmt(d.deRatio,2)}`]
   ];
   document.getElementById('overviewGrid').innerHTML = cards.map(([l,v,s])=>`
-    <div class="card"><div class="card-title">${l}</div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
+    <div class="card"><div class="card-title">${l} <span style="font-size:9px;color:var(--text3);" title="Simulated placeholder — not real data">SIM</span></div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
 
   // Upgrade to real Upstox fundamentals in the background
   if(isIndexSym(d.symbol)) return; // indices have no company fundamentals — keep the generated overview
@@ -1475,7 +1476,7 @@ function renderOverview(d){
     .then(r=>r.json())
     .then(f=>{
       if(f.error || window.CURRENT?.symbol !== d.symbol) return; // stale or error
-      const tag=(live)=>live?' <span style="font-size:9px;color:var(--green);">LIVE</span>':'';
+      const tag=(live)=>live?' <span style="font-size:9px;color:var(--green);">LIVE</span>':' <span style="font-size:9px;color:var(--text3);" title="Simulated placeholder — not real data">SIM</span>';
       const realCards=[
         ["Market cap", `&#8377;${fmt(d.marketCapT,2)} T`, f.sectorMarketCapInr?`Sector ${f.sectorMarketCapInr}`:(f.sector||''), false],
         ["P/E ratio", f.pe!=null ? fmt(f.pe,1) : fmt(d.pe,1), f.peSector!=null ? `Sector avg ${fmt(f.peSector,1)}` : `Fwd ${fmt(d.pe*0.88,1)}`, f.pe!=null],
@@ -3385,38 +3386,24 @@ async function tickLive(){
     refreshLiveDom(d);
     setLiveStatus('live');
   }catch(e){
-    const move=(Math.random()-0.5)*0.6;
-    d.price=d.price*(1+move/100);
-    d.changePct=(d.price/d.prevClose-1)*100;
-    d.prices.shift(); d.prices.push(d.price);
-    d.trendLine.shift(); d.trendLine.push(d.trendLine[d.trendLine.length-1]*(1+move/200));
-    d.support1=d.price*0.982; d.support2=d.price*0.958;
-    d.resistance1=d.price*1.018; d.resistance2=d.price*1.042;
-    d.horizons = buildHorizons(d);
-    const swing=d.horizons.swing;
-    d.rsi=swing.rsi; d.supertrendBull=swing.supertrendBull; d.macdBull=swing.macdBull; d.macdHist=swing.macdHist;
-    d.score=swing.score; d.signal=swing.signal; d.signalLabel=swing.signalLabel;
-    refreshLiveDom(d);
+    // Never fabricate price moves: keep the last real values and just flag the feed as not live.
     setLiveStatus('sim');
   }
 }
 
 function startFallbackPoll(d) {
   if (livePollInterval) return;
-  livePollInterval = setInterval(tickLive, 15000);
+  tickLive();
+  livePollInterval = setInterval(tickLive, 5000);
 }
 
 
 async function refreshTickerLive(){
   try{
-    const resp=await fetch('/api/quotes?symbols='+encodeURIComponent('^NSEI,^NSEBANK,^CNXIT,^INDIAVIX'), {cache:'no-store'});
-    const data=await resp.json();
-    const nameMap={'^NSEI':'NIFTY 50','^NSEBANK':'BANK NIFTY','^CNXIT':'NIFTY IT','^INDIAVIX':'INDIA VIX'};
-    const rows=data.filter(x=>x && !x.error && x.price!=null).map(x=>{
-      const chg = x.prevClose ? ((x.price/x.prevClose-1)*100) : 0;
-      return [nameMap[x.symbol]||x.symbol, x.price.toLocaleString('en-IN',{maximumFractionDigits:2}), chg];
-    });
-    if(rows.length===4) renderTicker(rows);
+    const defs=[['NIFTY 50','NIFTY'],['BANK NIFTY','BANKNIFTY'],['NIFTY IT','NIFTYIT'],['INDIA VIX','INDIAVIX']];
+    const res=await Promise.all(defs.map(([n,s])=>fetch('/api/quote/'+s,{cache:'no-store'}).then(r=>r.json()).then(q=>({n,q})).catch(()=>({n,q:null}))));
+    const rows=res.filter(x=>x.q && !x.q.error && x.q.price!=null).map(x=>[x.n, x.q.price.toLocaleString('en-IN',{maximumFractionDigits:2}), x.q.changePct||0]);
+    if(rows.length) renderTicker(rows);
   }catch(e){ /* keep showing the last known values */ }
 }
 setInterval(refreshTickerLive, 15000);
@@ -3765,7 +3752,7 @@ const ProChart = (function(){
   }
 
   /* ---------- state ---------- */
-  const S = { d:null, sym:null, tf:lsGet('pcTf','5m'), type:lsGet('pcType','candles'), log:false, vol:lsGet('pcVol',true), mode:'pro',
+  const S = { d:null, sym:null, tf:lsGet('pcTf','5m'), type:lsGet('pcType','candles'), log:false, vol:lsGet('pcVol',true), mode:lsGet('pcMode','pro'),
               candles:[], indicators:lsGet('pcInds',[{t:'ema',p:20},{t:'ema',p:50}]), strat:null, stratParams:{}, drawings:[], tool:'cursor', sel:null, pending:null,
               upd:[], chart:null, main:null, volS:null, indSeries:{}, panes:{}, root:null, ro:null, lastRecalc:0, color:'#f0a93a', markers:[] };
   const root = ()=>document.getElementById('proChartRoot');
@@ -3779,13 +3766,13 @@ const ProChart = (function(){
   /* ---------- data ---------- */
   function heikin(C){ const o=[]; C.forEach((x,i)=>{ const cl=(x.open+x.high+x.low+x.close)/4; const op=i?(o[i-1].open+o[i-1].close)/2:(x.open+x.close)/2; o.push({time:x.time,open:op,close:cl,high:Math.max(x.high,op,cl),low:Math.min(x.low,op,cl),volume:x.volume}); }); return o; }
   async function loadCandles(){
-    const tf=TF[S.tf]; let cs=null;
+    S.err=null; S.source=null; S.srcNote=null; let cs=[];
     try{
-      const resp=await fetch('/api/chart/'+encodeURIComponent(yahooSymbol(S.sym))+'?range='+tf.r+'&interval='+tf.i,{cache:'no-store'});
-      const data=await resp.json(); if(!resp.ok||data.error||!data.series||data.series.length<5) throw new Error('no data');
-      const seen=new Set(); cs=[]; data.series.forEach(p=>{ const t=Math.floor(p.t)+IST; if(seen.has(t)) return; seen.add(t); cs.push({time:t,open:p.o,high:p.h,low:p.l,close:p.c,volume:p.v||0}); });
-      cs.sort((a,b)=>a.time-b.time); S.real=true;
-    }catch(e){ S.real=false; cs=syntheticCandlesFromCloses(S.d.prices).map(x=>({...x,volume:0})); }
+      const resp=await fetch('/api/candles/'+encodeURIComponent(S.sym)+'?tf='+encodeURIComponent(S.tf),{cache:'no-store'});
+      const data=await resp.json(); if(!resp.ok||data.error||!data.series||data.series.length<3) throw new Error(data.error||'no data');
+      cs=data.series.map(p=>({time:Math.floor(p.t)+IST,open:p.o,high:p.h,low:p.l,close:p.c,volume:p.v||0}));
+      S.real=true; S.source=data.source; S.srcNote=data.note||null;
+    }catch(e){ S.real=false; S.err=e.message||String(e); cs=[]; }
     S.candles=cs;
   }
 
@@ -3835,7 +3822,9 @@ const ProChart = (function(){
     r.querySelectorAll('[data-tf]').forEach(b=>b.classList.toggle('on',b.dataset.tf===S.tf));
     r.querySelector('#pcLog').classList.toggle('on',S.log); r.querySelector('#pcVol').classList.toggle('on',S.vol);
     r.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===S.tool));
-    const n=document.getElementById('pcNote'); if(n) n.innerHTML=(S.real?'Real Yahoo Finance data':'<span style="color:var(--amber)">Simulated fallback — real data unavailable</span>')+' &middot; times in IST &middot; scroll = zoom, drag = pan, drag the price/time axis to scale &middot; drawings are saved per symbol in this browser. Educational only.';
+    const n=document.getElementById('pcNote'); if(n){
+      const src = S.source==='upstox' ? '<span style="color:var(--green)">Upstox data</span>' : S.source==='yahoo' ? '<span style="color:var(--amber)">Yahoo fallback data (Upstox unavailable'+(S.srcNote?': '+S.srcNote.replace(/</g,'&lt;'):'')+')</span>' : (S.err?'<span style="color:var(--red)">No real data</span>':'Loading\u2026');
+      n.innerHTML=src+' &middot; times in IST &middot; scroll = zoom, drag = pan, drag the price/time axis to scale &middot; drawings are saved per symbol in this browser. Educational only.'; }
   }
 
   /* ---------- indicators panel ---------- */
@@ -3900,6 +3889,10 @@ const ProChart = (function(){
   async function reload(){
     const d=S.d; if(!d) return; markBtns();
     await loadCandles(); if(window.CURRENT!==d) return;
+    if(!S.candles.length){
+      destroyInner(); const host=document.getElementById('pcMain'); if(host){ host.style.height='auto'; host.innerHTML='<div style="padding:60px 20px;text-align:center;line-height:1.7;"><b style="color:var(--red)">No real price data available for '+S.sym+' ('+TF[S.tf].l+')</b><br><span class="metric-sub">'+String(S.err||'').replace(/</g,'&lt;')+'</span><br><span class="metric-sub">Check that the Upstox token on Render is valid (see the Connect Upstox button). Nothing is simulated on this chart.</span></div>'; }
+      const cv=document.getElementById('pcCanvas'); if(cv) cv.style.display='none'; markBtns(); return; }
+    const cv0=document.getElementById('pcCanvas'); if(cv0) cv0.style.display='';
     buildChart(); markBtns();
   }
   function destroyInner(){
@@ -4070,13 +4063,14 @@ const ProChart = (function(){
   }
   const TV_INDEX={NIFTY:'NSE:NIFTY',BANKNIFTY:'NSE:BANKNIFTY',NIFTYIT:'NSE:CNXIT',NIFTYFMCG:'NSE:CNXFMCG',NIFTYPHARMA:'NSE:CNXPHARMA',NIFTYAUTO:'NSE:CNXAUTO',NIFTYMETAL:'NSE:CNXMETAL',NIFTYREALTY:'NSE:CNXREALTY',NIFTYENERGY:'NSE:CNXENERGY',NIFTYINFRA:'NSE:CNXINFRA',NIFTYPSUBANK:'NSE:CNXPSUBANK',NIFTYMIDCAP:'NSE:CNXMIDCAP',NIFTYSMALLCAP:'NSE:CNXSMALLCAP',NIFTYNXT50:'NSE:NIFTYJR',SENSEX:'BSE:SENSEX',INDIAVIX:'NSE:INDIAVIX'};
   const tvSymbol=s=>TV_INDEX[s]||('NSE:'+s.replace(/[&-]/g,'_'));
+  const tvWidgetSymbol=s=>(TV_INDEX[s]&&TV_INDEX[s].startsWith('BSE:'))?TV_INDEX[s]:(TV_INDEX[s]?TV_INDEX[s]:('BSE:'+s.replace(/[&-]/g,'')));
   function loadTV(cb){ if(window.TradingView&&window.TradingView.widget) return cb(); const s=document.createElement('script'); s.src='https://s3.tradingview.com/tv.js'; s.onload=cb; s.onerror=()=>{ const t=document.getElementById('tvWidgetRoot'); if(t) t.innerHTML='<div class="metric-sub" style="padding:30px;">Could not load TradingView (blocked or offline). Use the built-in chart instead.</div>'; }; document.head.appendChild(s); }
   function applyMode(){
     const pro=document.getElementById('proChartRoot'), tv=document.getElementById('tvWidgetRoot'); if(!pro||!tv) return;
     document.querySelectorAll('#chartModeBtns [data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===S.mode));
     const inner=pro.querySelectorAll('.pc-top,.pc-panel,.pc-body,#pcResults,#pcNote');
-    if(S.mode==='tv'){ inner.forEach(e=>e.style.display='none'); tv.style.display='block'; tv.innerHTML=''; const sym=tvSymbol(S.sym); tv.style.height=(document.fullscreenElement?window.innerHeight-90:760)+'px';
-      loadTV(()=>{ try{ new TradingView.widget({container_id:'tvWidgetRoot',autosize:true,symbol:sym,interval:'D',timezone:'Asia/Kolkata',theme:'dark',style:'1',locale:'en',toolbar_bg:'#0b0f17',enable_publishing:false,allow_symbol_change:true,withdateranges:true,hide_side_toolbar:false,details:true,hotlist:false,calendar:false,studies:['RSI@tv-basicstudies','MASimple@tv-basicstudies'],save_image:true}); }catch(e){ tv.innerHTML='<div class="metric-sub" style="padding:30px;">TradingView failed to start.</div>'; } }); }
+    if(S.mode==='tv'){ inner.forEach(e=>e.style.display='none'); tv.style.display='block'; tv.innerHTML='<div class="metric-sub" style="padding:8px 2px;">Embedded TradingView shows BSE-listed symbols. If it says \u201Conly available on TradingView\u201D (common for NSE indices), use <b>Open on tradingview.com \u2197</b> above, or the Upstox chart.</div><div id="tvInner" style="height:calc(100% - 34px);"></div>'; const sym=tvWidgetSymbol(S.sym); tv.style.height=(document.fullscreenElement?window.innerHeight-90:760)+'px';
+      loadTV(()=>{ try{ new TradingView.widget({container_id:'tvInner',autosize:true,symbol:sym,interval:'D',timezone:'Asia/Kolkata',theme:'dark',style:'1',locale:'en',toolbar_bg:'#0b0f17',enable_publishing:false,allow_symbol_change:true,withdateranges:true,hide_side_toolbar:false,details:true,hotlist:false,calendar:false,studies:['RSI@tv-basicstudies','MASimple@tv-basicstudies'],save_image:true}); }catch(e){ tv.innerHTML='<div class="metric-sub" style="padding:30px;">TradingView failed to start.</div>'; } }); }
     else { tv.style.display='none'; tv.innerHTML=''; inner.forEach(e=>{ e.style.display=''; }); ['pcIndPanel','pcStratPanel'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; }); }
   }
   function setMode(m){ S.mode=m; lsSet('pcMode',m); applyMode(); if(m==='pro'){ if(S.chart) resize(); else reload(); } }

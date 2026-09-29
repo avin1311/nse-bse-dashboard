@@ -216,14 +216,21 @@ async function getUpstoxLTPC(instrumentKey) {
   if (ltpcCache[instrumentKey] && now - ltpcCache[instrumentKey].time < LTPC_TTL) {
     return { ...ltpcCache[instrumentKey].data, cached: true };
   }
-  const data = await upstoxGet(`/market-quote/ltp?instrument_key=${encodeURIComponent(instrumentKey)}`);
-  // Upstox returns { [instrumentKey]: { last_price, ohlc: { close } } }
-  const entry = data && data[instrumentKey.replace('|', ':')];
-  if (!entry) throw new Error('No LTPC data returned for ' + instrumentKey);
+  // Full quote (has net_change + ohlc + volume); fall back to plain LTP if it fails
+  let entry = null;
+  try {
+    const q = await upstoxGet(`/market-quote/quotes?instrument_key=${encodeURIComponent(instrumentKey)}`);
+    entry = q && (q[instrumentKey.replace('|', ':')] || Object.values(q)[0]);
+  } catch (e) { entry = null; }
+  if (!entry) {
+    const data = await upstoxGet(`/market-quote/ltp?instrument_key=${encodeURIComponent(instrumentKey)}`);
+    entry = data && (data[instrumentKey.replace('|', ':')] || Object.values(data)[0]);
+  }
+  if (!entry) throw new Error('No quote returned for ' + instrumentKey);
   const price = entry.last_price;
-  const prevClose = entry.ohlc?.close || price;
+  let prevClose = (entry.net_change != null && price != null) ? price - entry.net_change : (entry.cp || entry.ohlc?.close || price);
   const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : 0;
-  const result = { price, prevClose, changePct, source: 'upstox' };
+  const result = { price, prevClose, changePct, dayHigh: entry.ohlc?.high, dayLow: entry.ohlc?.low, open: entry.ohlc?.open, volume: entry.volume, source: 'upstox' };
   ltpcCache[instrumentKey] = { data: result, time: now };
   return result;
 }
@@ -235,15 +242,11 @@ async function getUpstoxLTPC(instrumentKey) {
 app.get('/api/quote/:symbol', async (req, res) => {
   const sym = req.params.symbol;
   // Index symbols (start with ^) always use Yahoo — not in the Upstox instruments format
-  if (!sym.startsWith('^') && process.env.UPSTOX_ACCESS_TOKEN) {
+  if (upstoxTokens().length) {
     try {
       // Resolve the instrument key from the universe cache if available
-      let instrumentKey = UPSTOX_INDEX_KEYS[sym];
-      if (!instrumentKey) {
-        if (!universeCache.data) await fetchAndCacheUniverse().catch(() => {});
-        const hit = universeCache.data && universeCache.data.find(s => s.symbol === sym);
-        if (hit && hit.instrument_key) instrumentKey = hit.instrument_key;
-      }
+      let instrumentKey = null;
+      try { instrumentKey = await dataKeyFor(sym.startsWith('^') ? appSym(sym) : sym); } catch (e) { instrumentKey = null; }
       if (instrumentKey) {
         const data = await getUpstoxLTPC(instrumentKey);
         return res.json(data);
@@ -278,6 +281,7 @@ app.get('/api/history/:symbol', async (req, res) => {
 });
 
 
+
 // ============================================================
 // REAL DAILY HISTORY FOR SIGNALS (batched, cached 30 min)
 // The screener/stock signals are computed from these real closes
@@ -288,10 +292,15 @@ const SCAN_HIST_TTL = 30 * 60 * 1000;
 async function getScanHistory(sym) {
   const c = scanHistCache[sym];
   if (c && Date.now() - c.time < SCAN_HIST_TTL) return c.data;
-  const parsed = await getChartData(sym, '1y', '1d');
-  if (!parsed || !parsed.series || parsed.series.length < 30) throw new Error('insufficient history');
-  const ser = parsed.series.slice(-250);
-  const data = { c: ser.map(p => p.c), h: ser.map(p => p.h), l: ser.map(p => p.l), v: ser.map(p => p.v), t: ser.map(p => p.t) };
+  let ser = null, source = 'upstox';
+  try { const rows = await getUpstoxCandles(appSym(sym), '1D'); if (rows.length >= 30) ser = rows.slice(-250).map(r => ({ t: r.t, c: r.c, h: r.h, l: r.l, v: r.v })); } catch (e) { /* fall back to Yahoo */ }
+  if (!ser) {
+    source = 'yahoo';
+    const parsed = await getChartData(sym, '1y', '1d');
+    if (!parsed || !parsed.series || parsed.series.length < 30) throw new Error('insufficient history');
+    ser = parsed.series.slice(-250);
+  }
+  const data = { c: ser.map(p => p.c), h: ser.map(p => p.h), l: ser.map(p => p.l), v: ser.map(p => p.v), t: ser.map(p => p.t), source };
   scanHistCache[sym] = { data, time: Date.now() };
   return data;
 }
@@ -319,9 +328,15 @@ const SEAS_TTL = 12 * 60 * 60 * 1000;
 async function getSeasonality(sym) {
   const c = seasCache[sym];
   if (c && Date.now() - c.time < SEAS_TTL) return c.data;
-  const parsed = await getChartData(sym, 'max', '1mo');
-  if (!parsed || !parsed.series || parsed.series.length < 14) throw new Error('insufficient monthly history');
-  const data = { t: parsed.series.map(p => p.t), c: parsed.series.map(p => p.c) };
+  let ser = null, source = 'upstox';
+  try { const rows = await getUpstoxCandles(appSym(sym), '1M'); if (rows.length >= 14) ser = rows; } catch (e) { /* fall back to Yahoo */ }
+  if (!ser) {
+    source = 'yahoo';
+    const parsed = await getChartData(sym, 'max', '1mo');
+    if (!parsed || !parsed.series || parsed.series.length < 14) throw new Error('insufficient monthly history');
+    ser = parsed.series;
+  }
+  const data = { t: ser.map(p => p.t), c: ser.map(p => p.c), source };
   seasCache[sym] = { data, time: Date.now() };
   return data;
 }
@@ -378,7 +393,7 @@ let streamerRetryTimer = null;
 
 function initUpstoxAuth() {
   if (!UpstoxClient) return false;
-  const token = process.env.UPSTOX_ACCESS_TOKEN;
+  const token = process.env.UPSTOX_OAUTH_TOKEN || process.env.UPSTOX_ACCESS_TOKEN || process.env.UPSTOX_ANALYTICS_TOKEN;
   if (!token) return false;
   const defaultClient = UpstoxClient.ApiClient.instance;
   const OAUTH2 = defaultClient.authentications['OAUTH2'];
@@ -481,8 +496,8 @@ async function symbolToInstrumentKey(symbol) {
 
 // SSE endpoint — browser opens this to receive 1s price updates
 app.get('/api/stream', async (req, res) => {
-  if (!process.env.UPSTOX_ACCESS_TOKEN || !UpstoxClient) {
-    return res.status(503).json({ error: 'Upstox streaming not configured — UPSTOX_ACCESS_TOKEN missing' });
+  if (!upstoxTokens().length || !UpstoxClient) {
+    return res.status(503).json({ error: 'Upstox streaming not configured — no Upstox token set' });
   }
 
   const rawSymbols = (req.query.symbols || '').split(',').filter(Boolean);
@@ -570,14 +585,15 @@ app.get('/api/stream', async (req, res) => {
 // Debug endpoint — shows streamer status and what's being subscribed
 let upstoxTokenCheck = { time: 0, valid: false, reason: null, token: null };
 async function checkUpstoxToken() {
-  const token = process.env.UPSTOX_ACCESS_TOKEN;
-  if (!token) return { valid: false, reason: 'no token' };
+  const toks = upstoxTokens();
+  if (!toks.length) return { valid: false, reason: 'no token set' };
+  const key = toks.join('|');
   const now = Date.now();
-  if (upstoxTokenCheck.token === token && now - upstoxTokenCheck.time < 30000) return upstoxTokenCheck;
+  if (upstoxTokenCheck.token === key && now - upstoxTokenCheck.time < 30000) return upstoxTokenCheck;
   let valid = false, reason = null;
-  try { await upstoxGet('/user/profile'); valid = true; }
+  try { await upstoxGet('/market-quote/ltp?instrument_key=' + encodeURIComponent('NSE_INDEX|Nifty 50')); valid = true; }
   catch (e) { reason = e.message; }
-  upstoxTokenCheck = { time: now, valid, reason, token };
+  upstoxTokenCheck = { time: now, valid, reason, token: key };
   return upstoxTokenCheck;
 }
 
@@ -590,7 +606,7 @@ app.get('/api/stream/status', async (req, res) => {
     activeClients: sseClients.size,
     subscribedKeys: allSubscribedKeys(),
     cachedPrices: Array.from(latestPrices.keys()),
-    upstoxTokenSet: !!process.env.UPSTOX_ACCESS_TOKEN,
+    upstoxTokenSet: upstoxTokens().length > 0,
     sdkLoaded: !!UpstoxClient
   });
 });
@@ -916,7 +932,7 @@ app.get('/upstox-callback', async (req, res) => {
     if (!data.access_token) throw new Error(JSON.stringify(data));
     const token = data.access_token;
     // Update the running server's token immediately — no restart needed
-    process.env.UPSTOX_ACCESS_TOKEN = token;
+    process.env.UPSTOX_OAUTH_TOKEN = token;
     upstoxTokenCheck = { time: 0, valid: false, reason: null, token: null };
     if (UpstoxClient) initUpstoxAuth();
     // Restart streamer with new token if clients are waiting
@@ -1004,19 +1020,37 @@ const HARDCODED_EQ_KEYS = {
   DLF:        'NSE_EQ|INE271C01023',
 };
 
-function upstoxHeaders() {
-  const token = process.env.UPSTOX_ACCESS_TOKEN;
-  if (!token) throw new Error('UPSTOX_ACCESS_TOKEN not configured on the server');
-  return { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` };
+// ---- Upstox token pool -------------------------------------------------
+// UPSTOX_ANALYTICS_TOKEN : 1-year read-only token (REST market data, no WebSocket)
+// UPSTOX_ACCESS_TOKEN    : legacy name — either kind of token
+// UPSTOX_OAUTH_TOKEN     : set automatically by "Connect Upstox" login (daily, allows WebSocket)
+// REST calls try each token in turn, so an expired daily token never breaks data
+// as long as the long-lived Analytics token is present.
+function upstoxTokens() {
+  return [...new Set([process.env.UPSTOX_OAUTH_TOKEN, process.env.UPSTOX_ACCESS_TOKEN, process.env.UPSTOX_ANALYTICS_TOKEN].filter(Boolean))];
 }
-async function upstoxGet(path) {
-  const resp = await fetch(`${UPSTOX_BASE}${path}`, { headers: upstoxHeaders() });
-  const json = await resp.json().catch(() => null);
-  if (!resp.ok || !json || json.status !== 'success') {
-    throw new Error((json && (json.errors?.[0]?.message || json.message)) || `Upstox request failed (${resp.status})`);
+let upstoxNext = 0;
+async function upstoxThrottle() { // keep well under Upstox rate limits (~9 req/s)
+  const now = Date.now(); const at = Math.max(now, upstoxNext); upstoxNext = at + 110;
+  if (at > now) await new Promise(r => setTimeout(r, at - now));
+}
+async function upstoxFetchJson(url) {
+  const toks = upstoxTokens();
+  if (!toks.length) throw new Error('No Upstox token configured (set UPSTOX_ANALYTICS_TOKEN on Render)');
+  let lastErr = null;
+  for (const tk of toks) {
+    await upstoxThrottle();
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${tk}` } });
+    const json = await resp.json().catch(() => null);
+    if (resp.ok && json && json.status === 'success') return json.data;
+    const msg = (json && (json.errors?.[0]?.message || json.message)) || `Upstox request failed (${resp.status})`;
+    lastErr = new Error(msg);
+    if (resp.status === 401 || resp.status === 403 || /invalid credentials|token/i.test(msg)) continue; // try the next token
+    throw lastErr;
   }
-  return json.data;
+  throw lastErr;
 }
+async function upstoxGet(path) { return upstoxFetchJson(`${UPSTOX_BASE}${path}`); }
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1151,6 +1185,102 @@ async function getUpstoxShareholding(symbol) {
 app.get('/api/shareholding/:symbol', async (req, res) => {
   try { res.json(await getUpstoxShareholding(req.params.symbol)); }
   catch (e) { res.status(502).json({ error: e.message, symbol: req.params.symbol }); }
+});
+
+// ============================================================
+// UPSTOX HISTORICAL CANDLES (primary price-data source)
+// Yahoo is only a labelled fallback. Works with the Analytics token.
+// ============================================================
+const DATA_INDEX_KEYS = {
+  ...UPSTOX_INDEX_KEYS,
+  NIFTYFMCG: 'NSE_INDEX|Nifty FMCG', NIFTYPHARMA: 'NSE_INDEX|Nifty Pharma', NIFTYAUTO: 'NSE_INDEX|Nifty Auto',
+  NIFTYMETAL: 'NSE_INDEX|Nifty Metal', NIFTYREALTY: 'NSE_INDEX|Nifty Realty', NIFTYENERGY: 'NSE_INDEX|Nifty Energy',
+  NIFTYINFRA: 'NSE_INDEX|Nifty Infra', NIFTYPSUBANK: 'NSE_INDEX|Nifty PSU Bank', NIFTYMIDCAP: 'NSE_INDEX|NIFTY MIDCAP 100',
+  NIFTYSMALLCAP: 'NSE_INDEX|NIFTY SMLCAP 100', INDIAVIX: 'NSE_INDEX|India VIX'
+};
+const DATA_INDEX_NAMES = {
+  NIFTY: ['Nifty 50'], BANKNIFTY: ['Nifty Bank'], NIFTYIT: ['Nifty IT'], NIFTYFMCG: ['Nifty FMCG', 'FMCG'], NIFTYPHARMA: ['Nifty Pharma', 'Pharma'],
+  NIFTYAUTO: ['Nifty Auto'], NIFTYMETAL: ['Nifty Metal', 'Metal'], NIFTYREALTY: ['Nifty Realty', 'Realty'], NIFTYENERGY: ['Nifty Energy'],
+  NIFTYINFRA: ['Nifty Infra'], NIFTYPSUBANK: ['PSU Bank'], NIFTYMIDCAP: ['MIDCAP 100', 'Midcap 100'], NIFTYSMALLCAP: ['SMLCAP 100', 'Smallcap 100'],
+  NIFTYNXT50: ['Next 50'], SENSEX: ['SENSEX'], INDIAVIX: ['India VIX']
+};
+const YAHOO_TO_APP = { '^NSEI': 'NIFTY', '^NSEBANK': 'BANKNIFTY', '^CNXIT': 'NIFTYIT', '^CNXFMCG': 'NIFTYFMCG', '^CNXPHARMA': 'NIFTYPHARMA', '^CNXAUTO': 'NIFTYAUTO',
+  '^CNXMETAL': 'NIFTYMETAL', '^CNXREALTY': 'NIFTYREALTY', '^CNXENERGY': 'NIFTYENERGY', '^CNXINFRA': 'NIFTYINFRA', '^CNXPSUBANK': 'NIFTYPSUBANK',
+  '^CNXMIDCAP': 'NIFTYMIDCAP', '^CNXSMALLCAP': 'NIFTYSMALLCAP', '^NSMIDCP100': 'NIFTYNXT50', '^BSESN': 'SENSEX', '^INDIAVIX': 'INDIAVIX' };
+const APP_TO_YAHOO = Object.fromEntries(Object.entries(YAHOO_TO_APP).map(([y, a]) => [a, y]));
+const appSym = ys => YAHOO_TO_APP[ys] || String(ys).replace(/\.NS$/, '');
+const yahooSym = as => APP_TO_YAHOO[as] || (as + '.NS');
+
+const resolvedIdxKeys = {};
+async function dataKeyFor(sym) {
+  if (resolvedIdxKeys[sym]) return resolvedIdxKeys[sym];
+  if (DATA_INDEX_KEYS[sym]) return DATA_INDEX_KEYS[sym];
+  const normalized = sym.replace(/[&-]/g, '_');
+  if (HARDCODED_EQ_KEYS[sym]) return HARDCODED_EQ_KEYS[sym];
+  if (HARDCODED_EQ_KEYS[normalized]) return HARDCODED_EQ_KEYS[normalized];
+  if (!universeCache.data) await fetchAndCacheUniverse().catch(() => {});
+  const hit = universeCache.data && universeCache.data.find(x => x.symbol === sym);
+  if (hit && hit.instrument_key) return hit.instrument_key;
+  throw new Error('No Upstox instrument key for ' + sym);
+}
+// [unit, interval, days back]  (weeks/months: from 2000)
+const CANDLE_TF = { '1m': ['minutes', 1, 5], '5m': ['minutes', 5, 25], '15m': ['minutes', 15, 28], '30m': ['minutes', 30, 85], '1h': ['hours', 1, 85], '1D': ['days', 1, 365 * 5], '1W': ['weeks', 1, 0], '1M': ['months', 1, 0] };
+const candleCache = {};
+function istDate(offsetDays) { const d = new Date(Date.now() + 19800000 - (offsetDays || 0) * 86400000); return d.toISOString().slice(0, 10); }
+function parseCandles(rows, unit) {
+  const dateOnly = (unit === 'days' || unit === 'weeks' || unit === 'months');
+  return (rows || []).map(c => {
+    let t = Math.floor(Date.parse(c[0]) / 1000);
+    if (dateOnly) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(c[0]); if (m) t = Date.UTC(+m[1], +m[2] - 1, +m[3], 12) / 1000; } // pin to noon UTC of the IST date
+    return { t, o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5] || 0 };
+  }).filter(x => x.c > 0 && !isNaN(x.t));
+}
+async function fetchCandlesForKey(key, tf) {
+  const [unit, interval, days] = CANDLE_TF[tf];
+  const enc = encodeURIComponent(key);
+  const from = days ? istDate(days) : '2000-01-01';
+  const to = istDate(0);
+  const hist = await upstoxFetchJson(`https://api.upstox.com/v3/historical-candle/${enc}/${unit}/${interval}/${to}/${from}`);
+  let rows = parseCandles(hist && hist.candles, unit);
+  if (unit === 'minutes' || unit === 'hours' || unit === 'days') { // today's still-forming candles
+    try {
+      const intra = await upstoxFetchJson(`https://api.upstox.com/v3/historical-candle/intraday/${enc}/${unit}/${interval}`);
+      rows = rows.concat(parseCandles(intra && intra.candles, unit));
+    } catch (e) { /* market not open yet / no intraday data — historical is enough */ }
+  }
+  const seen = new Set(); const out = [];
+  rows.sort((a, b) => a.t - b.t).forEach(r => { if (!seen.has(r.t)) { seen.add(r.t); out.push(r); } });
+  return out;
+}
+async function getUpstoxCandles(sym, tf) {
+  if (!CANDLE_TF[tf]) throw new Error('unsupported timeframe ' + tf);
+  const ck = sym + '|' + tf; const ttl = /m|h/.test(tf) && tf !== '1M' ? 20000 : 30 * 60000;
+  const c = candleCache[ck]; if (c && Date.now() - c.time < ttl) return c.data;
+  let key = await dataKeyFor(sym); let rows;
+  try { rows = await fetchCandlesForKey(key, tf); }
+  catch (e) {
+    const kw = DATA_INDEX_NAMES[sym];
+    if (kw && DATA_INDEX_KEYS[sym] && /instrument|invalid|not found|400|404/i.test(e.message)) { // self-heal a wrong index key by name search
+      key = await findIndexInstrumentKey(kw); resolvedIdxKeys[sym] = key; rows = await fetchCandlesForKey(key, tf);
+    } else throw e;
+  }
+  if (!rows.length) throw new Error('Upstox returned no candles for ' + sym);
+  candleCache[ck] = { data: rows, time: Date.now() };
+  return rows;
+}
+const YF_TF = { '1m': ['5d', '1m'], '5m': ['5d', '5m'], '15m': ['1mo', '15m'], '30m': ['1mo', '30m'], '1h': ['6mo', '60m'], '1D': ['2y', '1d'], '1W': ['5y', '1wk'], '1M': ['max', '1mo'] };
+app.get('/api/candles/:symbol', async (req, res) => {
+  const sym = req.params.symbol; const tf = req.query.tf || '5m';
+  const errors = [];
+  try { const rows = await getUpstoxCandles(sym, tf); return res.json({ symbol: sym, tf, source: 'upstox', series: rows }); }
+  catch (e) { errors.push('Upstox: ' + e.message); }
+  try {
+    const [r, i] = YF_TF[tf] || YF_TF['5m'];
+    const p = await getChartData(yahooSym(sym), r, i);
+    if (p && p.series && p.series.length > 5) return res.json({ symbol: sym, tf, source: 'yahoo', series: p.series, note: errors.join(' | ') });
+    errors.push('Yahoo: no data');
+  } catch (e) { errors.push('Yahoo: ' + e.message); }
+  res.status(502).json({ error: errors.join(' | '), symbol: sym });
 });
 
 app.get('/api/upstox/fno/:index', async (req, res) => {

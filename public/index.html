@@ -1357,16 +1357,17 @@ function renderOverview(d){
     .then(r=>r.json())
     .then(f=>{
       if(f.error || window.CURRENT?.symbol !== d.symbol) return; // stale or error
+      const tag=(live)=>live?' <span style="font-size:9px;color:var(--green);">LIVE</span>':'';
       const realCards=[
-        ["Market cap", f.marketCap ? `&#8377;${fmt(f.marketCap/1e12, 2)} T` : `&#8377;${fmt(d.marketCapT,2)} T`, f.sector||''],
-        ["P/E ratio", f.pe!=null ? fmt(f.pe,1) : fmt(d.pe,1), f.peSector!=null ? `Sector avg ${fmt(f.peSector,1)}` : `Fwd ${fmt(d.pe*0.88,1)}`],
-        ["P/B ratio", f.pb!=null ? fmt(f.pb,2) : fmt(d.pb,2), f.pbSector!=null ? `Sector avg ${fmt(f.pbSector,2)}` : ''],
-        ["ROE", f.roe!=null ? `${fmt(f.roe,1)}%` : `${fmt(d.roe,1)}%`, f.roce!=null ? `ROCE ${fmt(f.roce,1)}%` : `ROA ${fmt(d.roa,1)}%`],
-        ["D/E ratio", f.debtEquity!=null ? fmt(f.debtEquity,2) : fmt(d.deRatio,2), f.currentRatio!=null ? `Current ratio ${fmt(f.currentRatio,2)}` : ''],
-        ["Div yield", f.dividendYield!=null ? `${fmt(f.dividendYield,2)}%` : `${fmt(d.divYield,2)}%`, f.eps!=null ? `EPS ₹${fmt(f.eps,2)}` : '']
+        ["Market cap", `&#8377;${fmt(d.marketCapT,2)} T`, f.sectorMarketCapInr?`Sector ${f.sectorMarketCapInr}`:(f.sector||''), false],
+        ["P/E ratio", f.pe!=null ? fmt(f.pe,1) : fmt(d.pe,1), f.peSector!=null ? `Sector avg ${fmt(f.peSector,1)}` : `Fwd ${fmt(d.pe*0.88,1)}`, f.pe!=null],
+        ["P/B ratio", f.pb!=null ? fmt(f.pb,2) : fmt(d.pb,2), f.pbSector!=null ? `Sector avg ${fmt(f.pbSector,2)}` : '', f.pb!=null],
+        ["ROE", f.roe!=null ? `${fmt(f.roe,1)}%` : `${fmt(d.roe,1)}%`, f.roeSector!=null ? `Sector ${fmt(f.roeSector,1)}%` : '', f.roe!=null],
+        ["ROCE", f.roce!=null ? `${fmt(f.roce,1)}%` : '&mdash;', f.roceSector!=null ? `Sector ${fmt(f.roceSector,1)}%` : '', f.roce!=null],
+        ["EV/EBITDA", f.evEbitda!=null ? fmt(f.evEbitda,1) : '&mdash;', f.evEbitdaSector!=null ? `Sector ${fmt(f.evEbitdaSector,1)}` : (f.roa!=null?`ROA ${fmt(f.roa,1)}%`:''), f.evEbitda!=null]
       ];
-      document.getElementById('overviewGrid').innerHTML = realCards.map(([l,v,s])=>`
-        <div class="card"><div class="card-title">${l} <span style="font-size:9px;color:var(--green);">LIVE</span></div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
+      document.getElementById('overviewGrid').innerHTML = realCards.map(([l,v,s,live])=>`
+        <div class="card"><div class="card-title">${l}${tag(live)}</div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
       // Also update the company description if available
       if(f.description && document.getElementById('stockDesc')){
         document.getElementById('stockDesc').textContent = f.description;
@@ -1563,10 +1564,34 @@ function renderFourPanel(d){
     <div class="card"><div class="card-title">Price performance</div>${performance}</div>
     <div class="card"><div class="card-title">Shareholding</div>${shareholding}</div>`;
 
+  upgradeShareholding(d);
   const sc=document.getElementById('shareChart');
   charts.share = new Chart(sc,{type:'doughnut',data:{labels:['Promoter','FII','DII','Public'],
     datasets:[{data:[d.promoter,d.fii,d.dii,d.publicHold],backgroundColor:['#3d8bfd','#26c281','#f0a93a','#5b6472'],borderWidth:0}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'65%'}});
+}
+
+
+function upgradeShareholding(d){
+  fetch(`/api/shareholding/${encodeURIComponent(d.symbol)}`,{cache:'no-store'}).then(r=>r.json()).then(sh=>{
+    if(sh.error || window.CURRENT?.symbol!==d.symbol) return;
+    const C=sh.categories||{}, L=sh.latest||{};
+    const defs=[['promoters','Promoters','#3d8bfd'],['fii','FII','#26c281'],['other_dii','Other DII','#f0a93a'],['mutual_funds','Mutual funds','#a970ff'],['retail_and_other','Retail & other','#5b6472']].filter(x=>L[x[0]]!=null);
+    if(!defs.length) return;
+    const card=[...document.querySelectorAll('#fourPanel .card')].find(c=>c.querySelector('.card-title')?.textContent.startsWith('Shareholding'));
+    if(!card) return;
+    const periods=(C[defs[0][0]]||[]).map(p=>p.period);
+    const rows=defs.map(([k,label,col])=>{
+      const h=C[k]||[]; const cur=h.length?h[h.length-1].value:null; const prev=h.length>1?h[h.length-2].value:null;
+      const ch=(cur!=null&&prev!=null)?cur-prev:null;
+      return `<div class="row-flex"><span class="lbl"><span class="dot" style="background:${col};display:inline-block;"></span> ${label}</span><span>${fmt(cur,2)}% ${ch!=null?`<span class="${ch>=0?'up':'down'}" style="font-size:11px;">${ch>=0?'+':''}${ch.toFixed(2)}</span>`:''}</span></div>`;
+    }).join('');
+    const hist=`<div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;font-size:11px;"><thead><tr><th style="text-align:left;">%</th>${periods.map(p=>`<th>${p}</th>`).join('')}</tr></thead><tbody>${defs.map(([k,label])=>`<tr><td>${label}</td>${(C[k]||[]).map(p=>`<td style="text-align:center;">${fmt(p.value,1)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    card.innerHTML=`<div class="card-title">Shareholding <span style="font-size:9px;color:var(--green);">LIVE</span></div><div class="chart-wrap" style="height:120px;margin-bottom:8px;"><canvas id="shareChart"></canvas></div>${rows}${hist}<div class="metric-sub" style="margin-top:6px;">Latest quarter: ${periods[periods.length-1]||''} &middot; change vs previous quarter</div>`;
+    if(charts.share && charts.share.destroy) charts.share.destroy();
+    charts.share=new Chart(document.getElementById('shareChart'),{type:'doughnut',data:{labels:defs.map(x=>x[1]),datasets:[{data:defs.map(x=>L[x[0]]),backgroundColor:defs.map(x=>x[2]),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'65%'}});
+    d.promoterReal=L.promoters; // available to screener filter
+  }).catch(()=>{});
 }
 
 function renderMacro(d){

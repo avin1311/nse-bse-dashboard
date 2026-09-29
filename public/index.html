@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE + BSE Analytics Dashboard</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
@@ -692,6 +694,36 @@
 </div>
 
 <script>
+/* Render's free tier sleeps when idle and answers the first requests with an HTML "waking up" page instead of JSON.
+   Retry those API calls quietly (with a small banner) instead of failing with "Unexpected token '<'". */
+(function(){
+  const _f=window.fetch.bind(window); let waking=0, bar=null;
+  function banner(on){
+    if(on){ waking++; }
+    else if(waking>0){ waking--; }
+    if(!bar&&on){ bar=document.createElement('div'); bar.style.cssText='position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:99999;background:#f0a93a;color:#111;padding:6px 14px;border-radius:8px;font:12px/1.4 sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+      bar.textContent='Server is waking up (free hosting sleeps when idle) — retrying automatically…'; (document.body||document.documentElement).appendChild(bar); }
+    if(bar) bar.style.display=waking>0?'block':'none';
+  }
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  window.fetch=async function(u,o){
+    const url=typeof u==='string'?u:(u&&u.url)||'';
+    if(!/^\/api\//.test(url)) return _f(u,o);
+    let counted=false;
+    for(let n=0;n<10;n++){
+      try{
+        const r=await _f(u,o);
+        let ct=''; try{ ct=(r.headers&&r.headers.get('content-type'))||''; }catch(e){}
+        const asleep=(r.status===502||r.status===503||r.status===504)||(/text\/html/.test(ct)&&r.status!==404);
+        if(!asleep){ if(counted) banner(false); return r; }
+        if(!counted){ counted=true; banner(true); }
+      }catch(e){ if(!counted){ counted=true; banner(true); } }
+      await sleep(Math.min(6000,2000+n*1000));
+    }
+    if(counted) banner(false);
+    return _f(u,o);
+  };
+})();
 /* ============================================================
    STOCK UNIVERSE
    Add more rows here to extend coverage. exch = listing venues.

@@ -25,7 +25,32 @@
 const express = require('express');
 const path = require('path');
 
+const compression = require('compression');
+const { AsyncLocalStorage } = require('async_hooks');
+const lowPriority = new AsyncLocalStorage(); // background work (scans) runs in this lane so a user's click is never queued behind it
+
 const app = express();
+// Instant health check (no upstream calls) — point an uptime pinger here to keep the free Render instance awake
+app.get('/healthz', (req, res) => { res.set('Cache-Control', 'no-store'); res.type('text/plain').send('ok'); });
+// gzip/deflate every text response (the page alone is ~325 KB uncompressed); never buffer the live SSE stream
+app.use(compression({ filter: (req, res) => (req.path.startsWith('/api/stream') ? false : compression.filter(req, res)) }));
+// tiny response caches so many tabs / rapid clicks share one upstream call
+function microCache(ttl) {
+  const store = new Map();
+  return (req, res, next) => {
+    if (req.method !== 'GET') return next();
+    const k = req.originalUrl, hit = store.get(k);
+    if (hit && Date.now() - hit.t < ttl) return res.status(hit.status).json(hit.body);
+    const oj = res.json.bind(res);
+    res.json = (b) => { if (res.statusCode < 400) { store.set(k, { t: Date.now(), status: res.statusCode, body: b }); if (store.size > 600) store.delete(store.keys().next().value); } return oj(b); };
+    next();
+  };
+}
+app.use('/api/quote', microCache(4000));
+app.use('/api/upstox/fno', microCache(60000));
+app.use('/api/news', microCache(5 * 60000));
+app.use('/api/shareholding', microCache(30 * 60000));
+app.use('/api/fundamentals', microCache(10 * 60000));
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
@@ -304,7 +329,7 @@ async function getScanHistory(sym) {
   scanHistCache[sym] = { data, time: Date.now() };
   return data;
 }
-app.get('/api/scan-history', async (req, res) => {
+app.get('/api/scan-history', (req, res) => lowPriority.run(true, async () => {
   const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 60);
   if (!symbols.length) return res.status(400).json({ error: 'symbols required' });
   const out = {};
@@ -317,7 +342,7 @@ app.get('/api/scan-history', async (req, res) => {
   }
   await Promise.all(Array.from({ length: 6 }, worker));
   res.json(out);
-});
+}));
 
 
 // ============================================================
@@ -340,7 +365,7 @@ async function getSeasonality(sym) {
   seasCache[sym] = { data, time: Date.now() };
   return data;
 }
-app.get('/api/seasonality-batch', async (req, res) => {
+app.get('/api/seasonality-batch', (req, res) => lowPriority.run(true, async () => {
   const symbols = (req.query.symbols || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 40);
   if (!symbols.length) return res.status(400).json({ error: 'symbols required' });
   const out = {};
@@ -353,14 +378,14 @@ app.get('/api/seasonality-batch', async (req, res) => {
   }
   await Promise.all(Array.from({ length: 6 }, worker));
   res.json(out);
-});
+}));
 
 // ============================================================
 // F&O-ENABLED UNDERLYINGS (from Upstox NSE instruments file), cached 24h
 // ============================================================
 const FNO_FALLBACK = ['RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','SBIN','BHARTIARTL','ITC','LT','KOTAKBANK','AXISBANK','HINDUNILVR','BAJFINANCE','MARUTI','SUNPHARMA','TITAN','ASIANPAINT','ULTRACEMCO','NESTLEIND','WIPRO','HCLTECH','TECHM','POWERGRID','NTPC','ONGC','COALINDIA','TATAMOTORS','TATASTEEL','JSWSTEEL','HINDALCO','ADANIENT','ADANIPORTS','M&M','BAJAJFINSV','DRREDDY','CIPLA','DIVISLAB','EICHERMOT','HEROMOTOCO','BPCL','GRASIM','INDUSINDBK','BRITANNIA','APOLLOHOSP','TATACONSUM','SBILIFE','HDFCLIFE','BAJAJ-AUTO','UPL','VOLTAS','PIDILITIND','DLF','GAIL','IOC','VEDL','SAIL','PNB','BANKBARODA','CANBK','IDFCFIRSTB','FEDERALBNK','AUBANK','BANDHANBNK','TATAPOWER','TATACHEM','TVSMOTOR','ASHOKLEY','BHEL','BEL','HAL','IRCTC','ZOMATO','PAYTM','NAUKRI','DMART','SIEMENS','ABB','HAVELLS','CROMPTON','GODREJCP','DABUR','MARICO','COLPAL','LUPIN','AUROPHARMA','TORNTPHARM','ALKEM','BIOCON','MCX','CHOLAFIN','MUTHOOTFIN','MANAPPURAM','LICHSGFIN','RECLTD','PFC','INDIGO','JUBLFOOD','PAGEIND','TRENT','BERGEPAINT','ACC','AMBUJACEM','SHREECEM','INDHOTEL','LTIM','PERSISTENT','COFORGE','MPHASIS','OFSS'];
 let fnoCache = { data: null, time: 0, source: null };
-app.get('/api/fno-stocks', async (req, res) => {
+app.get('/api/fno-stocks', (req, res) => lowPriority.run(true, async () => {
   if (fnoCache.data && Date.now() - fnoCache.time < 24 * 60 * 60 * 1000) return res.json({ symbols: fnoCache.data, source: fnoCache.source });
   try {
     const list = await fetchRawInstrumentFile('NSE');
@@ -375,7 +400,7 @@ app.get('/api/fno-stocks', async (req, res) => {
     fnoCache = { data: FNO_FALLBACK, time: Date.now() - 23 * 60 * 60 * 1000, source: 'fallback' }; // retry in ~1h
   }
   res.json({ symbols: fnoCache.data, source: fnoCache.source });
-});
+}));
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1029,10 +1054,21 @@ const HARDCODED_EQ_KEYS = {
 function upstoxTokens() {
   return [...new Set([process.env.UPSTOX_OAUTH_TOKEN, process.env.UPSTOX_ACCESS_TOKEN, process.env.UPSTOX_ANALYTICS_TOKEN].filter(Boolean))];
 }
-let upstoxNext = 0;
+let upstoxNext = 0, upstoxHiWaiting = 0;
 async function upstoxThrottle() { // keep well under Upstox rate limits (~9 req/s)
-  const now = Date.now(); const at = Math.max(now, upstoxNext); upstoxNext = at + 110;
-  if (at > now) await new Promise(r => setTimeout(r, at - now));
+  if (lowPriority.getStore()) { // background scan: only go when no interactive request is waiting
+    for (let i = 0; i < 400; i++) {
+      if (upstoxHiWaiting === 0 && Date.now() >= upstoxNext) break;
+      await new Promise(r => setTimeout(r, 40));
+    }
+    upstoxNext = Math.max(Date.now(), upstoxNext) + 110;
+    return;
+  }
+  upstoxHiWaiting++;
+  try {
+    const now = Date.now(); const at = Math.max(now, upstoxNext); upstoxNext = at + 110;
+    if (at > now) await new Promise(r => setTimeout(r, at - now));
+  } finally { upstoxHiWaiting--; }
 }
 async function upstoxFetchJson(url) {
   const toks = upstoxTokens();

@@ -10,6 +10,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "compression": "^1.8.2",
     "express": "^4.19.2",
     "upstox-js-sdk": "^2.0.0"
   },

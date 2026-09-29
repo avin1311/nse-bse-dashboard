@@ -74,6 +74,7 @@
   .pat-x-row{display:grid;grid-template-columns:110px 1fr;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5;} .pat-x-row b{color:var(--text2);}
   .pat-tag{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:6px;margin:2px 4px 2px 0;font-size:11.5px;}
   .pat-sym{cursor:pointer;color:var(--blue);}
+  .pat-type{display:inline-block;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:5px;color:var(--text2);vertical-align:1px;}
   @media(max-width:760px){.pat-controls{grid-template-columns:1fr 1fr;} .pat-x-row{grid-template-columns:1fr;}}
   .seas-tbl{border-collapse:collapse;font-size:11px;width:100%;min-width:640px;}
   .seas-tbl th,.seas-tbl td{padding:4px 6px;text-align:center;border:1px solid var(--border);white-space:nowrap;}
@@ -594,7 +595,7 @@
     <div class="pat-controls">
       <div><label>Symbol</label><input id="patSym" placeholder="e.g. RELIANCE, NIFTY" autocomplete="off"></div>
       <div><label>Timeframe</label><select id="patTf"><option value="1D" selected>Daily (~1 year)</option><option value="1W">Weekly</option><option value="1h">Hourly</option></select></div>
-      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option></select></div>
+      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select></div>
       <button class="btn" id="patGo" style="padding:9px;">Analyse</button>
       <button class="btn" id="patScanBtn" style="padding:9px;" title="Scan every stock and index in the screener list on daily data">Scan all</button>
     </div>
@@ -4172,7 +4173,7 @@ const PatternEngine = (function(){
 
   // ---------- explanations (brief + full) ----------
   const LIB = {
-    cont:{name:'Continuation Pattern',bias:'Neutral',
+    cont:{type:'Continuation',name:'Continuation Pattern',bias:'Neutral',
       brief:'Sharp move, then a tight pause that usually resolves in the same direction.',
       full:{what:'A strong impulse ("pole") followed by a shallow, low-range pause. Buyers (or sellers) are digesting the move rather than reversing it.',
         form:'Impulse of at least ~8% (or 4&times; ATR) in under 25 bars, then 5&ndash;25 bars of consolidation that is quieter than the impulse, whose range is under 50% of it and that retraces no more than 50%.',
@@ -4181,7 +4182,7 @@ const PatternEngine = (function(){
         target:'Measured move: impulse height projected from the breakout level.',
         fail:'A close through the far side of the pause, or a retrace deeper than 50%, cancels the setup.',
         vol:'Volume should shrink during the pause and expand on the breakout.'}},
-    dtop:{name:'Double Top',bias:'Bearish',
+    dtop:{type:'Reversal',name:'Double Top',bias:'Bearish',
       brief:'Two similar highs with a dip between; a close under the dip confirms a reversal down.',
       full:{what:'Price fails twice at nearly the same resistance, showing buyers cannot push through. It is a bearish reversal after an advance.',
         form:'Prior uptrend (net advance into the first top of at least ~8%, scaled up for volatile stocks). Two swing highs within ~1.5&ndash;4% of each other, 10&ndash;70 bars apart, with a pullback low (the neckline) between them that is no deeper than 25%.',
@@ -4190,7 +4191,7 @@ const PatternEngine = (function(){
         target:'Top &minus; neckline height, projected down from the neckline.',
         fail:'A close above the tops after the second peak invalidates it; a drop is not confirmed until the neckline breaks.',
         vol:'Volume is usually lower on the second peak and rises on the neckline break.'}},
-    dbot:{name:'Double Bottom',bias:'Bullish',
+    dbot:{type:'Reversal',name:'Double Bottom',bias:'Bullish',
       brief:'Two similar lows with a bounce between; a close above the bounce high confirms a reversal up.',
       full:{what:'Price finds support twice at almost the same level, showing sellers are exhausted. A bullish reversal after a decline.',
         form:'Prior downtrend (net decline into the first low of at least ~8%, scaled up for volatile stocks). Two swing lows within ~1.5&ndash;4% of each other, 10&ndash;70 bars apart, with a rally high (neckline) between them that is no deeper than 25%.',
@@ -4199,20 +4200,20 @@ const PatternEngine = (function(){
         target:'Neckline + (neckline &minus; bottom), projected up.',
         fail:'A close below the bottoms after the second trough cancels it.',
         vol:'Rising volume on the breakout above the neckline adds conviction.'}},
-    ttop:{name:'Triple Top',bias:'Bearish',
+    ttop:{type:'Reversal',name:'Triple Top',bias:'Bearish',
       brief:'Three failed attempts at the same high; a close below the support between them confirms down.',
       full:{what:'A stronger version of the double top: three rejections at one resistance zone.',
         form:'Prior uptrend. Three swing highs within ~4% of each other, two intervening lows at similar levels; neckline = the lower of those lows.',
         entry:'Close below the neckline.',stop:'Above the highest top.',
         target:'Top &minus; neckline height projected down.',
         fail:'A close above the tops.',vol:'Volume typically fades with each peak.'}},
-    tbot:{name:'Triple Bottom',bias:'Bullish',
+    tbot:{type:'Reversal',name:'Triple Bottom',bias:'Bullish',
       brief:'Three tests of the same low; a close above the resistance between them confirms up.',
       full:{what:'Three successful defences of one support zone &mdash; a strong bullish reversal.',
         form:'Prior downtrend. Three swing lows within ~4% of each other; neckline = the higher of the two rallies between them.',
         entry:'Close above the neckline.',stop:'Below the lowest bottom.',
         target:'Neckline + neckline&minus;bottom height.',fail:'A close below the bottoms.',vol:'Expanding volume on the breakout.'}},
-    hs:{name:'Head and Shoulders',bias:'Bearish',
+    hs:{type:'Reversal',name:'Head and Shoulders',bias:'Bearish',
       brief:'Left shoulder, higher head, right shoulder; a close under the neckline confirms a top.',
       full:{what:'The classic bearish reversal: three peaks, the middle one highest. Each rally is weaker than the last.',
         form:'Prior uptrend. Head at least ~3% above both shoulders; shoulders within ~5&ndash;6% of each other; two troughs form the neckline (may slope).',
@@ -4220,88 +4221,94 @@ const PatternEngine = (function(){
         target:'Head &minus; neckline (measured at the head) projected down from the break.',
         fail:'Price closing back above the right shoulder.',
         vol:'Volume is typically highest on the left shoulder / head and weaker on the right shoulder; it expands on the break.'}},
-    ihs:{name:'Inverted Head and Shoulders',bias:'Bullish',
+    ihs:{type:'Reversal',name:'Inverse Head and Shoulders',bias:'Bullish',
       brief:'Left shoulder, lower head, right shoulder; a close above the neckline confirms a bottom.',
       full:{what:'The bullish mirror of head &amp; shoulders: three troughs, the middle deepest, after a decline.',
         form:'Prior downtrend. Head at least ~3% below both shoulders; shoulders within ~5&ndash;6%; two rally highs form the neckline.',
         entry:'Close above the neckline.',stop:'Below the right shoulder.',
         target:'Neckline &minus; head depth projected up from the break.',
         fail:'A close back under the right shoulder.',vol:'Volume should pick up on the breakout.'}},
-    cup:{name:'Cup and Handle',bias:'Bullish',
-      brief:'Rounded U-shaped base plus a small pullback (handle); a close above the rim triggers.',
-      full:{what:'A base where price rounds out after a drop and returns to the prior high, then dips slightly (handle) before breaking out.',
-        form:'Cup 30&ndash;200 bars long, 10&ndash;50% deep, clearly rounded (parabolic fit R&sup2; &ge; 0.7) with rims within ~10%. Handle pulls back no more than half the cup depth and stays in the upper half of the cup.',
-        entry:'Close above the rim (highest of the two rims).',stop:'Below the handle low.',
-        target:'Rim + cup depth.',fail:'Handle falls below the cup midpoint, or a V-shaped cup (no rounding).',
-        vol:'Volume dries up in the handle and expands on the breakout.'}},
-    cupc:{name:'Cup and Handle Continuation',bias:'Bullish',
-      brief:'Cup &amp; handle inside an ongoing uptrend: a pause-and-go base that resumes the advance.',
-      full:{what:'Same structure as cup &amp; handle, but it appears after a strong advance (&ge;15% into the left rim), so it acts as a rest stop rather than a bottom.',
-        form:'Uptrend into the left rim, then a rounded cup and shallow handle as in the standard pattern.',
-        entry:'Close above the rim.',stop:'Below the handle low.',target:'Rim + cup depth.',
-        fail:'Handle breaks the cup midpoint or the prior trend flips down.',vol:'Dry-up in the handle, surge on breakout.'}},
-    bflag:{name:'Bullish Flag',bias:'Bullish',
+    cup:{type:'Continuation',name:'Cup and Handle',bias:'Bullish',
+      brief:'Bullish continuation: rounded U-shaped base after an uptrend plus a small handle; a close above the cup&apos;s top triggers.',
+      full:{what:'A bullish continuation pattern shaped like a tea cup. After an uptrend, price makes a rounded bottom (the cup: selling gradually gives way to buying), returns to the prior high, then pauses or dips slightly (the handle) before the next move up.',
+        form:'Best after an uptrend (the note on each detection shows the prior run). Cup 30&ndash;200 bars long, 10&ndash;50% deep, clearly rounded (parabolic fit R&sup2; &ge; 0.7) with rims within ~10%. The handle is a small flag/pullback of no more than half the cup depth that stays in the upper half of the cup.',
+        entry:'Close above the resistance formed by the top of the cup / handle, with rising volume.',stop:'Below the handle low.',
+        target:'Cup depth added to the breakout point.',fail:'Handle falls below the cup midpoint, or the cup is V-shaped (no rounding).',
+        vol:''}},
+    icup:{type:'Reversal',name:'Inverted Cup and Handle',bias:'Bearish',
+      brief:'Bearish reversal: rounded dome after an uptrend plus a small upward handle; a close below the base triggers.',
+      full:{what:'The bearish counterpart of the cup and handle. After an uptrend price makes a rounded top (an upside-down U): buying pressure fades and selling pressure builds.',
+        form:'Rounded dome 30&ndash;200 bars long, 10&ndash;50% high, parabolic fit R&sup2; &ge; 0.7, both ends of the dome at similar levels. The handle is a small sideways/upward drift (mini flag or pennant) of no more than half the dome height that stays in the lower half of the dome.',
+        entry:'Close below the support formed by the base of the inverted cup, on increased volume.',stop:'Above the handle high.',
+        target:'Dome height subtracted from the breakdown point.',fail:'Handle rises above the dome midpoint, or the dome is pointed (no rounding).',
+        vol:''}},
+    bflag:{type:'Continuation',name:'Bullish Flag',bias:'Bullish',
       brief:'Sharp rally (pole) then a small downward-sloping channel; breakout above it resumes up.',
       full:{what:'A brief, orderly pullback after a fast rally. The flag is a small parallel channel that drifts down.',
         form:'Pole &ge; max(10%, 5&times;ATR) within 25 bars; 5&ndash;28 flag bars sloping flat-to-down, retracing under 45% of the pole, roughly parallel edges.',
         entry:'Close above the flag&apos;s upper line.',stop:'Below the flag low.',
         target:'Pole height added to the breakout.',fail:'A close below the lower line or retrace over 50%.',
         vol:'Falling volume in the flag, rising on breakout.'}},
-    brflag:{name:'Bearish Flag',bias:'Bearish',
+    brflag:{type:'Continuation',name:'Bearish Flag',bias:'Bearish',
       brief:'Sharp drop (pole) then a small upward-sloping channel; breakdown below it resumes down.',
       full:{what:'A brief relief bounce after a fast fall, drifting up in a small parallel channel.',
         form:'Pole down &ge; max(10%, 5&times;ATR) within 25 bars; 5&ndash;28 bars flat-to-up, retracing under 45% of the pole.',
         entry:'Close below the lower line.',stop:'Above the flag high.',
         target:'Pole height subtracted from the breakdown.',fail:'A close above the upper line.',vol:'Low volume in the bounce, heavy on breakdown.'}},
-    brect:{name:'Bullish Rectangle',bias:'Bullish',
+    brect:{type:'Continuation',name:'Bullish Rectangle',bias:'Bullish',
       brief:'Sideways range between flat support/resistance inside an uptrend; upside break continues it.',
       full:{what:'Price ranges between horizontal support and resistance after an advance &mdash; a pause that usually resolves up.',
         form:'Prior uptrend (&ge;4%). At least two touches each on a flat top and flat bottom, range 3%+ and 15+ bars.',
         entry:'Close above resistance.',stop:'Below support (or mid-range for tighter risk).',
         target:'Rectangle height added to the breakout.',fail:'Close below support.',vol:'Quiet inside, expansion on breakout.'}},
-    srect:{name:'Bearish Rectangle',bias:'Bearish',
+    srect:{type:'Continuation',name:'Bearish Rectangle',bias:'Bearish',
       brief:'Sideways range inside a downtrend; downside break continues it.',
       full:{what:'A horizontal pause after a decline that usually resolves lower.',
         form:'Prior downtrend (&ge;4%). Two+ touches on flat resistance and flat support, 15+ bars.',
         entry:'Close below support.',stop:'Above resistance.',
         target:'Rectangle height subtracted from the breakdown.',fail:'Close above resistance.',vol:'Expansion on breakdown.'}},
-    rect_n:{name:'Rectangle (bias pending)',bias:'Neutral',
+    rect_n:{type:'Continuation',name:'Rectangle (bias pending)',bias:'Neutral',
       brief:'Flat range with no clear prior trend; direction decided by the breakout.',
       full:{what:'A horizontal trading range without a decisive lead-in trend.',
         form:'Two+ touches on flat resistance and support.',
         entry:'Wait for a close outside the range in either direction.',stop:'Opposite side of the range.',
         target:'Range height from the breakout.',fail:'False breaks that close back inside.',vol:'Expansion on the breakout.'}},
-    bsym:{name:'Bullish Symmetrical Triangle',bias:'Bullish',
+    bsym:{type:'Continuation',name:'Bullish Symmetrical Triangle',bias:'Bullish',
       brief:'Lower highs and higher lows squeezing after an uptrend; upside break continues it.',
       full:{what:'Volatility contracts as both highs and lows converge; in an uptrend the break usually goes with the trend.',
         form:'Falling upper line and rising lower line, 5+ swing touches in total (each line anchored near both ends), width shrinking by 25%+; prior uptrend.',
         entry:'Close above the upper line.',stop:'Below the lower line.',
         target:'Widest part of the triangle added to the breakout.',fail:'Close below the lower line.',
         vol:'Volume contracts into the apex, expands on the break.'}},
-    ssym:{name:'Bearish Symmetrical Triangle',bias:'Bearish',
+    ssym:{type:'Continuation',name:'Bearish Symmetrical Triangle',bias:'Bearish',
       brief:'Converging highs and lows inside a downtrend; downside break continues it.',
       full:{what:'A squeeze that in a downtrend more often breaks lower.',
         form:'Falling highs, rising lows, 2+ touches each, prior downtrend.',
         entry:'Close below the lower line.',stop:'Above the upper line.',
         target:'Widest part subtracted from the breakdown.',fail:'Close above the upper line.',vol:'Expansion on breakdown.'}},
-    sym_n:{name:'Symmetrical Triangle (bias pending)',bias:'Neutral',
+    sym_n:{type:'Continuation',name:'Symmetrical Triangle (bias pending)',bias:'Neutral',
       brief:'Converging highs/lows with no dominant prior trend; watch for the break.',
       full:{what:'A contracting range with no decisive lead-in trend.',
         form:'Falling highs, rising lows, 2+ touches each.',
         entry:'Close outside either line.',stop:'Opposite line.',target:'Widest part from the breakout.',fail:'False breaks.',vol:'Volume expands on the break.'}},
-    asc:{name:'Bullish Ascending Triangle',bias:'Bullish',
+    asc:{type:'Continuation',name:'Bullish Ascending Triangle',bias:'Bullish',
       brief:'Flat resistance with rising lows; buyers keep coming, breakout above resistance is the trigger.',
       full:{what:'Sellers defend one price while buyers pay higher each dip &mdash; pressure builds under resistance.',
         form:'Flat upper line, steadily rising lower line, 5+ swing touches in total, width shrinking 25%+.',
         entry:'Close above the flat resistance.',stop:'Below the latest higher low.',
         target:'Triangle height added to the breakout.',fail:'Close below the rising support.',vol:'Expansion on the breakout.'}},
-    desc:{name:'Bearish Descending Triangle',bias:'Bearish',
+    desc:{type:'Continuation',name:'Bearish Descending Triangle',bias:'Bearish',
       brief:'Flat support with falling highs; sellers keep coming, breakdown below support is the trigger.',
       full:{what:'Buyers defend one price while sellers offer lower each rally.',
         form:'Flat lower line, steadily falling upper line, 5+ swing touches in total, width shrinking 25%+.',
         entry:'Close below the flat support.',stop:'Above the latest lower high.',
         target:'Triangle height subtracted from the breakdown.',fail:'Close above the falling resistance.',vol:'Expansion on the breakdown.'}}
   };
+  // volume guidance (from the Legacy Wealth Builder chart-pattern notes): confirm on rising volume, distrust low-volume breaks
+  for(const k in LIB){ const f=LIB[k].full;
+    f.vol = LIB[k].type==='Reversal'
+      ? 'Confirm the break with clearly higher volume (1.2&times; the 20-bar average or more). A break on low volume may be a false move &mdash; be cautious (the table flags it as "low volume").'
+      : 'Volume normally shrinks while the pattern forms and expands on the breakout (1.2&times; average or more). Low-volume breakouts show as "Breakout &middot; low volume" and score lower.'; }
 
   // ---------- helpers ----------
   function atrArr(C,p){ p=p||14; let a=null; const o=[]; for(let i=0;i<C.length;i++){ const tr=i===0?C[i].h-C[i].l:Math.max(C[i].h-C[i].l,Math.abs(C[i].h-C[i-1].c),Math.abs(C[i].l-C[i-1].c)); a=a==null?tr:(a*(p-1)+tr)/p; o.push(a);} return o; }
@@ -4346,8 +4353,13 @@ const PatternEngine = (function(){
 
   function mk(ctx,o){
     const s=ctx.s, C0=ctx.C0;
-    const conf=Math.round(clamp(32+38*clamp(o.fit,0,1)+(o.brk!=null?12:0)+(o.vol!=null&&o.vol>=1.3?8:0)+(o.aligned?10:0),20,95));
     const lib=LIB[o.key];
+    const vrat=o.brk!=null&&o.vol!=null?o.vol:null;
+    const volState=o.brk==null?'pending':(vrat==null?'na':(vrat>=1.2?'strong':'weak'));
+    const avgV=(a,b)=>{ let t=0,k=0; for(let j=Math.max(0,a);j<=Math.min(C0.length-1,b);j++){ if(C0[j].v>0){t+=C0[j].v;k++;} } return k>=4?t/k:null; };
+    let dry=null;
+    if(lib.type==='Continuation'&&!o.failed){ const fv=o.fv||[o.i0,(o.brk!=null?o.brk-1:o.i1)], pv=o.pv||[o.i0-30,o.i0-1]; const f=avgV(fv[0],fv[1]), p0=avgV(pv[0],pv[1]); if(f&&p0) dry=f/p0; }
+    const conf=Math.round(clamp(32+38*clamp(o.fit,0,1)+(o.brk!=null?12:0)+(volState==='strong'?8:0)-(volState==='weak'?10:0)+(dry!=null?(dry<=0.85?5:dry>1.15?-5:0):0)+(o.aligned?10:0),20,95));
     const flipB=b=>b==='Bullish'?'Bearish':b==='Bearish'?'Bullish':b;
     const P=v=>v==null?null:ctx.unm(v);
     const entry=P(o.entry), stop=P(o.stop);
@@ -4355,7 +4367,7 @@ const PatternEngine = (function(){
     if(o.hgt){ const dist=Math.abs(ctx.unm(o.hgt[0])-ctx.unm(o.hgt[1])); target=entry+(o.tdir*s)*dist; }
     const risk=entry!=null&&stop!=null?Math.abs(entry-stop):null, reward=entry!=null&&target!=null?Math.abs(target-entry):null;
     const lastC=C0[C0.length-1].c;
-    return {key:o.key,name:lib.name+(o.failed?' (failed)':''),bias:o.failed?flipB(lib.bias):(o.bias||lib.bias),status:o.failed?'Failed':(o.brk!=null?'Confirmed':'Forming'),conf:o.failed?Math.min(conf,45):conf,
+    return {key:o.key,name:lib.name+(o.failed?' (failed)':''),bias:o.failed?flipB(lib.bias):(o.bias||lib.bias),status:o.failed?'Failed':(o.brk!=null?(volState==='weak'?'Weak break':'Confirmed'):'Forming'),type:lib.type,volState,dry,conf:o.failed?Math.min(conf,45):conf,
       i0:o.i0,i1:o.i1,brk:o.brk!=null?o.brk:null,barsSince:o.brk!=null?C0.length-1-o.brk:null,
       entry,stop,target,rr:risk&&reward?reward/risk:null,
       distPct:entry?(lastC/entry-1)*100:null,vol:o.vol==null?null:o.vol,
@@ -4413,8 +4425,8 @@ const PatternEngine = (function(){
         const mx=Math.max(a.p,b.p,c.p), mn=Math.min(a.p,b.p,c.p), spread=(mx-mn)/mx;
         const lspread=Math.abs(l1.p-l2.p)/Math.max(l1.p,l2.p);
         if(spread<=tolEq*1.2 && lspread<=tolEq*2.5 && b.i-a.i>=6 && c.i-b.i>=6 && riseBefore(C,a.i,40)>=minTrend){
-          const neck=Math.min(l1.p,l2.p);
-          finish(bull?'tbot':'ttop',[a,b,c],()=>neck,0,[mx,neck],a.i,1-spread/(tolEq*1.2),
+          const neck=Math.min(l1.p,l2.p), nf=()=>neck; // neckline = the (level) line under the lows between the peaks; not extrapolated as a slope
+          finish(bull?'tbot':'ttop',[a,b,c],nf,0,[mx,neck],a.i,1-spread/(tolEq*1.2),
             [{i1:a.i,p1:a.p,i2:c.i,p2:c.p,label:bull?'Bottoms':'Tops',dash:true}],'Three peaks within '+(spread*100).toFixed(1)+'%.');
         }
       }
@@ -4441,8 +4453,16 @@ const PatternEngine = (function(){
   // ---------- cup & handle (bullish only) ----------
   function detCup(ctx){
     const {C,P,n}=ctx, out=[]; const last=n-1;
-    for(let x=0;x<P.length;x++){ const a=P[x]; if(a.type!=='H') continue;
-      for(let y=x+1;y<P.length;y++){ const c=P[y]; if(c.type!=='H') continue;
+    const cands=[];
+    for(const PP of [P,ctx.Pfine||P]){ // main swings plus a finer set (a small handle can hide the right rim from the main set)
+      if(ctx.s>0){ for(let x=0;x<PP.length;x++){ const a=PP[x]; if(a.type!=='H') continue; for(let y=x+1;y<PP.length;y++){ const c=PP[y]; if(c.type==='H') cands.push([a,c]); } } }
+      else { // inverted cup: the dome's left rim sits inside the prior advance (not a swing point) — find where price last stood at the right-rim level before the dome
+        for(let y=1;y<PP.length;y++){ const c=PP[y], bt=PP[y-1]; if(c.type!=='H'||bt.type!=='L') continue;
+          let j=-1; for(let q=bt.i-1;q>=0;q--){ if(C[q].h>=c.p*0.985){ j=q; break; } }
+          if(j>=0) cands.push([{i:j,p:C[j].h,type:'H'},c]); } }
+    }
+    {
+      for(const [a,c] of cands){
         const w=c.i-a.i; if(w<30||w>200) continue;
         if(c.p<a.p*0.9||c.p>a.p*1.03) continue;
         let lowI=a.i, low=Infinity; for(let j=a.i;j<=c.i;j++) if(C[j].l<low){low=C[j].l;lowI=j;}
@@ -4467,12 +4487,13 @@ const PatternEngine = (function(){
           if(C[last].c<mid || C[last].c<c.p*(1-0.5*depth)) continue;
           if(hLen<1) continue;
         }
-        const run=(()=>{let mn=Infinity; for(let j=Math.max(0,a.i-60);j<=a.i;j++) mn=Math.min(mn,C[j].l); return a.p/mn-1;})();
+        const run=(()=>{ if(ctx.s>0){ let mn=Infinity; for(let j=Math.max(0,a.i-60);j<=a.i;j++) mn=Math.min(mn,C[j].l); return a.p/mn-1; }
+          let mx=-Infinity; for(let j=Math.max(0,a.i-60);j<=a.i;j++) mx=Math.max(mx,C[j].h); return mx/a.p-1; })(); // prior advance (in the original chart) into the left rim
         const cont=run>=0.15;
         const fit=clamp(q.r2,0,1)*0.6+clamp(1-Math.abs(a.p-c.p)/a.p/0.1,0,1)*0.4;
-        out.push(mk(ctx,{key:cont?'cupc':'cup',brk:brk>=0?brk:null,i0:a.i,i1:brk>=0?brk:last,entry:rimMax,stop:Math.min(hLow,c.p-0.25*depth*rim)*0.995,
+        out.push(mk(ctx,{key:ctx.s>0?'cup':'icup',fv:[c.i+1,hEnd],pv:[a.i,c.i],brk:brk>=0?brk:null,i0:a.i,i1:brk>=0?brk:last,entry:rimMax,stop:Math.min(hLow,c.p-0.25*depth*rim)*0.995,
           hgt:[rimMax,low],tdir:1,fit,aligned:cont,vol:brk>=0?volRatio(C,brk):null,
-          note:'Cup depth '+(depth*100).toFixed(0)+'%, R² '+q.r2.toFixed(2)+(cont?', prior run +'+(run*100).toFixed(0)+'%':'')+'.',
+          note:'Cup depth '+(depth*100).toFixed(0)+'%, R² '+q.r2.toFixed(2)+(cont?', prior advance +'+(run*100).toFixed(0)+'% (fits the textbook context)':', no strong prior uptrend (weaker context)')+'.',
           lines:[{i1:a.i,p1:rimMax,i2:brk>=0?brk:last,p2:rimMax,label:'Rim'},
                  {i1:a.i,p1:a.p,i2:lowI,p2:low,label:'Cup',dash:true},{i1:lowI,p1:low,i2:c.i,p2:c.p,label:'Cup',dash:true}]}));
       }
@@ -4510,7 +4531,7 @@ const PatternEngine = (function(){
           if(retr<=0.45 && sM<=0.0004 && sM>=-0.012 && (mxH-mnL)<=0.5*poleAbs && ratio>=0.5 && ratio<=1.5 && (brk>=0? last-brk<=15 : last-T.i<=28)){
             const fit=clamp(1-chan.dev/0.25,0,1)*0.6+clamp(1-retr/0.5,0,1)*0.4;
             const bLevel=brk>=0?chan.up(brk):chan.up(last);
-            out.push(mk(ctx,{key:bull?'bflag':'brflag',brk:brk>=0?brk:null,i0:B.i,i1:brk>=0?brk:last,entry:bLevel,stop:mnL*0.995,hgt:[T.p,B.p],tdir:1,
+            out.push(mk(ctx,{key:bull?'bflag':'brflag',fv:[start,e],pv:[B.i,T.i],brk:brk>=0?brk:null,i0:B.i,i1:brk>=0?brk:last,entry:bLevel,stop:mnL*0.995,hgt:[T.p,B.p],tdir:1,
               fit,aligned:true,vol:brk>=0?volRatio(C,brk):null,
               note:'Pole '+(rise*100).toFixed(0)+'% in '+pb+' bars; flag retraces '+(retr*100).toFixed(0)+'%.',
               lines:[{i1:B.i,p1:B.p,i2:T.i,p2:T.p,label:'Pole'},{i1:start,p1:chan.up(start),i2:brk>=0?brk:last,p2:bLevel,label:'Flag top'},
@@ -4535,7 +4556,7 @@ const PatternEngine = (function(){
         const calm=cn>0&&pn>0&&(cr/cn)<=0.85*(pr/pn); // the pause must be quieter than the impulse
         if(calm && retr<=0.5 && (cHi-cLo)<=0.5*poleAbs && e-start+1<=25 && (bIdx<0 || last-bIdx<=15)){
           const fit=clamp(1-retr/0.618,0,1)*0.5+clamp(1-(cHi-cLo)/(0.6*poleAbs),0,1)*0.5;
-          out.push(mk(ctx,{key:'cont',bias:bull?'Bullish':'Bearish',brk:bIdx>=0?bIdx:null,i0:B.i,i1:bIdx>=0?bIdx:last,entry:Math.max(cHi,T.p),stop:cLo*0.995,hgt:[T.p,B.p],tdir:1,
+          out.push(mk(ctx,{key:'cont',fv:[start,e],pv:[B.i,T.i],bias:bull?'Bullish':'Bearish',brk:bIdx>=0?bIdx:null,i0:B.i,i1:bIdx>=0?bIdx:last,entry:Math.max(cHi,T.p),stop:cLo*0.995,hgt:[T.p,B.p],tdir:1,
             fit,aligned:true,vol:bIdx>=0?volRatio(C,bIdx):null,
             note:'Impulse '+(rise*100).toFixed(0)+'% then '+(e-start+1)+'-bar pause retracing '+(retr*100).toFixed(0)+'%.',
             lines:[{i1:B.i,p1:B.p,i2:T.i,p2:T.p,label:'Impulse'},{i1:start,p1:cHi,i2:bIdx>=0?bIdx:last,p2:cHi,label:'Pause high'},{i1:start,p1:cLo,i2:bIdx>=0?bIdx:last,p2:cLo,label:'Pause low'}]}));
@@ -4598,15 +4619,21 @@ const PatternEngine = (function(){
       if(brk>=0 ? last-brk>20 : last-b.i>25) continue;
       // don't keep forming triangles whose apex is already behind us
       if(brk<0&&kind!=='rect'&&(up(last)-lo(last))<=0) continue;
-      const prior=C[a.i].c/C[Math.max(0,a.i-30)].c-1;
-      let key,bias;
-      if(kind==='asc'){ if(dirBrk<0) continue; key='asc'; bias='Bullish'; }
-      else if(kind==='desc'){ if(dirBrk>0) continue; key='desc'; bias='Bearish'; }
+      const prior=C[a.i].c/C[Math.max(0,a.i-60)].c-1; // trend going INTO the pattern (60 bars)
+      let key,bias,failed=false;
+      if(kind==='asc'){ if(prior<0.03) continue; key='asc'; bias='Bullish'; if(dirBrk<0) failed=true; }          // appears during an uptrend
+      else if(kind==='desc'){ if(prior>-0.03) continue; key='desc'; bias='Bearish'; if(dirBrk>0) failed=true; } // appears during a downtrend
       else {
-        if(dirBrk!==0) bias=dirBrk>0?'Bullish':'Bearish';
-        else bias=prior>=0.04?'Bullish':prior<=-0.04?'Bearish':'Neutral';
+        bias=prior>=0.03?'Bullish':prior<=-0.03?'Bearish':'Neutral';
+        if(dirBrk!==0){ if(bias==='Neutral') bias=dirBrk>0?'Bullish':'Bearish'; else if((bias==='Bullish')!==(dirBrk>0)) failed=true; }
         if(kind==='rect') key=bias==='Bullish'?'brect':bias==='Bearish'?'srect':'rect_n';
         else key=bias==='Bullish'?'bsym':bias==='Bearish'?'ssym':'sym_n';
+      }
+      if(failed){
+        out.push(mk(ctx,{key,failed:true,brk:null,i0:a.i,i1:brk,entry:null,stop:null,target:null,fit:0.5,vol:null,
+          note:'Price broke '+(dirBrk>0?'up':'down')+' against the prior '+(bias==='Bullish'||key==='asc'?'uptrend':'downtrend')+', so the continuation setup failed &mdash; treat the break as a possible reversal.',
+          lines:[{i1:a.i,p1:up(a.i),i2:brk,p2:up(brk),label:'Upper line'},{i1:a.i,p1:lo(a.i),i2:brk,p2:lo(brk),label:'Lower line'}]}));
+        continue;
       }
       const upEnd=up(brk>=0?brk:last), loEnd=lo(brk>=0?brk:last);
       const long=bias==='Bullish', short=bias==='Bearish';
@@ -4615,7 +4642,7 @@ const PatternEngine = (function(){
       const stop=short?Math.max(hs[hs.length-1].p,entry*1.01):(long?Math.min(ls[ls.length-1].p,entry*0.99):loEnd); // last swing on the far side, never closer than 1%
       const touches=hs.length+ls.length;
       const fit=clamp(1-(hs.reduce((s,p)=>s+Math.abs(p.p-up(p.i)),0)+ls.reduce((s,p)=>s+Math.abs(p.p-lo(p.i)),0))/touches/px/tl,0,1)*0.6+clamp((touches-4)/4,0,1)*0.4;
-      const aligned=(bias==='Bullish'&&prior>=0.04)||(bias==='Bearish'&&prior<=-0.04)||kind==='asc'||kind==='desc';
+      const aligned=(bias==='Bullish'&&prior>=0.03)||(bias==='Bearish'&&prior<=-0.03)||kind==='asc'||kind==='desc';
       const e1=brk>=0?brk:last;
       out.push(mk(ctx,{key,bias,brk:brk>=0?brk:null,i0:a.i,i1:e1,entry,stop,target,fit,aligned,vol:brk>=0?volRatio(C,brk):null,
         note:touches+' pivot touches over '+L+' bars; range narrowed to '+(shrink*100).toFixed(0)+'%'+(brk<0&&bias==='Neutral'?'; direction pending':'')+'.',
@@ -4625,7 +4652,7 @@ const PatternEngine = (function(){
   }
 
   // ---------- run everything ----------
-  const FAMILY={bsym:'sym',ssym:'sym',sym_n:'sym',brect:'rect',srect:'rect',rect_n:'rect',cup:'cup',cupc:'cup',bflag:'flag',brflag:'flag'};
+  const FAMILY={bsym:'sym',ssym:'sym',sym_n:'sym',brect:'rect',srect:'rect',rect_n:'rect',cup:'cup',icup:'icup',bflag:'flag',brflag:'flag'};
   function dedupe(list){
     list.sort((x,y)=>y.conf-x.conf);
     const keep=[];
@@ -4649,14 +4676,18 @@ const PatternEngine = (function(){
     const res=[];
     const K=C0[0].c*C0[0].c;
     const run=(C,s)=>{
-      const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),dev,tolEq,atrPct,minTrend};
+      const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),Pfine:zigzag(C,Math.max(0.03,dev*0.5)),dev,tolEq,atrPct,minTrend};
       res.push(...detTops(ctx),...detFlags(ctx));
-      if(s>0) res.push(...detCup(ctx));
+      res.push(...detCup(ctx));
     };
     run(C0,1); run(mirror(C0,K),-1);
     const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,Math.max(0.025,dev*0.6)),dev,tolEq,atrPct,minTrend}; // finer swings: triangle apexes contract below the main swing size
     res.push(...detChannels(ch));
-    const patterns=dedupe(res).sort((a,b)=>(a.brk!=null?1:0)-(b.brk!=null?1:0)||b.conf-a.conf);
+    let patterns=dedupe(res);
+    // the generic "Continuation Pattern" is only shown when no specific continuation pattern (flag, rectangle, triangle, cup & handle) explains the same pause
+    const specific=patterns.filter(p=>p.key!=='cont'&&p.status!=='Failed'&&p.type==='Continuation');
+    patterns=patterns.filter(p=>p.key!=='cont'||!specific.some(q=>Math.min(q.i1,p.i1)-Math.max(q.i0,p.i0)>0));
+    patterns.sort((a,b)=>(a.brk!=null?1:0)-(b.brk!=null?1:0)||b.conf-a.conf);
     return {patterns,bars:C0.length,dev,atrPct};
   }
   return {detect,LIB,zigzag,_quadFit:quadFit,_mirror:mirror};
@@ -4706,7 +4737,7 @@ const PatternUI = (function(){
 
   function visible(){
     if(!S.res) return [];
-    return S.res.patterns.map((p,i)=>({p,i})).filter(({p})=>S.filter==='all'||(S.filter==='confirmed'?p.status==='Confirmed':S.filter==='forming'?p.status==='Forming':p.bias.toLowerCase()===S.filter));
+    return S.res.patterns.map((p,i)=>({p,i})).filter(({p})=>S.filter==='all'||(S.filter==='confirmed'?p.status==='Confirmed':S.filter==='forming'?p.status==='Forming':(S.filter==='reversal'||S.filter==='continuation')?p.type.toLowerCase()===S.filter:p.bias.toLowerCase()===S.filter));
   }
 
   function fullHtml(p){
@@ -4724,19 +4755,26 @@ const PatternUI = (function(){
     const all=S.res.patterns, vis=visible();
     const live=all.filter(p=>p.status!=='Failed');
     const bull=live.filter(p=>p.bias==='Bullish').length, bear=live.filter(p=>p.bias==='Bearish').length;
-    const conf=live.filter(p=>p.status==='Confirmed').length;
+    const conf=live.filter(p=>p.status==='Confirmed').length, weak=live.filter(p=>p.status==='Weak break').length;
+    let ctxChip='';
+    try{ const cur=window.CURRENT; if(cur&&cur.symbol===S.sym&&cur.horizons&&cur.horizons.swing&&all.length){ const h=cur.horizons.swing; const hb=h.signal.indexOf('buy')>=0?1:h.signal.indexOf('sell')>=0?-1:0; const pb=bull-bear;
+      const agree=hb===0?'':(pb===0?'':((hb>0)===(pb>0)?' &mdash; agrees with the patterns':' &mdash; conflicts with the patterns, be careful'));
+      ctxChip='<span class="pat-chip '+(hb>0?'up':hb<0?'down':'')+'">Composite swing signal: '+h.signalLabel+' ('+h.score+')'+agree+'</span>'; } }catch(e){}
     sum.innerHTML=all.length?
-      '<span class="pat-chip up">'+bull+' bullish</span><span class="pat-chip down">'+bear+' bearish</span><span class="pat-chip">'+conf+' confirmed / '+(live.length-conf)+' forming'+(all.length>live.length?' / '+(all.length-live.length)+' failed':'')+'</span>'+
-      (bull&&bear?'<span class="pat-chip" style="color:var(--amber);">Mixed signals &mdash; patterns disagree, size down / wait</span>':(bull>=2?'<span class="pat-chip up">Bullish confluence</span>':bear>=2?'<span class="pat-chip down">Bearish confluence</span>':'')):
+      '<span class="pat-chip up">'+bull+' bullish</span><span class="pat-chip down">'+bear+' bearish</span><span class="pat-chip">'+conf+' confirmed / '+(live.length-conf-weak)+' forming'+(weak?' / '+weak+' low-volume break'+(weak>1?'s':''):'')+(all.length>live.length?' / '+(all.length-live.length)+' failed':'')+'</span>'+
+      ctxChip+(bull&&bear?'<span class="pat-chip" style="color:var(--amber);">Mixed signals &mdash; patterns disagree, size down / wait</span>':(bull>=2?'<span class="pat-chip up">Bullish confluence</span>':bear>=2?'<span class="pat-chip down">Bearish confluence</span>':'')):
       '<span class="pat-chip">'+(S.res.reason||'Nothing on this chart meets the pattern rules right now &mdash; try another timeframe.')+'</span>';
     if(!vis.length){ body.innerHTML='<tr><td colspan="6" class="metric-sub" style="text-align:center;padding:16px;">'+(all.length?'No patterns match this filter.':'No patterns detected.')+'</td></tr>'; return; }
     body.innerHTML=vis.map(({p,i})=>{
       const lib=PatternEngine.LIB[p.key], op=S.open[p.key+i];
       const lv=(p.entry?'Entry <b>'+fmt(p.entry,2)+'</b>':'')+(p.stop?' &middot; Stop <b class="down">'+fmt(p.stop,2)+'</b>':'')+(p.target?' &middot; Target <b class="up">'+fmt(p.target,2)+'</b>':'')+(p.rr?' &middot; R:R '+p.rr.toFixed(1):'');
-      const st=p.status==='Failed'?'<span class="badge badge-hold">Failed</span>':p.status==='Confirmed'?'<span class="badge badge-'+(p.bias==='Bearish'?'sell':'buy')+'">Confirmed'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':'<span class="badge badge-hold">Forming</span>';
-      const volTxt=p.vol!=null?'<div class="metric-sub">Breakout vol '+p.vol.toFixed(1)+'&times; avg'+(p.vol>=1.3?' &#10003;':'')+'</div>':'';
+      const st=p.status==='Failed'?'<span class="badge badge-hold">Failed</span>':p.status==='Weak break'?'<span class="badge badge-hold" style="color:var(--amber);">Breakout &middot; low volume &#9888;'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':p.status==='Confirmed'?'<span class="badge badge-'+(p.bias==='Bearish'?'sell':'buy')+'">Confirmed'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':'<span class="badge badge-hold">Forming</span>';
+      let volTxt='';
+      if(p.vol!=null) volTxt+='<div class="metric-sub">Breakout volume '+p.vol.toFixed(1)+'&times; avg'+(p.vol>=1.2?' &#10003; confirms':' &mdash; below the 1.2&times; needed to confirm')+'</div>';
+      else if(p.status==='Forming') volTxt+='<div class="metric-sub">Wait for a break on 1.2&times;+ volume</div>';
+      if(p.dry!=null) volTxt+='<div class="metric-sub">Volume while forming: '+Math.round(p.dry*100)+'% of before'+(p.dry<=0.85?' (dry-up &#10003;)':p.dry>1.15?' (expanding &#9888;)':'')+'</div>';
       const dist=p.distPct!=null?'<div class="metric-sub">Price '+(p.distPct>=0?'+':'')+p.distPct.toFixed(1)+'% vs entry</div>':'';
-      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b><div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
+      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span><div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
         '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+volTxt+'</td>'+
         '<td><div class="pat-conf"><i style="width:'+p.conf+'%"></i></div>'+p.conf+'%</td>'+
         '<td>'+lv+dist+'</td>'+
@@ -4810,7 +4848,7 @@ const PatternUI = (function(){
     found.sort((a,b)=>b.pats.length-a.pats.length||b.pats[0].conf-a.pats[0].conf);
     $('patScanStatus').textContent='Scanned '+done+' of '+syms.length+' symbols with real daily history · '+found.length+' with active patterns (click a symbol to open its chart).';
     $('patScanOut').innerHTML=found.length?'<table><thead><tr><th>Symbol</th><th>Active patterns</th></tr></thead><tbody>'+found.map(f=>'<tr><td><a class="pat-sym" data-sym="'+esc(f.s)+'"><b>'+esc(f.s)+'</b></a><div class="metric-sub">'+esc(f.name)+'</div></td><td>'+
-      f.pats.map(p=>'<span class="pat-tag '+biasCls(p.bias)+'" title="'+esc(p.status+' · conf '+p.conf+'%')+'">'+esc(p.name)+(p.status==='Confirmed'?' ✓':' …')+'</span>').join('')+'</td></tr>').join('')+'</tbody></table>':'<div class="metric-sub">No active patterns found in the scanned list.</div>';
+      f.pats.map(p=>'<span class="pat-tag '+biasCls(p.bias)+'" title="'+esc(p.status+' · conf '+p.conf+'%')+'">'+esc(p.name)+(p.status==='Confirmed'?' ✓':p.status==='Weak break'?' ⚠':p.status==='Failed'?' ✗':' …')+'</span>').join('')+'</td></tr>').join('')+'</tbody></table>':'<div class="metric-sub">No active patterns found in the scanned list.</div>';
     btn.disabled=false;
   }
 

@@ -59,6 +59,22 @@
   .metric-sub{font-size:11px;color:var(--text3);margin-top:2px;}
 
 
+
+  /* chart-pattern section */
+  .sb-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+  .sb-tbl td{padding:5px 6px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  .pat-controls{display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:8px;align-items:end;margin-bottom:10px;}
+  .pat-controls label{display:block;font-size:11px;color:var(--text2);margin-bottom:3px;}
+  .pat-controls input,.pat-controls select{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:8px;font-size:12px;}
+  .pat-chip{display:inline-block;padding:3px 9px;border:1px solid var(--border);border-radius:999px;font-size:11.5px;margin:0 6px 6px 0;background:var(--panel2);}
+  .pat-row{cursor:pointer;} .pat-row:hover,.pat-row.sel{background:rgba(61,139,253,.07);}
+  .pat-conf{height:5px;background:var(--panel2);border-radius:3px;margin-bottom:3px;width:70px;} .pat-conf i{display:block;height:5px;border-radius:3px;background:var(--blue);}
+  .pat-logic{max-width:340px;color:var(--text2);font-size:11.5px;line-height:1.45;} .pat-more{color:var(--blue);cursor:pointer;white-space:nowrap;}
+  .pat-xrow td{background:var(--panel2);} .pat-x{padding:6px 4px;}
+  .pat-x-row{display:grid;grid-template-columns:110px 1fr;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5;} .pat-x-row b{color:var(--text2);}
+  .pat-tag{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:6px;margin:2px 4px 2px 0;font-size:11.5px;}
+  .pat-sym{cursor:pointer;color:var(--blue);}
+  @media(max-width:760px){.pat-controls{grid-template-columns:1fr 1fr;} .pat-x-row{grid-template-columns:1fr;}}
   .seas-tbl{border-collapse:collapse;font-size:11px;width:100%;min-width:640px;}
   .seas-tbl th,.seas-tbl td{padding:4px 6px;text-align:center;border:1px solid var(--border);white-space:nowrap;}
   .seas-tbl th{color:var(--text2);font-weight:600;background:var(--panel);}
@@ -263,6 +279,9 @@
   </button>
   <button class="rail-btn" data-target="sec-priceaction" data-tip="Price action">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l4-8 4 4 6-10 4 6"/></svg>
+  </button>
+  <button class="rail-btn" data-target="sec-patterns" data-tip="Chart patterns">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18l5-9 4 5 3-7 6 11"/><path d="M3 21h18"/></svg>
   </button>
   <div class="rail-spacer"></div>
   <button class="rail-btn" id="collapseBtn" data-tip="Collapse">
@@ -566,6 +585,27 @@
       <tbody id="paBody"></tbody>
     </table></div>
     <div id="paStatus" class="metric-sub"></div>
+  </section>
+
+
+  <section id="sec-patterns" class="panel">
+    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">17 classic patterns &middot; detected on real Upstox candles &middot; several can be active at once</span></div>
+    <p class="desc">Swing-point analysis finds every pattern that is <strong>forming</strong> or <strong>confirmed</strong> on the chart right now &mdash; overlapping patterns (e.g. a flag inside a triangle) are all listed. Click a row to draw it on the chart; click <strong>full logic</strong> for the complete strategy (how it forms, entry, stop, target, failure, volume).</p>
+    <div class="pat-controls">
+      <div><label>Symbol</label><input id="patSym" placeholder="e.g. RELIANCE, NIFTY" autocomplete="off"></div>
+      <div><label>Timeframe</label><select id="patTf"><option value="1D" selected>Daily (~1 year)</option><option value="1W">Weekly</option><option value="1h">Hourly</option></select></div>
+      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option></select></div>
+      <button class="btn" id="patGo" style="padding:9px;">Analyse</button>
+      <button class="btn" id="patScanBtn" style="padding:9px;" title="Scan every stock and index in the screener list on daily data">Scan all</button>
+    </div>
+    <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
+    <div id="patChart" style="width:100%;height:340px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;"></div>
+    <div id="patSummary" style="margin-bottom:6px;"></div>
+    <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status</th><th>Confidence</th><th>Levels</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
+    <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume and trend alignment &mdash; it is a ranking aid, not a probability of profit.</div>
+    <h4 style="margin:16px 0 4px;">Scan across all stocks</h4>
+    <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
+    <div id="patScanOut" style="overflow-x:auto;"></div>
   </section>
 
   <div class="grid cols-2b">
@@ -1096,17 +1136,31 @@ function computeSupertrendHL(hi,lo,cl,period,mult){
 // Trend-following composite score for REAL price history: price vs EMAs,
 // EMA cross, ATR Supertrend, MACD and RSI (RSI only tempers extremes; it is
 // no longer allowed to flip a falling stock into a "strong buy").
-function realTrendScore(closes, rsi, stBull, macdBull, fastP, slowP){
+function realTrendParts(closes, rsi, stBull, macdBull, fastP, slowP){
   const eF=ema(closes,fastP), eS=ema(closes,slowP);
-  const last=closes[closes.length-1];
-  let s=50;
-  s += last>eF[eF.length-1] ? 8 : -8;
-  s += eF[eF.length-1]>eS[eS.length-1] ? 8 : -8;
-  s += stBull ? 12 : -12;
-  s += macdBull ? 8 : -8;
-  if(rsi>=50) s += Math.min(rsi-50,20)*0.5 - (rsi>75 ? 8 : 0);
-  else s -= Math.min(50-rsi,20)*0.5 - (rsi<25 ? 14 : 0); // deeply oversold: soften, don't flip
-  return Math.max(2,Math.min(98,Math.round(s)));
+  const last=closes[closes.length-1], f=eF[eF.length-1], sl=eS[eS.length-1];
+  const P=[{label:'Base (neutral)',points:50,note:'Every score starts at 50.'}];
+  P.push({label:'Price vs EMA'+fastP,points:last>f?8:-8,note:'Close '+(last>f?'above':'below')+' its '+fastP+'-period EMA ('+f.toFixed(2)+').'});
+  P.push({label:'EMA'+fastP+' vs EMA'+slowP,points:f>sl?8:-8,note:'Fast EMA '+(f>sl?'above':'below')+' slow EMA ('+sl.toFixed(2)+') \u2014 '+(f>sl?'uptrend':'downtrend')+' structure.'});
+  P.push({label:'ATR Supertrend',points:stBull?12:-12,note:'Volatility-adjusted trend line is '+(stBull?'below price (bullish).':'above price (bearish).')});
+  P.push({label:'MACD',points:macdBull?8:-8,note:'MACD line '+(macdBull?'above':'below')+' its signal line.'});
+  let r, rn;
+  if(rsi>=50){ r=Math.min(rsi-50,20)*0.5-(rsi>75?8:0); rn='RSI '+rsi.toFixed(1)+(rsi>75?' is overheated (>75) so the bonus is trimmed.':' shows momentum on the bullish side.'); }
+  else { r=-(Math.min(50-rsi,20)*0.5-(rsi<25?14:0)); rn='RSI '+rsi.toFixed(1)+(rsi<25?' is deeply oversold, so the penalty is softened.':' shows weak momentum.'); }
+  P.push({label:'RSI adjustment',points:Math.round(r*10)/10,note:rn});
+  return P;
+}
+function sumParts(P){ const raw=P.reduce((a,x)=>a+x.points,0); return Math.max(2,Math.min(98,Math.round(raw))); }
+function realTrendScore(closes, rsi, stBull, macdBull, fastP, slowP){
+  return sumParts(realTrendParts(closes, rsi, stBull, macdBull, fastP, slowP));
+}
+function simpleParts(rsi, stBull, macdBull){
+  return [
+    {label:'Base (neutral)',points:50,note:'Every score starts at 50.'},
+    {label:'RSI mean-reversion',points:Math.round((50-rsi)*0.35*10)/10,note:'RSI '+rsi.toFixed(1)+' \u2014 lower RSI adds points, higher subtracts.'},
+    {label:'Supertrend',points:stBull?15:-15,note:'Trend line '+(stBull?'bullish.':'bearish.')},
+    {label:'MACD',points:macdBull?10:-10,note:'MACD '+(macdBull?'above':'below')+' signal.'}
+  ];
 }
 
 function buildHorizons(d){
@@ -1116,42 +1170,48 @@ function buildHorizons(d){
   const macdIntraday = computeMACD(intradayCloses, 5, 13, 5);
   const stIntraday = computeSupertrend(intradayCloses, 0.6);
   let scoreIntraday = scoreFromIndicators(rsiIntraday, stIntraday.bull, macdIntraday.bull);
+  let partsIntraday = simpleParts(rsiIntraday, stIntraday.bull, macdIntraday.bull);
 
   const rsiSwing = computeRSI(closes, 14);
   const macdSwing = computeMACD(closes, 12, 26, 9);
   let stSwing = computeSupertrend(closes, 0.15);
   let scoreSwing = scoreFromIndicators(rsiSwing, stSwing.bull, macdSwing.bull);
+  let partsSwing = simpleParts(rsiSwing, stSwing.bull, macdSwing.bull);
   if(d.realHistory && d.histHL){
     const H=d.histHL.h, L=d.histHL.l;
     stSwing = computeSupertrendHL(H,L,closes,10,3);
-    scoreSwing = realTrendScore(closes, rsiSwing, stSwing.bull, macdSwing.bull, 20, 50);
+    partsSwing = realTrendParts(closes, rsiSwing, stSwing.bull, macdSwing.bull, 20, 50);
+    scoreSwing = sumParts(partsSwing);
     const n30=closes.slice(-30), h30=H.slice(-30), l30=L.slice(-30);
     const stI=computeSupertrendHL(h30,l30,n30,5,1.5);
     Object.assign(stIntraday,{bull:stI.bull});
-    scoreIntraday = realTrendScore(n30, rsiIntraday, stI.bull, macdIntraday.bull, 5, 10);
+    partsIntraday = realTrendParts(n30, rsiIntraday, stI.bull, macdIntraday.bull, 5, 10);
+    scoreIntraday = sumParts(partsIntraday);
   }
 
   // Long-term: fundamentals-driven rather than short-window technicals.
   // With REAL history loaded it is trend-driven instead (6-month momentum,
   // price vs its 100-day average, and distance from the 52-week high).
   let scoreLong = 50;
+  const partsLong=[{label:'Base (neutral)',points:50,note:'Every score starts at 50.'}];
+  const clampR=(v,a,b)=>Math.max(a,Math.min(b,v));
   if(d.realHistory && closes.length>=60){
     const last=closes[closes.length-1];
     const back=closes[Math.max(0,closes.length-126)];
     const mom=(last/back-1)*100;
     const win=closes.slice(-100); const sma=win.reduce((a,b)=>a+b,0)/win.length;
     const hi=Math.max(...closes);
-    scoreLong += Math.max(-22,Math.min(22, mom*0.9));
-    scoreLong += last>sma ? 12 : -12;
-    scoreLong += Math.max(-10,Math.min(6, -(hi-last)/hi*100*0.4+4));
+    partsLong.push({label:'6-month momentum',points:clampR(mom*0.9,-22,22),note:'Price change over ~6 months: '+mom.toFixed(1)+'% (×0.9, capped ±22).'});
+    partsLong.push({label:'Price vs 100-day average',points:last>sma?12:-12,note:'Close '+(last>sma?'above':'below')+' the 100-day average ('+sma.toFixed(2)+').'});
+    partsLong.push({label:'Distance from 52-week high',points:clampR(-(hi-last)/hi*100*0.4+4,-10,6),note:((hi-last)/hi*100).toFixed(1)+'% below the period high; near highs adds, deep drawdowns subtract.'});
   } else {
-    scoreLong += Math.max(-20,Math.min(20, d.upside*0.7));
-    scoreLong += Math.max(-12,Math.min(12,(d.revGrowth-8)*0.6));
-    scoreLong += Math.max(-10,Math.min(10,(d.roe-12)*0.5));
+    partsLong.push({label:'Analyst upside',points:clampR(d.upside*0.7,-20,20),note:'Upside to mean analyst target: '+fmt(d.upside,1)+'% (simulated fundamentals).'});
+    partsLong.push({label:'Revenue growth',points:clampR((d.revGrowth-8)*0.6,-12,12),note:'Growth '+fmt(d.revGrowth,1)+'% vs an 8% par (simulated).'});
+    partsLong.push({label:'Return on equity',points:clampR((d.roe-12)*0.5,-10,10),note:'ROE '+fmt(d.roe,1)+'% vs a 12% par (simulated).'});
   }
-  scoreLong = Math.max(2,Math.min(98,Math.round(scoreLong)));
+  scoreLong = sumParts(partsLong);
 
-  function withTargets(score, tight){
+  function withTargets(score, tight, parts){
     const l=labelFromScore(score);
     let target, stopLoss, note;
     if(l.signal==='strongbuy'||l.signal==='buy'){
@@ -1167,13 +1227,13 @@ function buildHorizons(d){
       stopLoss = tight==='intraday'? d.price*0.996 : (tight==='swing'? d.support1 : d.support2);
       note='Range-bound / no strong directional edge at this horizon — levels shown are the nearer boundaries.';
     }
-    return {...l, score, target, stopLoss, note};
+    return {...l, score, target, stopLoss, note, breakdown:parts, rawScore:parts.reduce((a,x)=>a+x.points,0)};
   }
 
   return {
-    intraday: {...withTargets(scoreIntraday,'intraday'), rsi:rsiIntraday, macdBull:macdIntraday.bull, macdHist:macdIntraday.hist, supertrendBull:stIntraday.bull, label:'Intraday'},
-    swing:    {...withTargets(scoreSwing,'swing'), rsi:rsiSwing, macdBull:macdSwing.bull, macdHist:macdSwing.hist, supertrendBull:stSwing.bull, trendLine:stSwing.trendLine, label:'Swing (positional)'},
-    longterm: {...withTargets(scoreLong,'longterm'), rsi:rsiSwing, macdBull:macdSwing.bull, macdHist:macdSwing.hist, supertrendBull:stSwing.bull, label:'Long-term (investment)'}
+    intraday: {...withTargets(scoreIntraday,'intraday',partsIntraday), rsi:rsiIntraday, macdBull:macdIntraday.bull, macdHist:macdIntraday.hist, supertrendBull:stIntraday.bull, label:'Intraday'},
+    swing:    {...withTargets(scoreSwing,'swing',partsSwing), rsi:rsiSwing, macdBull:macdSwing.bull, macdHist:macdSwing.hist, supertrendBull:stSwing.bull, trendLine:stSwing.trendLine, label:'Swing (positional)'},
+    longterm: {...withTargets(scoreLong,'longterm',partsLong), rsi:rsiSwing, macdBull:macdSwing.bull, macdHist:macdSwing.hist, supertrendBull:stSwing.bull, label:'Long-term (investment)'}
   };
 }
 
@@ -1513,6 +1573,23 @@ function renderPriceChart(d){
   charts.price={remove(){ ProChart.destroy(); }};
 }
 
+function scoreBreakdownHtml(h){
+  if(!h.breakdown) return '';
+  const rows=h.breakdown.map(x=>{
+    const v=x.points, base=x.label.indexOf('Base')===0;
+    const w=base?0:Math.min(100,Math.abs(v)/22*100);
+    const col=v>0?'var(--green,#26c281)':'var(--red,#ef5350)';
+    return `<tr title="${x.note.replace(/"/g,'&quot;')}"><td>${x.label}<div class="metric-sub" style="font-size:10.5px;">${x.note}</div></td>
+      <td style="width:90px;">${base?'':`<div style="height:6px;background:var(--panel2);border-radius:3px;position:relative;"><div style="position:absolute;height:6px;border-radius:3px;background:${col};${v>=0?'left:50%':'right:50%'};width:${w/2}%;"></div></div>`}</td>
+      <td class="${base?'':(v>=0?'up':'down')}" style="text-align:right;white-space:nowrap;font-weight:600;">${base?'50':(v>=0?'+':'')+v.toFixed(1)}</td></tr>`;
+  }).join('');
+  const clamped = Math.round(h.rawScore)!==h.score ? `<div class="metric-sub">Raw total ${h.rawScore.toFixed(1)} is limited to the 2&ndash;98 range.</div>` : '';
+  return `<div style="margin-top:12px;"><div class="card-title" style="margin-bottom:4px;">Score breakdown</div>
+    <table class="sb-tbl">${rows}
+    <tr><td style="font-weight:700;">Total</td><td></td><td style="text-align:right;font-weight:700;">${h.score}</td></tr></table>${clamped}
+    <div class="metric-sub">Bands: &ge;70 Strong Buy &middot; &ge;56 Buy &middot; 45&ndash;55 Hold &middot; &le;44 Sell &middot; &le;30 Strong Sell.</div></div>`;
+}
+
 function renderSignal(d){
   const activeKey = window.ACTIVE_HORIZON || 'swing';
   const h = d.horizons[activeKey];
@@ -1532,6 +1609,7 @@ function renderSignal(d){
     <div class="row-flex"><span class="lbl">MACD</span><span class="${h.macdBull?'up':'down'}">${h.macdBull?'Bullish':'Bearish'} (${fmt(h.macdHist,2)})</span></div>
     <div class="row-flex"><span class="lbl">${isBear?'Downside projection':'Target'}</span><span class="up">&#8377;${fmt(h.target,2)} (${(((h.target/d.price)-1)*100).toFixed(1)}%)</span></div>
     <div class="row-flex"><span class="lbl">${isBear?'Invalidation level':'Stop-loss'}</span><span class="down">&#8377;${fmt(h.stopLoss,2)} (${(((h.stopLoss/d.price)-1)*100).toFixed(1)}%)</span></div>
+    ${scoreBreakdownHtml(h)}
     <div class="metric-sub" style="margin-top:8px;line-height:1.5;">${h.note} Educational/demo levels &mdash; not investment advice.</div>`;
 
   document.querySelectorAll('.horizon-tab').forEach(btn=>{
@@ -4082,6 +4160,648 @@ document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closes
 setupSeasonalityControls();
 refreshTickerLive();
 setTimeout(()=>{ try{ scanScreenerLive(); }catch(e){} }, 4000); // load real price history for signals in the background
+</script>
+<script>
+/* ============================================================
+   CHART PATTERN ENGINE  (standalone: reads OHLCV, returns every pattern
+   that is forming / confirmed right now — several can coexist)
+   candles: [{t,o,h,l,c,v}]  oldest -> newest
+   ============================================================ */
+const PatternEngine = (function(){
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+  // ---------- explanations (brief + full) ----------
+  const LIB = {
+    cont:{name:'Continuation Pattern',bias:'Neutral',
+      brief:'Sharp move, then a tight pause that usually resolves in the same direction.',
+      full:{what:'A strong impulse ("pole") followed by a shallow, low-range pause. Buyers (or sellers) are digesting the move rather than reversing it.',
+        form:'Impulse of at least ~6% (or 3&times; ATR) in under 30 bars, then 5+ bars of consolidation whose range is under 60% of the impulse and that retraces no more than 61.8% of it.',
+        entry:'Enter on a close beyond the consolidation high (uptrend) or low (downtrend), ideally on above-average volume.',
+        stop:'Opposite side of the consolidation.',
+        target:'Measured move: impulse height projected from the breakout level.',
+        fail:'A close through the far side of the pause, or a retrace deeper than 61.8%, cancels the setup.',
+        vol:'Volume should shrink during the pause and expand on the breakout.'}},
+    dtop:{name:'Double Top',bias:'Bearish',
+      brief:'Two similar highs with a dip between; a close under the dip confirms a reversal down.',
+      full:{what:'Price fails twice at nearly the same resistance, showing buyers cannot push through. It is a bearish reversal after an advance.',
+        form:'Prior uptrend (&ge;6%). Two swing highs within ~1.5&ndash;4% of each other, at least 8 bars apart, with a pullback low (the neckline) between them.',
+        entry:'Short/exit when price closes below the neckline (the low between the tops).',
+        stop:'Just above the higher top.',
+        target:'Top &minus; neckline height, projected down from the neckline.',
+        fail:'A close above the tops after the second peak invalidates it; a drop is not confirmed until the neckline breaks.',
+        vol:'Volume is usually lower on the second peak and rises on the neckline break.'}},
+    dbot:{name:'Double Bottom',bias:'Bullish',
+      brief:'Two similar lows with a bounce between; a close above the bounce high confirms a reversal up.',
+      full:{what:'Price finds support twice at almost the same level, showing sellers are exhausted. A bullish reversal after a decline.',
+        form:'Prior downtrend (&ge;6%). Two swing lows within ~1.5&ndash;4% of each other, at least 8 bars apart, with a rally high (neckline) between them.',
+        entry:'Buy when price closes above the neckline (the high between the bottoms).',
+        stop:'Just below the lower bottom.',
+        target:'Neckline + (neckline &minus; bottom), projected up.',
+        fail:'A close below the bottoms after the second trough cancels it.',
+        vol:'Rising volume on the breakout above the neckline adds conviction.'}},
+    ttop:{name:'Triple Top',bias:'Bearish',
+      brief:'Three failed attempts at the same high; a close below the support between them confirms down.',
+      full:{what:'A stronger version of the double top: three rejections at one resistance zone.',
+        form:'Prior uptrend. Three swing highs within ~4% of each other, two intervening lows at similar levels; neckline = the lower of those lows.',
+        entry:'Close below the neckline.',stop:'Above the highest top.',
+        target:'Top &minus; neckline height projected down.',
+        fail:'A close above the tops.',vol:'Volume typically fades with each peak.'}},
+    tbot:{name:'Triple Bottom',bias:'Bullish',
+      brief:'Three tests of the same low; a close above the resistance between them confirms up.',
+      full:{what:'Three successful defences of one support zone &mdash; a strong bullish reversal.',
+        form:'Prior downtrend. Three swing lows within ~4% of each other; neckline = the higher of the two rallies between them.',
+        entry:'Close above the neckline.',stop:'Below the lowest bottom.',
+        target:'Neckline + neckline&minus;bottom height.',fail:'A close below the bottoms.',vol:'Expanding volume on the breakout.'}},
+    hs:{name:'Head and Shoulders',bias:'Bearish',
+      brief:'Left shoulder, higher head, right shoulder; a close under the neckline confirms a top.',
+      full:{what:'The classic bearish reversal: three peaks, the middle one highest. Each rally is weaker than the last.',
+        form:'Prior uptrend. Head at least ~2% above both shoulders; shoulders within ~5&ndash;6% of each other; two troughs form the neckline (may slope).',
+        entry:'Close below the neckline.',stop:'Above the right shoulder.',
+        target:'Head &minus; neckline (measured at the head) projected down from the break.',
+        fail:'Price closing back above the right shoulder.',
+        vol:'Volume is typically highest on the left shoulder / head and weaker on the right shoulder; it expands on the break.'}},
+    ihs:{name:'Inverted Head and Shoulders',bias:'Bullish',
+      brief:'Left shoulder, lower head, right shoulder; a close above the neckline confirms a bottom.',
+      full:{what:'The bullish mirror of head &amp; shoulders: three troughs, the middle deepest, after a decline.',
+        form:'Prior downtrend. Head at least ~2% below both shoulders; shoulders within ~5&ndash;6%; two rally highs form the neckline.',
+        entry:'Close above the neckline.',stop:'Below the right shoulder.',
+        target:'Neckline &minus; head depth projected up from the break.',
+        fail:'A close back under the right shoulder.',vol:'Volume should pick up on the breakout.'}},
+    cup:{name:'Cup and Handle',bias:'Bullish',
+      brief:'Rounded U-shaped base plus a small pullback (handle); a close above the rim triggers.',
+      full:{what:'A base where price rounds out after a drop and returns to the prior high, then dips slightly (handle) before breaking out.',
+        form:'Cup 25&ndash;200 bars long, 10&ndash;50% deep, rounded (parabolic fit) with rims within ~10%. Handle pulls back no more than half the cup depth and stays in the upper half of the cup.',
+        entry:'Close above the rim (highest of the two rims).',stop:'Below the handle low.',
+        target:'Rim + cup depth.',fail:'Handle falls below the cup midpoint, or a V-shaped cup (no rounding).',
+        vol:'Volume dries up in the handle and expands on the breakout.'}},
+    cupc:{name:'Cup and Handle Continuation',bias:'Bullish',
+      brief:'Cup &amp; handle inside an ongoing uptrend: a pause-and-go base that resumes the advance.',
+      full:{what:'Same structure as cup &amp; handle, but it appears after a strong advance (&ge;15% into the left rim), so it acts as a rest stop rather than a bottom.',
+        form:'Uptrend into the left rim, then a rounded cup and shallow handle as in the standard pattern.',
+        entry:'Close above the rim.',stop:'Below the handle low.',target:'Rim + cup depth.',
+        fail:'Handle breaks the cup midpoint or the prior trend flips down.',vol:'Dry-up in the handle, surge on breakout.'}},
+    bflag:{name:'Bullish Flag',bias:'Bullish',
+      brief:'Sharp rally (pole) then a small downward-sloping channel; breakout above it resumes up.',
+      full:{what:'A brief, orderly pullback after a fast rally. The flag is a small parallel channel that drifts down.',
+        form:'Pole &ge; max(8%, 3.5&times;ATR) within 30 bars; 5&ndash;30 flag bars sloping flat-to-down, retracing under 50% of the pole, roughly parallel edges.',
+        entry:'Close above the flag&apos;s upper line.',stop:'Below the flag low.',
+        target:'Pole height added to the breakout.',fail:'A close below the lower line or retrace over 50%.',
+        vol:'Falling volume in the flag, rising on breakout.'}},
+    brflag:{name:'Bearish Flag',bias:'Bearish',
+      brief:'Sharp drop (pole) then a small upward-sloping channel; breakdown below it resumes down.',
+      full:{what:'A brief relief bounce after a fast fall, drifting up in a small parallel channel.',
+        form:'Pole down &ge; max(8%, 3.5&times;ATR) within 30 bars; 5&ndash;30 bars flat-to-up, retracing under 50% of the pole.',
+        entry:'Close below the lower line.',stop:'Above the flag high.',
+        target:'Pole height subtracted from the breakdown.',fail:'A close above the upper line.',vol:'Low volume in the bounce, heavy on breakdown.'}},
+    brect:{name:'Bullish Rectangle',bias:'Bullish',
+      brief:'Sideways range between flat support/resistance inside an uptrend; upside break continues it.',
+      full:{what:'Price ranges between horizontal support and resistance after an advance &mdash; a pause that usually resolves up.',
+        form:'Prior uptrend (&ge;4%). At least two touches each on a flat top and flat bottom, range 3%+ and 15+ bars.',
+        entry:'Close above resistance.',stop:'Below support (or mid-range for tighter risk).',
+        target:'Rectangle height added to the breakout.',fail:'Close below support.',vol:'Quiet inside, expansion on breakout.'}},
+    srect:{name:'Bearish Rectangle',bias:'Bearish',
+      brief:'Sideways range inside a downtrend; downside break continues it.',
+      full:{what:'A horizontal pause after a decline that usually resolves lower.',
+        form:'Prior downtrend (&ge;4%). Two+ touches on flat resistance and flat support, 15+ bars.',
+        entry:'Close below support.',stop:'Above resistance.',
+        target:'Rectangle height subtracted from the breakdown.',fail:'Close above resistance.',vol:'Expansion on breakdown.'}},
+    rect_n:{name:'Rectangle (bias pending)',bias:'Neutral',
+      brief:'Flat range with no clear prior trend; direction decided by the breakout.',
+      full:{what:'A horizontal trading range without a decisive lead-in trend.',
+        form:'Two+ touches on flat resistance and support.',
+        entry:'Wait for a close outside the range in either direction.',stop:'Opposite side of the range.',
+        target:'Range height from the breakout.',fail:'False breaks that close back inside.',vol:'Expansion on the breakout.'}},
+    bsym:{name:'Bullish Symmetrical Triangle',bias:'Bullish',
+      brief:'Lower highs and higher lows squeezing after an uptrend; upside break continues it.',
+      full:{what:'Volatility contracts as both highs and lows converge; in an uptrend the break usually goes with the trend.',
+        form:'Falling upper line and rising lower line, 2+ touches each, width shrinking by 25%+; prior uptrend.',
+        entry:'Close above the upper line.',stop:'Below the lower line.',
+        target:'Widest part of the triangle added to the breakout.',fail:'Close below the lower line.',
+        vol:'Volume contracts into the apex, expands on the break.'}},
+    ssym:{name:'Bearish Symmetrical Triangle',bias:'Bearish',
+      brief:'Converging highs and lows inside a downtrend; downside break continues it.',
+      full:{what:'A squeeze that in a downtrend more often breaks lower.',
+        form:'Falling highs, rising lows, 2+ touches each, prior downtrend.',
+        entry:'Close below the lower line.',stop:'Above the upper line.',
+        target:'Widest part subtracted from the breakdown.',fail:'Close above the upper line.',vol:'Expansion on breakdown.'}},
+    sym_n:{name:'Symmetrical Triangle (bias pending)',bias:'Neutral',
+      brief:'Converging highs/lows with no dominant prior trend; watch for the break.',
+      full:{what:'A contracting range with no decisive lead-in trend.',
+        form:'Falling highs, rising lows, 2+ touches each.',
+        entry:'Close outside either line.',stop:'Opposite line.',target:'Widest part from the breakout.',fail:'False breaks.',vol:'Volume expands on the break.'}},
+    asc:{name:'Bullish Ascending Triangle',bias:'Bullish',
+      brief:'Flat resistance with rising lows; buyers keep coming, breakout above resistance is the trigger.',
+      full:{what:'Sellers defend one price while buyers pay higher each dip &mdash; pressure builds under resistance.',
+        form:'Flat upper line (2+ touches), rising lower line (2+ touches), width shrinking 25%+.',
+        entry:'Close above the flat resistance.',stop:'Below the latest higher low.',
+        target:'Triangle height added to the breakout.',fail:'Close below the rising support.',vol:'Expansion on the breakout.'}},
+    desc:{name:'Bearish Descending Triangle',bias:'Bearish',
+      brief:'Flat support with falling highs; sellers keep coming, breakdown below support is the trigger.',
+      full:{what:'Buyers defend one price while sellers offer lower each rally.',
+        form:'Flat lower line (2+ touches), falling upper line (2+ touches), width shrinking 25%+.',
+        entry:'Close below the flat support.',stop:'Above the latest lower high.',
+        target:'Triangle height subtracted from the breakdown.',fail:'Close above the falling resistance.',vol:'Expansion on the breakdown.'}}
+  };
+
+  // ---------- helpers ----------
+  function atrArr(C,p){ p=p||14; let a=null; const o=[]; for(let i=0;i<C.length;i++){ const tr=i===0?C[i].h-C[i].l:Math.max(C[i].h-C[i].l,Math.abs(C[i].h-C[i-1].c),Math.abs(C[i].l-C[i-1].c)); a=a==null?tr:(a*(p-1)+tr)/p; o.push(a);} return o; }
+  function mirror(C,K){ return C.map(x=>({t:x.t,o:K/x.o,h:K/x.l,l:K/x.h,c:K/x.c,v:x.v})); }
+  function zigzag(C,dev){
+    const n=C.length; if(n<5) return [];
+    const P=[]; let dir=0, hi=C[0].h, hiI=0, lo=C[0].l, loI=0;
+    for(let i=1;i<n;i++){
+      const c=C[i];
+      if(dir===0){
+        if(c.h>hi){hi=c.h;hiI=i;} if(c.l<lo){lo=c.l;loI=i;}
+        if(hi>=lo*(1+dev) && hiI>loI){ P.push({i:loI,p:lo,type:'L'}); dir=1; }
+        else if(lo<=hi*(1-dev) && loI>hiI){ P.push({i:hiI,p:hi,type:'H'}); dir=-1; }
+      } else if(dir===1){
+        if(c.h>hi){hi=c.h;hiI=i;} else if(c.l<=hi*(1-dev)){ P.push({i:hiI,p:hi,type:'H'}); dir=-1; lo=c.l; loI=i; }
+      } else {
+        if(c.l<lo){lo=c.l;loI=i;} else if(c.h>=lo*(1+dev)){ P.push({i:loI,p:lo,type:'L'}); dir=1; hi=c.h; hiI=i; }
+      }
+    }
+    if(dir===1) P.push({i:hiI,p:hi,type:'H',prov:true}); else if(dir===-1) P.push({i:loI,p:lo,type:'L',prov:true});
+    return P;
+  }
+  function linreg(xs,ys){ const n=xs.length; let sx=0,sy=0,sxx=0,sxy=0; for(let i=0;i<n;i++){sx+=xs[i];sy+=ys[i];sxx+=xs[i]*xs[i];sxy+=xs[i]*ys[i];}
+    const d=n*sxx-sx*sx; const m=d===0?0:(n*sxy-sx*sy)/d; return {m,b:(sy-m*sx)/n}; }
+  function quadFit(ys){ // y = a x^2 + b x + c on x in [0,1]; returns {a,vertex,r2}
+    const n=ys.length; const xs=ys.map((_,i)=>i/(n-1));
+    let s0=n,s1=0,s2=0,s3=0,s4=0,t0=0,t1=0,t2=0;
+    for(let i=0;i<n;i++){ const x=xs[i],y=ys[i]; s1+=x;s2+=x*x;s3+=x*x*x;s4+=x*x*x*x;t0+=y;t1+=x*y;t2+=x*x*y; }
+    const M=[[s4,s3,s2,t2],[s3,s2,s1,t1],[s2,s1,s0,t0]];
+    for(let i=0;i<3;i++){ let mx=i; for(let r=i+1;r<3;r++) if(Math.abs(M[r][i])>Math.abs(M[mx][i])) mx=r; [M[i],M[mx]]=[M[mx],M[i]];
+      if(Math.abs(M[i][i])<1e-12) return null;
+      for(let r=i+1;r<3;r++){ const f=M[r][i]/M[i][i]; for(let c=i;c<4;c++) M[r][c]-=f*M[i][c]; } }
+    const co=[0,0,0]; for(let i=2;i>=0;i--){ let s=M[i][3]; for(let c=i+1;c<3;c++) s-=M[i][c]*co[c]; co[i]=s/M[i][i]; }
+    const [a,b,c]=co; const mean=t0/n; let ssr=0,sst=0;
+    for(let i=0;i<n;i++){ const f=a*xs[i]*xs[i]+b*xs[i]+c; ssr+=(ys[i]-f)**2; sst+=(ys[i]-mean)**2; }
+    return {a,vertex:a!==0?-b/(2*a):0.5,r2:sst>0?1-ssr/sst:0};
+  }
+  function volRatio(C,i){ if(i<1||!C[i].v) return null; const s=Math.max(0,i-20); let t=0,k=0; for(let j=s;j<i;j++){ if(C[j].v){t+=C[j].v;k++;} } return k? C[i].v/(t/k):null; }
+  function riseBefore(C,i,look){ let mn=Infinity; for(let j=Math.max(0,i-look);j<=i;j++) mn=Math.min(mn,C[j].l); return C[i].h/mn-1; }
+  function firstAfter(C,from,fn){ for(let j=from;j<C.length;j++) if(fn(C[j],j)) return j; return -1; }
+
+  function mk(ctx,o){
+    const s=ctx.s, C0=ctx.C0;
+    const conf=Math.round(clamp(32+38*clamp(o.fit,0,1)+(o.brk!=null?12:0)+(o.vol!=null&&o.vol>=1.3?8:0)+(o.aligned?10:0),20,95));
+    const lib=LIB[o.key];
+    const P=v=>v==null?null:ctx.unm(v);
+    const entry=P(o.entry), stop=P(o.stop);
+    let target=P(o.target);
+    if(o.hgt){ const dist=Math.abs(ctx.unm(o.hgt[0])-ctx.unm(o.hgt[1])); target=entry+(o.tdir*s)*dist; }
+    const risk=entry!=null&&stop!=null?Math.abs(entry-stop):null, reward=entry!=null&&target!=null?Math.abs(target-entry):null;
+    const lastC=C0[C0.length-1].c;
+    return {key:o.key,name:lib.name,bias:o.bias||lib.bias,status:o.brk!=null?'Confirmed':'Forming',conf,
+      i0:o.i0,i1:o.i1,brk:o.brk!=null?o.brk:null,barsSince:o.brk!=null?C0.length-1-o.brk:null,
+      entry,stop,target,rr:risk&&reward?reward/risk:null,
+      distPct:entry?(lastC/entry-1)*100:null,vol:o.vol==null?null:o.vol,
+      lines:(o.lines||[]).map(l=>({i1:l.i1,p1:ctx.unm(l.p1),i2:l.i2,p2:ctx.unm(l.p2),label:l.label,dash:!!l.dash})),
+      note:o.note||''};
+  }
+
+  // ---------- top-type reversal patterns (double/triple top, H&S) ; mirrored => bottoms ----------
+  function detTops(ctx){
+    const {C,P,n,tolEq}=ctx, out=[]; const bull=ctx.s<0; const H=(k)=>P[k], last=n-1;
+    const isH=k=>k>=0&&P[k]&&P[k].type==='H', isL=k=>k>=0&&P[k]&&P[k].type==='L';
+    function finish(key,tops,neckFn,stopLevel,hgtPair,neckStartI,fit,extraLines,note){
+      const lastTop=tops[tops.length-1], hi=Math.max(...tops.map(t=>t.p));
+      // breakout = first close under the neckline after last top
+      let brk=firstAfter(C,lastTop.i+1,(c,j)=>c.c<neckFn(j)*(1-0.001));
+      // invalidation: close above highest top before the break
+      const inv=firstAfter(C,lastTop.i+1,(c,j)=>c.c>hi*1.01);
+      if(inv>=0 && (brk<0 || inv<brk)) return;
+      if(brk>=0){
+        if(last-brk>40) return;
+        const back=firstAfter(C,brk+1,(c)=>c.c>hi*1.01); if(back>=0) return;
+      } else {
+        if(last-lastTop.i>40) return;
+        if(C[last].c>lastTop.p*0.995 && lastTop.prov) return; // right peak still being made
+        if(C[last].c<neckFn(last)) brk=last; // safety
+      }
+      const nk=brk>=0?neckFn(brk):neckFn(last);
+      out.push(mk(ctx,{key,brk:brk>=0?brk:null,i0:tops[0].i,i1:brk>=0?brk:last,entry:nk,stop:hi*1.005,hgt:hgtPair,tdir:-1,
+        fit,aligned:true,vol:brk>=0?volRatio(C,brk):null,note,
+        lines:[{i1:neckStartI,p1:neckFn(neckStartI),i2:brk>=0?brk:last,p2:nk,label:'Neckline'}].concat(extraLines)}));
+    }
+    for(let k=0;k<P.length;k++){
+      if(!isH(k)) continue;
+      // ---- double top ----
+      if(isL(k-1)&&isH(k-2)){
+        const h1=P[k-2],h2=P[k],l=P[k-1];
+        const diff=Math.abs(h1.p-h2.p)/Math.max(h1.p,h2.p);
+        const tripleAhead=isL(k-3)&&isH(k-4)&&Math.abs(P[k-4].p-h1.p)/h1.p<=tolEq&&P[k-4].i<h1.i;
+        if(diff<=tolEq && h2.i-h1.i>=8 && riseBefore(C,h1.i,40)>=0.06 && !tripleAhead){
+          const hgt=Math.min(h1.p,h2.p)-l.p, neck=l.p;
+          finish(bull?'dbot':'dtop',[h1,h2],()=>neck,0,[Math.max(h1.p,h2.p),neck],h1.i,1-diff/tolEq,
+            [{i1:h1.i,p1:h1.p,i2:h2.i,p2:h2.p,label:bull?'Bottoms':'Tops',dash:true}],
+            'Peaks differ by '+(diff*100).toFixed(1)+'%.');
+        }
+      }
+      // ---- triple top ----
+      if(isL(k-1)&&isH(k-2)&&isL(k-3)&&isH(k-4)){
+        const a=P[k-4],b=P[k-2],c=P[k], l1=P[k-3], l2=P[k-1];
+        const mx=Math.max(a.p,b.p,c.p), mn=Math.min(a.p,b.p,c.p), spread=(mx-mn)/mx;
+        const lspread=Math.abs(l1.p-l2.p)/Math.max(l1.p,l2.p);
+        if(spread<=tolEq*1.2 && lspread<=tolEq*2.5 && b.i-a.i>=6 && c.i-b.i>=6 && riseBefore(C,a.i,40)>=0.06){
+          const neck=Math.min(l1.p,l2.p);
+          finish(bull?'tbot':'ttop',[a,b,c],()=>neck,0,[mx,neck],a.i,1-spread/(tolEq*1.2),
+            [{i1:a.i,p1:a.p,i2:c.i,p2:c.p,label:bull?'Bottoms':'Tops',dash:true}],'Three peaks within '+(spread*100).toFixed(1)+'%.');
+        }
+      }
+      // ---- head & shoulders ----
+      if(isL(k-1)&&isH(k-2)&&isL(k-3)&&isH(k-4)){
+        const ls=P[k-4],t1=P[k-3],hd=P[k-2],t2=P[k-1],rs=P[k];
+        const shDiff=Math.abs(ls.p-rs.p)/hd.p, headUp=(hd.p-Math.max(ls.p,rs.p))/hd.p;
+        const tilt=Math.abs(t1.p-t2.p)/Math.max(t1.p,t2.p);
+        const tl=(hd.i-ls.i)/Math.max(1,(rs.i-hd.i));
+        if(hd.p>ls.p&&hd.p>rs.p&&headUp>=0.02&&shDiff<=0.06&&tilt<=0.08&&tl>=0.4&&tl<=2.5&&riseBefore(C,ls.i,40)>=0.06){
+          const slope=(t2.p-t1.p)/(t2.i-t1.i);
+          const neckFn=j=>t1.p+slope*(j-t1.i);
+          const height=[hd.p,neckFn(hd.i)];
+          const fit=clamp(1-shDiff/0.06,0,1)*0.6+clamp(headUp/0.06,0,1)*0.4;
+          finish(bull?'ihs':'hs',[ls,hd,rs],neckFn,0,height,t1.i,fit,
+            [{i1:ls.i,p1:ls.p,i2:hd.i,p2:hd.p,label:'LS→Head',dash:true},{i1:hd.i,p1:hd.p,i2:rs.i,p2:rs.p,label:'Head→RS',dash:true}],
+            'Head '+(headUp*100).toFixed(1)+'% above shoulders; shoulders differ '+(shDiff*100).toFixed(1)+'%.');
+        }
+      }
+    }
+    return out;
+  }
+
+  // ---------- cup & handle (bullish only) ----------
+  function detCup(ctx){
+    const {C,P,n}=ctx, out=[]; const last=n-1;
+    for(let x=0;x<P.length;x++){ const a=P[x]; if(a.type!=='H') continue;
+      for(let y=x+1;y<P.length;y++){ const c=P[y]; if(c.type!=='H') continue;
+        const w=c.i-a.i; if(w<25||w>200) continue;
+        if(c.p<a.p*0.9||c.p>a.p*1.03) continue;
+        let lowI=a.i, low=Infinity; for(let j=a.i;j<=c.i;j++) if(C[j].l<low){low=C[j].l;lowI=j;}
+        const rim=Math.min(a.p,c.p), depth=(rim-low)/rim; if(depth<0.10||depth>0.5) continue;
+        const pos=(lowI-a.i)/w; if(pos<0.25||pos>0.75) continue;
+        const q=quadFit(C.slice(a.i,c.i+1).map(z=>z.c)); if(!q||q.a<=0||q.r2<0.55||q.vertex<0.2||q.vertex>0.8) continue;
+        // no bar inside the cup may close far above the rims
+        const rimMax=Math.max(a.p,c.p); let bad=false; for(let j=a.i;j<=c.i;j++) if(C[j].c>rimMax*1.03){bad=true;break;} if(bad) continue;
+        // handle
+        const mid=low+0.5*(rim-low);
+        let brk=firstAfter(C,c.i+1,(z)=>z.c>rimMax*1.001);
+        const hEnd=brk>=0?brk-1:last;
+        if(brk>=0 && last-brk>30) continue;
+        if(brk<0 && last-c.i>45) continue;
+        let hLow=Infinity; for(let j=c.i+1;j<=hEnd;j++) hLow=Math.min(hLow,C[j].l);
+        const hLen=hEnd-c.i;
+        if(hLow===Infinity){ hLow=c.p; }
+        if(hLow<mid) continue;
+        if(hLen>Math.max(35,w/2)) continue;
+        const hDepth=(c.p-hLow)/c.p; if(hDepth>0.5*depth) continue;
+        if(brk<0){ // unbroken: price must still be near the rim and inside the handle zone
+          if(C[last].c<mid || C[last].c<c.p*(1-0.5*depth)) continue;
+          if(hLen<1) continue;
+        }
+        const run=(()=>{let mn=Infinity; for(let j=Math.max(0,a.i-60);j<=a.i;j++) mn=Math.min(mn,C[j].l); return a.p/mn-1;})();
+        const cont=run>=0.15;
+        const fit=clamp(q.r2,0,1)*0.6+clamp(1-Math.abs(a.p-c.p)/a.p/0.1,0,1)*0.4;
+        out.push(mk(ctx,{key:cont?'cupc':'cup',brk:brk>=0?brk:null,i0:a.i,i1:brk>=0?brk:last,entry:rimMax,stop:Math.min(hLow,c.p-0.25*depth*rim)*0.995,
+          hgt:[rimMax,low],tdir:1,fit,aligned:cont,vol:brk>=0?volRatio(C,brk):null,
+          note:'Cup depth '+(depth*100).toFixed(0)+'%, R² '+q.r2.toFixed(2)+(cont?', prior run +'+(run*100).toFixed(0)+'%':'')+'.',
+          lines:[{i1:a.i,p1:rimMax,i2:brk>=0?brk:last,p2:rimMax,label:'Rim'},
+                 {i1:a.i,p1:a.p,i2:lowI,p2:low,label:'Cup',dash:true},{i1:lowI,p1:low,i2:c.i,p2:c.p,label:'Cup',dash:true}]}));
+      }
+    }
+    return out;
+  }
+
+  // ---------- flags & generic continuation (up orientation; mirrored = bearish) ----------
+  function detFlags(ctx){
+    const {C,P,n,atrPct}=ctx, out=[]; const bull=ctx.s>0; const last=n-1;
+    for(let k=0;k+1<P.length;k++){
+      const B=P[k],T=P[k+1]; if(B.type!=='L'||T.type!=='H') continue;
+      const poleAbs=T.p-B.p, rise=poleAbs/B.p, pb=T.i-B.i;
+      if(pb<3||pb>30) continue;
+      // ---- flag ----
+      if(rise>=Math.max(0.08,3.5*atrPct) && rise/pb>=0.004){
+        const start=T.i+1; const maxE=Math.min(last,T.i+35);
+        let brk=-1, e=maxE, ok=false, chan=null;
+        for(let j=start+5;j<=maxE;j++){
+          const ch=channel(C,start,j-1); if(!ch) break;
+          const up=ch.up(j);
+          if(C[j].c>up*1.001){ brk=j; e=j-1; chan=ch; ok=true; break; }
+          if(C[j].c<ch.lo(j)*0.998){ ok=false; e=-1; break; }
+          e=j; chan=ch; ok=true;
+        }
+        if(chan&&ok&&e-start+1>=5){
+          let mnL=Infinity,mxH=-Infinity; for(let j=start;j<=e;j++){mnL=Math.min(mnL,C[j].l);mxH=Math.max(mxH,C[j].h);}
+          const retr=(T.p-mnL)/poleAbs, sM=(chan.sH+chan.sL)/2, w0=chan.up(start)-chan.lo(start), w1=chan.up(e)-chan.lo(e);
+          const ratio=w0>0?w1/w0:1;
+          if(retr<=0.5 && sM<=0.0004 && sM>=-0.012 && (mxH-mnL)<=0.5*poleAbs && ratio>=0.5 && ratio<=1.5 && (brk>=0? last-brk<=20 : last-T.i<=35)){
+            const fit=clamp(1-chan.dev/0.25,0,1)*0.6+clamp(1-retr/0.5,0,1)*0.4;
+            const bLevel=brk>=0?chan.up(brk):chan.up(last);
+            out.push(mk(ctx,{key:bull?'bflag':'brflag',brk:brk>=0?brk:null,i0:B.i,i1:brk>=0?brk:last,entry:bLevel,stop:mnL*0.995,hgt:[T.p,B.p],tdir:1,
+              fit,aligned:true,vol:brk>=0?volRatio(C,brk):null,
+              note:'Pole '+(rise*100).toFixed(0)+'% in '+pb+' bars; flag retraces '+(retr*100).toFixed(0)+'%.',
+              lines:[{i1:B.i,p1:B.p,i2:T.i,p2:T.p,label:'Pole'},{i1:start,p1:chan.up(start),i2:brk>=0?brk:last,p2:bLevel,label:'Flag top'},
+                     {i1:start,p1:chan.lo(start),i2:brk>=0?brk:last,p2:chan.lo(brk>=0?brk:last),label:'Flag bottom'}]}));
+          }
+        }
+      }
+      // ---- generic continuation ----
+      if(rise>=Math.max(0.06,3*atrPct)){
+        const start=T.i+1; if(last-T.i<5||last-T.i>40) continue;
+        let brk=firstAfter(C,start+2,(z)=>z.c>T.p*1.001 && false);
+        // consolidation = bars after T until first close above the running consolidation high (breakout)
+        let cHi=-Infinity, cLo=Infinity, bIdx=-1;
+        for(let j=start;j<=last;j++){
+          if(j>=start+4 && C[j].c>cHi*1.001){ bIdx=j; break; }
+          cHi=Math.max(cHi,C[j].h); cLo=Math.min(cLo,C[j].l);
+        }
+        const e=bIdx>=0?bIdx-1:last; if(e-start+1<5) continue;
+        cHi=-Infinity;cLo=Infinity; for(let j=start;j<=e;j++){cHi=Math.max(cHi,C[j].h);cLo=Math.min(cLo,C[j].l);}
+        const retr=(T.p-cLo)/poleAbs;
+        if(retr<=0.618 && (cHi-cLo)<=0.6*poleAbs && (bIdx<0 || last-bIdx<=20)){
+          const fit=clamp(1-retr/0.618,0,1)*0.5+clamp(1-(cHi-cLo)/(0.6*poleAbs),0,1)*0.5;
+          out.push(mk(ctx,{key:'cont',bias:bull?'Bullish':'Bearish',brk:bIdx>=0?bIdx:null,i0:B.i,i1:bIdx>=0?bIdx:last,entry:Math.max(cHi,T.p),stop:cLo*0.995,hgt:[T.p,B.p],tdir:1,
+            fit,aligned:true,vol:bIdx>=0?volRatio(C,bIdx):null,
+            note:'Impulse '+(rise*100).toFixed(0)+'% then '+(e-start+1)+'-bar pause retracing '+(retr*100).toFixed(0)+'%.',
+            lines:[{i1:B.i,p1:B.p,i2:T.i,p2:T.p,label:'Impulse'},{i1:start,p1:cHi,i2:bIdx>=0?bIdx:last,p2:cHi,label:'Pause high'},{i1:start,p1:cLo,i2:bIdx>=0?bIdx:last,p2:cLo,label:'Pause low'}]}));
+        }
+      }
+    }
+    return out;
+  }
+  // regression channel on highs/lows (lines shifted to touch extremes)
+  function channel(C,s,e){
+    if(e-s<4) return null;
+    const xs=[],hs=[],ls=[]; for(let j=s;j<=e;j++){xs.push(j);hs.push(C[j].h);ls.push(C[j].l);}
+    const rh=linreg(xs,hs), rl=linreg(xs,ls);
+    let sh=-Infinity, sl=Infinity; for(let i=0;i<xs.length;i++){ sh=Math.max(sh,hs[i]-(rh.m*xs[i]+rh.b)); sl=Math.min(sl,ls[i]-(rl.m*xs[i]+rl.b)); }
+    const up=j=>rh.m*j+rh.b+sh, lo=j=>rl.m*j+rl.b+sl;
+    const px=C[e].c; let dev=0; for(let i=0;i<xs.length;i++){ dev+=Math.abs(up(xs[i])-hs[i])+Math.abs(lo(xs[i])-ls[i]); }
+    const rng=Math.max(1e-9,up(e)-lo(e)); dev=dev/(2*xs.length)/rng;
+    return {up,lo,sH:rh.m/px,sL:rl.m/px,dev};
+  }
+
+  // ---------- pivot channels: rectangle, symmetrical / ascending / descending triangles ----------
+  function detChannels(ctx){
+    const {C,P,n,dev}=ctx, out=[]; const last=n-1; const tl=Math.max(0.012,dev*0.4);
+    const idx=[]; for(let k=0;k<P.length;k++) if(P[k].i>=last-140) idx.push(k);
+    for(let ai=0;ai<idx.length;ai++) for(let bi=ai+3;bi<idx.length&&bi<=ai+9;bi++){
+      const seg=idx.slice(ai,bi+1).map(k=>P[k]);
+      const hs=seg.filter(p=>p.type==='H'), ls=seg.filter(p=>p.type==='L');
+      if(hs.length<2||ls.length<2) continue;
+      const a=seg[0], b=seg[seg.length-1]; const L=b.i-a.i; if(L<15) continue;
+      const rh=linreg(hs.map(p=>p.i),hs.map(p=>p.p)), rl=linreg(ls.map(p=>p.i),ls.map(p=>p.p));
+      const up=j=>rh.m*j+rh.b, lo=j=>rl.m*j+rl.b;
+      const px=C[b.i].c; let ok=true;
+      for(const p of hs) if(Math.abs(p.p-up(p.i))/px>tl){ok=false;break;} if(!ok) continue;
+      for(const p of ls) if(Math.abs(p.p-lo(p.i))/px>tl){ok=false;break;} if(!ok) continue;
+      // price must respect the lines between first and last pivot
+      for(let j=a.i;j<=b.i;j++){ if(C[j].c>up(j)*(1+tl*0.7)||C[j].c<lo(j)*(1-tl*0.7)){ok=false;break;} } if(!ok) continue;
+      const w0=up(a.i)-lo(a.i), w1=up(b.i)-lo(b.i); if(w0<=0||w1<=0) continue;
+      const height0=w0, hp=w0/px; if(hp<0.03) continue;
+      const moveH=rh.m*L/px, moveL=rl.m*L/px, flatT=0.025, slopeT=0.03;
+      const flatH=Math.abs(moveH)<=flatT, flatL=Math.abs(moveL)<=flatT;
+      const shrink=w1/w0;
+      let kind=null;
+      if(flatH&&flatL&&shrink>=0.75&&shrink<=1.25) kind='rect';
+      else if(moveH<=-slopeT&&moveL>=slopeT&&shrink<=0.75) kind='sym';
+      else if(flatH&&moveL>=slopeT&&shrink<=0.75) kind='asc';
+      else if(flatL&&moveH<=-slopeT&&shrink<=0.75) kind='desc';
+      if(!kind) continue;
+      // breakout
+      let brk=-1, dirBrk=0;
+      for(let j=b.i+1;j<=last;j++){ if(C[j].c>up(j)*1.002){brk=j;dirBrk=1;break;} if(C[j].c<lo(j)*0.998){brk=j;dirBrk=-1;break;} }
+      if(brk>=0 ? last-brk>20 : last-b.i>25) continue;
+      // don't keep forming triangles whose apex is already behind us
+      if(brk<0&&kind!=='rect'&&(up(last)-lo(last))<=0) continue;
+      const prior=C[a.i].c/C[Math.max(0,a.i-30)].c-1;
+      let key,bias;
+      if(kind==='asc'){ if(dirBrk<0) continue; key='asc'; bias='Bullish'; }
+      else if(kind==='desc'){ if(dirBrk>0) continue; key='desc'; bias='Bearish'; }
+      else {
+        if(dirBrk!==0) bias=dirBrk>0?'Bullish':'Bearish';
+        else bias=prior>=0.04?'Bullish':prior<=-0.04?'Bearish':'Neutral';
+        if(kind==='rect') key=bias==='Bullish'?'brect':bias==='Bearish'?'srect':'rect_n';
+        else key=bias==='Bullish'?'bsym':bias==='Bearish'?'ssym':'sym_n';
+      }
+      const upEnd=up(brk>=0?brk:last), loEnd=lo(brk>=0?brk:last);
+      const long=bias==='Bullish', short=bias==='Bearish';
+      const entry=brk>=0?(dirBrk>0?upEnd:loEnd):(short?loEnd:upEnd);
+      const target=short||(bias==='Neutral'&&false)?entry-height0:entry+height0;
+      const stop=short?upEnd:loEnd;
+      const touches=hs.length+ls.length;
+      const fit=clamp(1-(hs.reduce((s,p)=>s+Math.abs(p.p-up(p.i)),0)+ls.reduce((s,p)=>s+Math.abs(p.p-lo(p.i)),0))/touches/px/tl,0,1)*0.6+clamp((touches-4)/4,0,1)*0.4;
+      const aligned=(bias==='Bullish'&&prior>=0.04)||(bias==='Bearish'&&prior<=-0.04)||kind==='asc'||kind==='desc';
+      const e1=brk>=0?brk:last;
+      out.push(mk(ctx,{key,bias,brk:brk>=0?brk:null,i0:a.i,i1:e1,entry,stop,target,fit,aligned,vol:brk>=0?volRatio(C,brk):null,
+        note:touches+' pivot touches over '+L+' bars; range narrowed to '+(shrink*100).toFixed(0)+'%'+(brk<0&&bias==='Neutral'?'; direction pending':'')+'.',
+        lines:[{i1:a.i,p1:up(a.i),i2:e1,p2:upEnd,label:'Upper line'},{i1:a.i,p1:lo(a.i),i2:e1,p2:loEnd,label:'Lower line'}]}));
+    }
+    return out;
+  }
+
+  // ---------- run everything ----------
+  const FAMILY={bsym:'sym',ssym:'sym',sym_n:'sym',brect:'rect',srect:'rect',rect_n:'rect',cup:'cup',cupc:'cup',bflag:'flag',brflag:'flag'};
+  function dedupe(list){
+    list.sort((x,y)=>y.conf-x.conf);
+    const keep=[];
+    for(const r of list){
+      const fam=FAMILY[r.key]||r.key;
+      const dup=keep.some(k=>(FAMILY[k.key]||k.key)===fam && Math.min(k.i1,r.i1)-Math.max(k.i0,r.i0)>0.5*Math.min(k.i1-k.i0,r.i1-r.i0));
+      if(!dup) keep.push(r);
+    }
+    // a double top/bottom that is just two legs of a triple top/bottom is redundant
+    return keep.filter(r=>{
+      const t=r.key==='dtop'?'ttop':r.key==='dbot'?'tbot':null; if(!t) return true;
+      return !keep.some(k=>k.key===t && k.i0<=r.i0+1 && k.i1>=r.i1-2);
+    });
+  }
+  function detect(candles, opts){
+    opts=opts||{};
+    const C0=(candles||[]).filter(x=>x&&x.h>0&&x.l>0&&x.c>0).map(x=>({t:x.t,o:x.o||x.c,h:x.h,l:x.l,c:x.c,v:x.v||0}));
+    if(C0.length<40) return {patterns:[],bars:C0.length,reason:'Need at least 40 bars of history.'};
+    const A=atrArr(C0,14), atrPct=A[A.length-1]/C0[C0.length-1].c;
+    const dev=clamp(1.8*atrPct,0.03,0.08), tolEq=clamp(dev*0.6,0.015,0.04);
+    const res=[];
+    const K=C0[0].c*C0[0].c;
+    const run=(C,s)=>{
+      const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),dev,tolEq,atrPct};
+      res.push(...detTops(ctx),...detFlags(ctx));
+      if(s>0) res.push(...detCup(ctx));
+    };
+    run(C0,1); run(mirror(C0,K),-1);
+    const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,dev),dev,tolEq,atrPct};
+    res.push(...detChannels(ch));
+    const patterns=dedupe(res).sort((a,b)=>(a.brk!=null?1:0)-(b.brk!=null?1:0)||b.conf-a.conf);
+    return {patterns,bars:C0.length,dev,atrPct};
+  }
+  return {detect,LIB,zigzag,_quadFit:quadFit,_mirror:mirror};
+})();
+
+
+/* ============================================================
+   CHART PATTERNS SECTION (standalone; does not touch other panels)
+   ============================================================ */
+const PatternUI = (function(){
+  const $=id=>document.getElementById(id);
+  const S={sym:null,tf:'1D',candles:[],res:null,chart:null,series:null,extra:[],priceLines:[],sel:null,filter:'all',open:{},loading:false,src:''};
+  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const biasCls=b=>b==='Bullish'?'up':b==='Bearish'?'down':'';
+  const barTime=(C,i)=>C[Math.max(0,Math.min(C.length-1,i))].t;
+
+  function sectionReady(){ return !!$('patBody'); }
+  function currentSym(){ return (window.CURRENT&&window.CURRENT.symbol)||'NIFTY'; }
+
+  async function load(sym){
+    if(!sectionReady()) return;
+    S.sym=(sym||$('patSym').value||currentSym()).trim().toUpperCase(); $('patSym').value=S.sym;
+    S.tf=$('patTf').value; S.loading=true; S.sel=null;
+    $('patStatus').textContent='Loading '+S.sym+' candles…';
+    try{
+      const resp=await fetch('/api/candles/'+encodeURIComponent(S.sym)+'?tf='+encodeURIComponent(S.tf),{cache:'no-store'});
+      const data=await resp.json();
+      if(!resp.ok||!data.series||!data.series.length) throw new Error(data.error||'no candles returned');
+      S.src=data.source; S.candles=data.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
+      if(S.tf==='1D') S.candles=S.candles.slice(-320);
+      analyse();
+    }catch(e){
+      S.candles=[]; S.res=null; render();
+      $('patStatus').innerHTML='<span class="down">Could not load candles for '+esc(S.sym)+':</span> '+esc(e.message);
+    }
+    S.loading=false;
+  }
+
+  function analyse(){
+    S.res=PatternEngine.detect(S.candles);
+    const n=S.res.patterns.length;
+    $('patStatus').innerHTML=esc(S.sym)+' &middot; '+S.candles.length+' '+({'1D':'daily','1W':'weekly','1h':'hourly'}[S.tf]||S.tf)+' bars &middot; data: '+(S.src==='upstox'?'Upstox':S.src==='yahoo'?'Yahoo (fallback)':esc(S.src))+
+      ' &middot; '+(n?n+' pattern'+(n>1?'s':'')+' active':'no pattern currently qualifies');
+    render();
+    if(n) select(0);
+  }
+
+  function visible(){
+    if(!S.res) return [];
+    return S.res.patterns.map((p,i)=>({p,i})).filter(({p})=>S.filter==='all'||(S.filter==='confirmed'?p.status==='Confirmed':S.filter==='forming'?p.status==='Forming':p.bias.toLowerCase()===S.filter));
+  }
+
+  function fullHtml(p){
+    const f=(window.PatternEngine.LIB[p.key]||{}).full; if(!f) return '';
+    const row=(k,v)=>'<div class="pat-x-row"><b>'+k+'</b><span>'+v+'</span></div>';
+    return '<div class="pat-x">'+row('What it is',f.what)+row('How it forms',f.form)+row('Entry',f.entry)+row('Stop-loss',f.stop)+row('Target',f.target)+row('Fails when',f.fail)+row('Volume',f.vol)+
+      (p.note?row('This chart',esc(p.note)):'')+
+      '<div class="metric-sub" style="margin-top:6px;">Detected by rule-based swing-point analysis &mdash; a screening aid, not a trade instruction. Confirm on the chart before acting.</div></div>';
+  }
+
+  function render(){
+    const body=$('patBody'); if(!body) return;
+    const sum=$('patSummary');
+    if(!S.res){ body.innerHTML=''; sum.innerHTML=''; return; }
+    const all=S.res.patterns, vis=visible();
+    const bull=all.filter(p=>p.bias==='Bullish').length, bear=all.filter(p=>p.bias==='Bearish').length;
+    const conf=all.filter(p=>p.status==='Confirmed').length;
+    sum.innerHTML=all.length?
+      '<span class="pat-chip up">'+bull+' bullish</span><span class="pat-chip down">'+bear+' bearish</span><span class="pat-chip">'+conf+' confirmed / '+(all.length-conf)+' forming</span>'+
+      (bull&&bear?'<span class="pat-chip" style="color:var(--amber);">Mixed signals &mdash; patterns disagree, size down / wait</span>':(bull>=2?'<span class="pat-chip up">Bullish confluence</span>':bear>=2?'<span class="pat-chip down">Bearish confluence</span>':'')):
+      '<span class="pat-chip">'+(S.res.reason||'Nothing on this chart meets the pattern rules right now &mdash; try another timeframe.')+'</span>';
+    if(!vis.length){ body.innerHTML='<tr><td colspan="6" class="metric-sub" style="text-align:center;padding:16px;">'+(all.length?'No patterns match this filter.':'No patterns detected.')+'</td></tr>'; return; }
+    body.innerHTML=vis.map(({p,i})=>{
+      const lib=PatternEngine.LIB[p.key], op=S.open[p.key+i];
+      const lv=(p.entry?'Entry <b>'+fmt(p.entry,2)+'</b>':'')+(p.stop?' &middot; Stop <b class="down">'+fmt(p.stop,2)+'</b>':'')+(p.target?' &middot; Target <b class="up">'+fmt(p.target,2)+'</b>':'')+(p.rr?' &middot; R:R '+p.rr.toFixed(1):'');
+      const st=p.status==='Confirmed'?'<span class="badge badge-'+(p.bias==='Bearish'?'sell':'buy')+'">Confirmed'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':'<span class="badge badge-hold">Forming</span>';
+      const volTxt=p.vol!=null?'<div class="metric-sub">Breakout vol '+p.vol.toFixed(1)+'&times; avg'+(p.vol>=1.3?' &#10003;':'')+'</div>':'';
+      const dist=p.distPct!=null?'<div class="metric-sub">Price '+(p.distPct>=0?'+':'')+p.distPct.toFixed(1)+'% vs entry</div>':'';
+      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b><div class="metric-sub">'+(S.sel===i?'shown on chart':'click to show on chart')+'</div></td>'+
+        '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+volTxt+'</td>'+
+        '<td><div class="pat-conf"><i style="width:'+p.conf+'%"></i></div>'+p.conf+'%</td>'+
+        '<td>'+lv+dist+'</td>'+
+        '<td class="pat-logic" data-toggle="'+p.key+i+'"><span class="pat-logic-brief">'+lib.brief+'</span> <a class="pat-more">'+(op?'less ▴':'full logic ▾')+'</a></td></tr>'+
+        (op?'<tr class="pat-xrow"><td colspan="6">'+fullHtml(p)+'</td></tr>':'');
+    }).join('');
+  }
+
+  /* ---------- chart with pattern overlay ---------- */
+  function ensureChart(){
+    const box=$('patChart');
+    if(typeof LightweightCharts==='undefined'){ box.innerHTML='<div class="metric-sub" style="padding:30px;text-align:center;">Chart library not loaded &mdash; the table above still works.</div>'; return false; }
+    if(S.chart) return true;
+    box.innerHTML='';
+    S.chart=LightweightCharts.createChart(box,{width:box.clientWidth||600,height:340,layout:{background:{color:'#0b0f17'},textColor:'#8a94a6'},grid:{vertLines:{color:'#151c28'},horzLines:{color:'#151c28'}},rightPriceScale:{borderColor:'#1f2733'},timeScale:{borderColor:'#1f2733',timeVisible:S.tf==='1h'}});
+    S.series=S.chart.addCandlestickSeries({upColor:'#26c281',downColor:'#ef5350',borderUpColor:'#26c281',borderDownColor:'#ef5350',wickUpColor:'#26c281',wickDownColor:'#ef5350'});
+    window.addEventListener('resize',()=>{ try{ S.chart.applyOptions({width:box.clientWidth}); }catch(e){} });
+    return true;
+  }
+  function clearOverlay(){
+    S.extra.forEach(s=>{ try{ S.chart.removeSeries(s); }catch(e){} }); S.extra=[];
+    S.priceLines.forEach(l=>{ try{ S.series.removePriceLine(l); }catch(e){} }); S.priceLines=[];
+  }
+  function drawChart(){
+    if(!S.candles.length||!ensureChart()) return;
+    try{ S.chart.applyOptions({timeScale:{timeVisible:S.tf==='1h'}}); }catch(e){}
+    S.series.setData(S.candles.map(c=>({time:c.t,open:c.o,high:c.h,low:c.l,close:c.c})));
+    clearOverlay();
+    const p=S.res&&S.res.patterns[S.sel]; if(p){
+      const C=S.candles;
+      p.lines.forEach(l=>{
+        const a=barTime(C,l.i1), b=barTime(C,l.i2); if(a===b) return;
+        const ls=S.chart.addLineSeries({color:p.bias==='Bearish'?'#ef5350':p.bias==='Bullish'?'#26c281':'#f0a93a',lineWidth:2,lineStyle:l.dash?2:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+        ls.setData([{time:Math.min(a,b),value:l.p1},{time:Math.max(a,b),value:l.p2}]); S.extra.push(ls);
+      });
+      const pl=(price,color,title)=>{ if(price) S.priceLines.push(S.series.createPriceLine({price,color,lineWidth:1,lineStyle:2,axisLabelVisible:true,title})); };
+      pl(p.entry,'#3d8bfd','Entry'); pl(p.stop,'#ef5350','Stop'); pl(p.target,'#26c281','Target');
+      try{ const from=barTime(C,Math.max(0,p.i0-15)); S.chart.timeScale().setVisibleRange({from,to:C[C.length-1].t}); }catch(e){}
+    } else { try{ S.chart.timeScale().fitContent(); }catch(e){} }
+  }
+  function select(i){ S.sel=i; render(); drawChart(); }
+
+  /* ---------- multi-stock scan (uses the same real daily history as the screener) ---------- */
+  async function scan(){
+    const btn=$('patScanBtn'); btn.disabled=true; $('patScanOut').innerHTML='';
+    const rows=STOCKS.concat(INDEX_ROWS_LIST); const syms=rows.map(r=>r[0]);
+    $('patScanStatus').textContent='Loading daily history for '+syms.length+' symbols…';
+    try{ await fetchScanHistory(syms); }catch(e){}
+    const found=[]; let done=0;
+    syms.forEach(s=>{
+      const h=window.REAL_HIST[s]; if(!h||!h.c||h.c.length<60) return; done++;
+      const C=h.c.map((c,i)=>({t:h.t?h.t[i]:i,o:c,h:h.h?h.h[i]:c,l:h.l?h.l[i]:c,c,v:h.v?h.v[i]:0}));
+      let r; try{ r=PatternEngine.detect(C); }catch(e){ return; }
+      if(r.patterns.length) found.push({s,name:(rows.find(x=>x[0]===s)||[])[1]||s,pats:r.patterns});
+    });
+    found.sort((a,b)=>b.pats.length-a.pats.length||b.pats[0].conf-a.pats[0].conf);
+    $('patScanStatus').textContent='Scanned '+done+' of '+syms.length+' symbols with real daily history · '+found.length+' with active patterns (click a symbol to open its chart).';
+    $('patScanOut').innerHTML=found.length?'<table><thead><tr><th>Symbol</th><th>Active patterns</th></tr></thead><tbody>'+found.map(f=>'<tr><td><a class="pat-sym" data-sym="'+esc(f.s)+'"><b>'+esc(f.s)+'</b></a><div class="metric-sub">'+esc(f.name)+'</div></td><td>'+
+      f.pats.map(p=>'<span class="pat-tag '+biasCls(p.bias)+'" title="'+esc(p.status+' · conf '+p.conf+'%')+'">'+esc(p.name)+(p.status==='Confirmed'?' ✓':' …')+'</span>').join('')+'</td></tr>').join('')+'</tbody></table>':'<div class="metric-sub">No active patterns found in the scanned list.</div>';
+    btn.disabled=false;
+  }
+
+  /* ---------- wiring ---------- */
+  function init(){
+    if(!sectionReady()) return;
+    $('patGo').addEventListener('click',()=>load());
+    $('patSym').addEventListener('keydown',e=>{ if(e.key==='Enter') load(); });
+    $('patTf').addEventListener('change',()=>{ S.chart&&(S.chart.remove(),S.chart=null); load(S.sym); });
+    $('patFilter').addEventListener('change',e=>{ S.filter=e.target.value; render(); });
+    $('patScanBtn').addEventListener('click',scan);
+    $('patBody').addEventListener('click',e=>{
+      const t=e.target.closest('[data-toggle]');
+      if(t){ S.open[t.dataset.toggle]=!S.open[t.dataset.toggle]; render(); return; }
+      const r=e.target.closest('.pat-row'); if(r) select(+r.dataset.i);
+    });
+    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; load(a.dataset.sym); $('sec-patterns').scrollIntoView({behavior:'smooth',block:'start'}); } });
+    // lazy: analyse the open stock the first time the section scrolls into view, and again when the stock changes
+    let lastSym=null;
+    const check=()=>{
+      const el=$('sec-patterns'); if(!el||S.loading) return;
+      const r=el.getBoundingClientRect(); const vis=r.top<window.innerHeight*1.2&&r.bottom>0&&el.offsetParent!==null;
+      const cs=currentSym();
+      if(vis&&(!S.sym||cs!==lastSym)){ lastSym=cs; load(cs); }
+    };
+    window.addEventListener('scroll',check,{passive:true}); setInterval(check,1500);
+  }
+  return {init,load,scan,_S:S};
+})();
+window.PatternUI=PatternUI; window.PatternEngine=PatternEngine;
+PatternUI.init();
 </script>
 </body>
 </html>

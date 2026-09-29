@@ -3313,6 +3313,10 @@ renderPositions();
         btn.style.background='rgba(38,194,129,.15)'; btn.style.borderColor='rgba(38,194,129,.5)'; btn.style.color='var(--green)';
         label.textContent='⚡ Upstox Live';
         btn.title='1-second live feed active via Upstox WebSocket';
+      } else if(data.tokenValid){
+        btn.style.background='rgba(38,194,129,.15)'; btn.style.borderColor='rgba(38,194,129,.5)'; btn.style.color='var(--green)';
+        label.textContent='✓ Upstox Connected';
+        btn.title='Upstox login active (1-second stream starts when you open a stock)';
       } else if(data.upstoxTokenSet){
         btn.style.background='rgba(240,169,58,.15)'; btn.style.borderColor='rgba(240,169,58,.4)'; btn.style.color='var(--amber)';
         label.textContent='↻ Reconnect Upstox';
@@ -3326,6 +3330,10 @@ renderPositions();
   }
   checkStatus();
   setInterval(checkStatus,10000);
+  // After clicking Connect (login opens in a new tab), poll every 3s for 3 minutes
+  const cb=document.getElementById('upstoxConnectBtn');
+  if(cb) cb.addEventListener('click',()=>{ let n=0; const t=setInterval(()=>{ checkStatus(); if(++n>60) clearInterval(t); },3000); });
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) checkStatus(); });
 })();
 async function hydrateFromServer(){
   try{

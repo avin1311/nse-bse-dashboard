@@ -483,8 +483,24 @@ app.get('/api/stream', async (req, res) => {
 });
 
 // Debug endpoint — shows streamer status and what's being subscribed
-app.get('/api/stream/status', (req, res) => {
+let upstoxTokenCheck = { time: 0, valid: false, reason: null, token: null };
+async function checkUpstoxToken() {
+  const token = process.env.UPSTOX_ACCESS_TOKEN;
+  if (!token) return { valid: false, reason: 'no token' };
+  const now = Date.now();
+  if (upstoxTokenCheck.token === token && now - upstoxTokenCheck.time < 30000) return upstoxTokenCheck;
+  let valid = false, reason = null;
+  try { await upstoxGet('/user/profile'); valid = true; }
+  catch (e) { reason = e.message; }
+  upstoxTokenCheck = { time: now, valid, reason, token };
+  return upstoxTokenCheck;
+}
+
+app.get('/api/stream/status', async (req, res) => {
+  const chk = await checkUpstoxToken().catch(() => ({ valid: false, reason: 'check failed' }));
   res.json({
+    tokenValid: !!(chk.valid || streamerConnected),
+    tokenReason: chk.valid ? null : chk.reason,
     streamerConnected,
     activeClients: sseClients.size,
     subscribedKeys: allSubscribedKeys(),
@@ -816,6 +832,7 @@ app.get('/upstox-callback', async (req, res) => {
     const token = data.access_token;
     // Update the running server's token immediately — no restart needed
     process.env.UPSTOX_ACCESS_TOKEN = token;
+    upstoxTokenCheck = { time: 0, valid: false, reason: null, token: null };
     if (UpstoxClient) initUpstoxAuth();
     // Restart streamer with new token if clients are waiting
     const keys = allSubscribedKeys();

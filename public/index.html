@@ -1702,7 +1702,7 @@ function renderVolumeProfile(d){
 
 window.SCREENER_LIVE = window.SCREENER_LIVE || {}; // symbol -> {price, prevClose}
 function signalCounts(){
-  return STOCKS.map(s=>{
+  return STOCKS.concat(INDEX_ROWS_LIST).map(s=>{
     const d = generateStockData(s[0],s[1],s[2],s[3]);
     const live = window.SCREENER_LIVE[s[0]];
     if(live && live.price){
@@ -1717,12 +1717,13 @@ async function scanScreenerLive(){
   const btn=document.getElementById('screenerScanBtn');
   if(btn) btn.textContent='Scanning\u2026';
   try{
-    const symbols = STOCKS.map(s=>yahooSymbol(s[0])).join(',');
+    const symbols = STOCKS.concat(INDEX_ROWS_LIST).map(s=>yahooSymbol(s[0])).join(',');
     const resp = await fetch('/api/quotes?symbols='+encodeURIComponent(symbols), {cache:'no-store'});
     const data = await resp.json();
     data.forEach(q=>{
       if(q && !q.error && q.price!=null){
-        const baseSym = (q.symbol||'').replace('.NS','');
+        const rawSym = q.symbol||'';
+        const baseSym = rawSym.startsWith('^') ? (Object.keys(INDEX_YAHOO).find(k=>INDEX_YAHOO[k]===rawSym)||rawSym) : rawSym.replace('.NS','');
         window.SCREENER_LIVE[baseSym] = {price:q.price, prevClose:q.prevClose};
       }
     });
@@ -1763,7 +1764,7 @@ function renderScreener(){
   const all = signalCounts();
   const sectorSel=document.getElementById('screenerSector');
   if(sectorSel.options.length<=1){
-    const sectors=[...new Set(STOCKS.map(s=>s[2]))].sort();
+    const sectors=[...new Set(STOCKS.concat(INDEX_ROWS_LIST).map(s=>s[2]))].sort();
     sectors.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sectorSel.appendChild(o);});
   }
   const q=(document.getElementById('screenerSearch').value||'').toUpperCase();
@@ -1785,7 +1786,9 @@ function renderScreener(){
   document.getElementById('screenerRsiHeader').textContent = 'RSI ('+HORIZON_LABELS[displayHorizon]+')';
   document.getElementById('screenerSignalHeader').textContent = combo.length>1 ? 'Signal ('+combo.map(h=>HORIZON_LABELS[h]).join('+')+' agree)' : 'Signal ('+HORIZON_LABELS[displayHorizon]+')';
 
+  const hasFundFilter = !isNaN(minPromoter)||!isNaN(maxPE)||!isNaN(minROE)||!isNaN(maxDE)||!isNaN(minRevGrowth)||dividendOnly||mcap!=='all';
   let rows = all.filter(d=>{
+    if(d.sector==='Index' && hasFundFilter) return false; // company filters don't apply to indices
     if(!(d.symbol.includes(q)||d.name.toUpperCase().includes(q)||d.sector.toUpperCase().includes(q))) return false;
     // Horizon-combo filter: with a specific signal selected, every horizon in
     // the combo must show that exact signal (this is what makes "Intraday +
@@ -1809,10 +1812,10 @@ function renderScreener(){
   const body=document.getElementById('screenerBody');
   body.innerHTML = rows.map(d=>{
     const h = d.horizons[displayHorizon];
-    return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td><td>&#8377;${fmt(d.price,2)}</td>
+    return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
       <td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
       <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
-      <td>${fmt(d.volumeCr,2)} Cr</td></tr>`;
+      <td>${d.sector==='Index'?'&mdash;':fmt(d.volumeCr,2)+' Cr'}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
 }
@@ -3115,8 +3118,28 @@ document.getElementById('btRun')?.addEventListener('click', async ()=>{
    feels alive. The badge next to the price always shows which mode
    is actually active — never claim "LIVE" silently on fake data.
    ============================================================ */
-const INDEX_YAHOO = {NIFTY:'^NSEI', BANKNIFTY:'^NSEBANK', NIFTYIT:'^CNXIT', SENSEX:'^BSESN'};
-const INDEX_ROWS = {NIFTY:['NIFTY','Nifty 50','Index',24175.7]};
+const INDEX_LIST = [
+  // [symbol, name, sector, placeholder level, yahoo symbol] — placeholder is replaced by live data on Scan
+  ['NIFTY','Nifty 50','Index',24175.7,'^NSEI'],
+  ['BANKNIFTY','Bank Nifty','Index',58031.65,'^NSEBANK'],
+  ['NIFTYIT','Nifty IT','Index',26965.05,'^CNXIT'],
+  ['NIFTYFMCG','Nifty FMCG','Index',56000,'^CNXFMCG'],
+  ['NIFTYPHARMA','Nifty Pharma','Index',22000,'^CNXPHARMA'],
+  ['NIFTYAUTO','Nifty Auto','Index',24500,'^CNXAUTO'],
+  ['NIFTYMETAL','Nifty Metal','Index',9800,'^CNXMETAL'],
+  ['NIFTYREALTY','Nifty Realty','Index',950,'^CNXREALTY'],
+  ['NIFTYENERGY','Nifty Energy','Index',36000,'^CNXENERGY'],
+  ['NIFTYINFRA','Nifty Infra','Index',9200,'^CNXINFRA'],
+  ['NIFTYPSUBANK','Nifty PSU Bank','Index',7200,'^CNXPSUBANK'],
+  ['NIFTYMIDCAP','Nifty Midcap 100','Index',58000,'^CNXMIDCAP'],
+  ['NIFTYSMALLCAP','Nifty Smallcap 100','Index',18000,'^CNXSMALLCAP'],
+  ['NIFTYNXT50','Nifty Next 50','Index',68000,'^NSMIDCP100'],
+  ['SENSEX','BSE Sensex','Index',79500,'^BSESN'],
+  ['INDIAVIX','India VIX','Index',12.3,'^INDIAVIX']
+];
+const INDEX_YAHOO = {}; const INDEX_ROWS = {};
+INDEX_LIST.forEach(r=>{ INDEX_YAHOO[r[0]]=r[4]; INDEX_ROWS[r[0]]=[r[0],r[1],r[2],r[3]]; });
+const INDEX_ROWS_LIST = INDEX_LIST.map(r=>[r[0],r[1],r[2],r[3]]);
 function isIndexSym(sym){ return !!INDEX_YAHOO[sym]; }
 function yahooSymbol(sym){ return INDEX_YAHOO[sym] || (sym+'.NS'); }
 

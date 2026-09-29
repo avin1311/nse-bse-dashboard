@@ -425,7 +425,7 @@ app.get('/api/stream', async (req, res) => {
       // Can't resolve yet — send a REST quote as a one-off so browser at least gets current price
       for (const sym of rawSymbols) {
         try {
-          const ySymbol = ({NIFTY:'^NSEI',BANKNIFTY:'^NSEBANK',NIFTYIT:'^CNXIT',SENSEX:'^BSESN'})[sym] || (sym + '.NS');
+          const ySymbol = ({NIFTY:'^NSEI',BANKNIFTY:'^NSEBANK',NIFTYIT:'^CNXIT',SENSEX:'^BSESN',NIFTYFMCG:'^CNXFMCG',NIFTYPHARMA:'^CNXPHARMA',NIFTYAUTO:'^CNXAUTO',NIFTYMETAL:'^CNXMETAL',NIFTYREALTY:'^CNXREALTY',NIFTYENERGY:'^CNXENERGY',NIFTYINFRA:'^CNXINFRA',NIFTYPSUBANK:'^CNXPSUBANK',NIFTYMIDCAP:'^CNXMIDCAP',NIFTYSMALLCAP:'^CNXSMALLCAP',NIFTYNXT50:'^NSMIDCP100',INDIAVIX:'^INDIAVIX'})[sym] || (sym + '.NS');
           const data = await getChartData(ySymbol, '1d', '5m');
           if (data && data.price) {
             const changePct = data.prevClose ? ((data.price - data.prevClose) / data.prevClose * 100) : 0;

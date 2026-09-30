@@ -365,7 +365,7 @@
     <div class="pat-controls">
       <div><label>Symbol</label><input id="patSym" placeholder="e.g. RELIANCE, NIFTY" autocomplete="off"></div>
       <div><label>Timeframe</label><select id="patTf"><option value="1D" selected>Daily (~1 year)</option><option value="1W">Weekly</option><option value="1h">Hourly</option></select></div>
-      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select></div>
+      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="recent">Latest only (forming + last 10 bars)</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select></div>
       <button class="btn" id="patGo" style="padding:9px;">Analyse</button>
       <button class="btn" id="patScanBtn" style="padding:9px;" title="Scan every stock and index in the screener list on daily data">Scan all</button>
     </div>
@@ -4510,7 +4510,7 @@ const PatternEngine = (function(){
     const avgV=(a,b)=>{ let t=0,k=0; for(let j=Math.max(0,a);j<=Math.min(C0.length-1,b);j++){ if(C0[j].v>0){t+=C0[j].v;k++;} } return k>=4?t/k:null; };
     let dry=null;
     if(lib.type==='Continuation'&&!o.failed){ const fv=o.fv||[o.i0,(o.brk!=null?o.brk-1:o.i1)], pv=o.pv||[o.i0-30,o.i0-1]; const f=avgV(fv[0],fv[1]), p0=avgV(pv[0],pv[1]); if(f&&p0) dry=f/p0; }
-    const conf=Math.round(clamp(32+38*clamp(o.fit,0,1)+(o.brk!=null?12:0)+(volState==='strong'?8:0)-(volState==='weak'?10:0)+(dry!=null?(dry<=0.85?5:dry>1.15?-5:0):0)+(o.aligned?10:0),20,95));
+    const conf=Math.round(clamp(32+38*clamp(o.fit,0,1)+(o.brk!=null?12:0)+(volState==='strong'?8:0)-(volState==='weak'?10:0)+(dry!=null?(dry<=0.85?5:dry>1.15?-5:0):0)+(o.aligned?10:0)-Math.round((1-(ctx.g||1))*12),20,95));
     const flipB=b=>b==='Bullish'?'Bearish':b==='Bearish'?'Bullish':b;
     const P=v=>v==null?null:ctx.unm(v);
     const entry=P(o.entry), stop=P(o.stop);
@@ -4518,7 +4518,7 @@ const PatternEngine = (function(){
     if(o.hgt){ const dist=Math.abs(ctx.unm(o.hgt[0])-ctx.unm(o.hgt[1])); target=entry+(o.tdir*s)*dist; }
     const risk=entry!=null&&stop!=null?Math.abs(entry-stop):null, reward=entry!=null&&target!=null?Math.abs(target-entry):null;
     const lastC=C0[C0.length-1].c;
-    return {key:o.key,name:lib.name+(o.failed?' (failed)':''),bias:o.failed?flipB(lib.bias):(o.bias||lib.bias),status:o.failed?'Failed':(o.brk!=null?(volState==='weak'?'Weak break':'Confirmed'):'Forming'),type:lib.type,volState,dry,conf:o.failed?Math.min(conf,45):conf,
+    return {scale:(ctx.g||1)<0.85?'minor':'major',key:o.key,name:lib.name+(o.failed?' (failed)':''),bias:o.failed?flipB(lib.bias):(o.bias||lib.bias),status:o.failed?'Failed':(o.brk!=null?(volState==='weak'?'Weak break':'Confirmed'):'Forming'),type:lib.type,volState,dry,conf:o.failed?Math.min(conf,45):conf,
       i0:o.i0,i1:o.i1,brk:o.brk!=null?o.brk:null,barsSince:o.brk!=null?C0.length-1-o.brk:null,
       entry,stop,target,rr:risk&&reward?reward/risk:null,
       distPct:entry?(lastC/entry-1)*100:null,vol:o.vol==null?null:o.vol,
@@ -4587,11 +4587,11 @@ const PatternEngine = (function(){
         const shDiff=Math.abs(ls.p-rs.p)/hd.p, headUp=(hd.p-Math.max(ls.p,rs.p))/hd.p;
         const tilt=Math.abs(t1.p-t2.p)/Math.max(t1.p,t2.p);
         const tl=(hd.i-ls.i)/Math.max(1,(rs.i-hd.i));
-        if(hd.p>ls.p&&hd.p>rs.p&&headUp>=Math.max(0.03,0.7*ctx.dev)&&shDiff<=0.06&&tilt<=0.08&&tl>=0.4&&tl<=2.5&&riseBefore(C,ls.i,40)>=minTrend){
+        if(hd.p>ls.p&&hd.p>rs.p&&headUp>=Math.max(0.03*ctx.g,0.7*ctx.dev)&&shDiff<=Math.max(0.025,0.06*ctx.g)&&tilt<=Math.max(0.03,0.08*ctx.g)&&tl>=0.4&&tl<=2.5&&riseBefore(C,ls.i,40)>=minTrend){
           const slope=(t2.p-t1.p)/(t2.i-t1.i);
           const neckFn=j=>t1.p+slope*(j-t1.i);
           const height=[hd.p,neckFn(hd.i)];
-          const fit=clamp(1-shDiff/0.06,0,1)*0.6+clamp(headUp/0.06,0,1)*0.4;
+          const fit=clamp(1-shDiff/Math.max(0.025,0.06*ctx.g),0,1)*0.6+clamp(headUp/Math.max(0.025,0.06*ctx.g),0,1)*0.4;
           finish(bull?'ihs':'hs',[ls,hd,rs],neckFn,0,height,t1.i,fit,
             [{i1:ls.i,p1:ls.p,i2:hd.i,p2:hd.p,label:'LS→Head',dash:true},{i1:hd.i,p1:hd.p,i2:rs.i,p2:rs.p,label:'Head→RS',dash:true}],
             'Head '+(headUp*100).toFixed(1)+'% above shoulders; shoulders differ '+(shDiff*100).toFixed(1)+'%.');
@@ -4609,19 +4609,19 @@ const PatternEngine = (function(){
       if(ctx.s>0){ for(let x=0;x<PP.length;x++){ const a=PP[x]; if(a.type!=='H') continue; for(let y=x+1;y<PP.length;y++){ const c=PP[y]; if(c.type==='H') cands.push([a,c]); } } }
       else { // inverted cup: the dome's left rim sits inside the prior advance (not a swing point) — find where price last stood at the right-rim level before the dome
         for(let y=1;y<PP.length;y++){ const c=PP[y], bt=PP[y-1]; if(c.type!=='H'||bt.type!=='L') continue;
-          let j=-1; for(let q=bt.i-1;q>=0;q--){ if(C[q].h>=c.p*0.985){ j=q; break; } }
+          let j=-1; for(let q=bt.i-1;q>=0;q--){ if(C[q].h>=c.p*(1-0.015*ctx.g)){ j=q; break; } }
           if(j>=0) cands.push([{i:j,p:C[j].h,type:'H'},c]); } }
     }
     {
       for(const [a,c] of cands){
         const w=c.i-a.i; if(w<30||w>200) continue;
-        if(c.p<a.p*0.9||c.p>a.p*1.03) continue;
+        if(c.p<a.p*(1-Math.max(0.03,0.1*ctx.g))||c.p>a.p*(1+Math.max(0.012,0.03*ctx.g))) continue;
         let lowI=a.i, low=Infinity; for(let j=a.i;j<=c.i;j++) if(C[j].l<low){low=C[j].l;lowI=j;}
-        const rim=Math.min(a.p,c.p), depth=(rim-low)/rim; if(depth<0.10||depth>0.5) continue;
+        const rim=Math.min(a.p,c.p), depth=(rim-low)/rim; if(depth<Math.max(0.04,0.10*ctx.g)||depth>0.5) continue;
         const pos=(lowI-a.i)/w; if(pos<0.25||pos>0.75) continue;
         const q=quadFit(C.slice(a.i,c.i+1).map(z=>z.c)); if(!q||q.a<=0||q.r2<0.7||q.vertex<0.2||q.vertex>0.8) continue;
         // no bar inside the cup may close far above the rims
-        const rimMax=Math.max(a.p,c.p); let bad=false; for(let j=a.i;j<=c.i;j++) if(C[j].c>rimMax*1.03){bad=true;break;} if(bad) continue;
+        const rimMax=Math.max(a.p,c.p); let bad=false; for(let j=a.i;j<=c.i;j++) if(C[j].c>rimMax*(1+Math.max(0.01,0.03*ctx.g))){bad=true;break;} if(bad) continue;
         // handle
         const mid=low+0.5*(rim-low);
         let brk=firstAfter(C,c.i+1,(z)=>z.c>rimMax*1.001);
@@ -4640,8 +4640,8 @@ const PatternEngine = (function(){
         }
         const run=(()=>{ if(ctx.s>0){ let mn=Infinity; for(let j=Math.max(0,a.i-60);j<=a.i;j++) mn=Math.min(mn,C[j].l); return a.p/mn-1; }
           let mx=-Infinity; for(let j=Math.max(0,a.i-60);j<=a.i;j++) mx=Math.max(mx,C[j].h); return mx/a.p-1; })(); // prior advance (in the original chart) into the left rim
-        const cont=run>=0.15;
-        const fit=clamp(q.r2,0,1)*0.6+clamp(1-Math.abs(a.p-c.p)/a.p/0.1,0,1)*0.4;
+        const cont=run>=Math.max(0.05,0.15*ctx.g);
+        const fit=clamp(q.r2,0,1)*0.6+clamp(1-Math.abs(a.p-c.p)/a.p/Math.max(0.04,0.1*ctx.g),0,1)*0.4;
         out.push(mk(ctx,{key:ctx.s>0?'cup':'icup',fv:[c.i+1,hEnd],pv:[a.i,c.i],brk:brk>=0?brk:null,i0:a.i,i1:brk>=0?brk:last,entry:rimMax,stop:Math.min(hLow,c.p-0.25*depth*rim)*0.995,
           hgt:[rimMax,low],tdir:1,fit,aligned:cont,vol:brk>=0?volRatio(C,brk):null,
           note:'Cup depth '+(depth*100).toFixed(0)+'%, R² '+q.r2.toFixed(2)+(cont?', prior advance +'+(run*100).toFixed(0)+'% (fits the textbook context)':', no strong prior uptrend (weaker context)')+'.',
@@ -4665,7 +4665,7 @@ const PatternEngine = (function(){
       const poleAbs=T.p-B.p, rise=poleAbs/B.p, pb=T.i-B.i;
       if(pb<3||pb>25) continue;
       // ---- flag ----
-      if(rise>=Math.max(0.10,5*atrPct) && rise/pb>=0.005){
+      if(rise>=Math.max(0.10*ctx.g,5*atrPct) && rise/pb>=0.005){
         const start=T.i+1; const maxE=Math.min(last,T.i+28);
         let brk=-1, e=maxE, ok=false, chan=null;
         for(let j=start+5;j<=maxE;j++){
@@ -4679,7 +4679,7 @@ const PatternEngine = (function(){
           let mnL=Infinity,mxH=-Infinity; for(let j=start;j<=e;j++){mnL=Math.min(mnL,C[j].l);mxH=Math.max(mxH,C[j].h);}
           const retr=(T.p-mnL)/poleAbs, sM=(chan.sH+chan.sL)/2, w0=chan.up(start)-chan.lo(start), w1=chan.up(e)-chan.lo(e);
           const ratio=w0>0?w1/w0:1;
-          if(retr<=0.45 && sM<=0.0004 && sM>=-0.012 && (mxH-mnL)<=0.5*poleAbs && ratio>=0.5 && ratio<=1.5 && (brk>=0? last-brk<=15 : last-T.i<=28)){
+          if(retr<=0.45 && sM<=0.0004*ctx.g && sM>=-0.012*ctx.g && (mxH-mnL)<=0.5*poleAbs && ratio>=0.5 && ratio<=1.5 && (brk>=0? last-brk<=15 : last-T.i<=28)){
             const fit=clamp(1-chan.dev/0.25,0,1)*0.6+clamp(1-retr/0.5,0,1)*0.4;
             const bLevel=brk>=0?chan.up(brk):chan.up(last);
             out.push(mk(ctx,{key:bull?'bflag':'brflag',fv:[start,e],pv:[B.i,T.i],brk:brk>=0?brk:null,i0:B.i,i1:brk>=0?brk:last,entry:bLevel,stop:mnL*0.995,hgt:[T.p,B.p],tdir:1,
@@ -4691,7 +4691,7 @@ const PatternEngine = (function(){
         }
       }
       // ---- generic continuation ----
-      if(rise>=Math.max(0.08,4*atrPct)){
+      if(rise>=Math.max(0.08*ctx.g,4*atrPct)){
         const start=T.i+1; if(last-T.i<5||last-T.i>30) continue;
         let brk=firstAfter(C,start+2,(z)=>z.c>T.p*1.001 && false);
         // consolidation = bars after T until first close above the running consolidation high (breakout)
@@ -4730,7 +4730,7 @@ const PatternEngine = (function(){
 
   // ---------- pivot channels: rectangle, symmetrical / ascending / descending triangles ----------
   function detChannels(ctx){
-    const {C,P,n,dev}=ctx, out=[]; const last=n-1; const tl=Math.max(0.01,dev*0.3);
+    const {C,P,n,dev}=ctx, out=[]; const last=n-1; const tl=Math.max(0.004,dev*0.3);
     const idx=[]; for(let k=0;k<P.length;k++) if(P[k].i>=last-140) idx.push(k);
     for(let ai=0;ai<idx.length;ai++) for(let bi=ai+3;bi<idx.length&&bi<=ai+9;bi++){
       const seg=idx.slice(ai,bi+1).map(k=>P[k]);
@@ -4749,8 +4749,8 @@ const PatternEngine = (function(){
       // price must respect the lines between first and last pivot
       for(let j=a.i;j<=b.i;j++){ if(C[j].c>up(j)*(1+tl*0.7)||C[j].c<lo(j)*(1-tl*0.7)){ok=false;break;} } if(!ok) continue;
       const w0=up(a.i)-lo(a.i), w1=up(b.i)-lo(b.i); if(w0<=0||w1<=0) continue;
-      const height0=w0, hp=w0/px; if(hp<Math.max(0.04,2*ctx.atrPct)) continue;
-      const moveH=rh.m*L/px, moveL=rl.m*L/px, flatT=0.025, slopeT=0.04;
+      const height0=w0, hp=w0/px; if(hp<Math.max(0.04*ctx.g,2*ctx.atrPct)) continue;
+      const moveH=rh.m*L/px, moveL=rl.m*L/px, flatT=0.025*ctx.g, slopeT=0.04*ctx.g;
       const flatH=Math.abs(moveH)<=flatT, flatL=Math.abs(moveL)<=flatT;
       const shrink=w1/w0;
       let kind=null;
@@ -4772,10 +4772,10 @@ const PatternEngine = (function(){
       if(brk<0&&kind!=='rect'&&(up(last)-lo(last))<=0) continue;
       const prior=C[a.i].c/C[Math.max(0,a.i-60)].c-1; // trend going INTO the pattern (60 bars)
       let key,bias,failed=false;
-      if(kind==='asc'){ if(prior<0.03) continue; key='asc'; bias='Bullish'; if(dirBrk<0) failed=true; }          // appears during an uptrend
-      else if(kind==='desc'){ if(prior>-0.03) continue; key='desc'; bias='Bearish'; if(dirBrk>0) failed=true; } // appears during a downtrend
+      if(kind==='asc'){ if(prior<0.03*ctx.g) continue; key='asc'; bias='Bullish'; if(dirBrk<0) failed=true; }          // appears during an uptrend
+      else if(kind==='desc'){ if(prior>-0.03*ctx.g) continue; key='desc'; bias='Bearish'; if(dirBrk>0) failed=true; } // appears during a downtrend
       else {
-        bias=prior>=0.03?'Bullish':prior<=-0.03?'Bearish':'Neutral';
+        bias=prior>=0.03*ctx.g?'Bullish':prior<=-0.03*ctx.g?'Bearish':'Neutral';
         if(dirBrk!==0){ if(bias==='Neutral') bias=dirBrk>0?'Bullish':'Bearish'; else if((bias==='Bullish')!==(dirBrk>0)) failed=true; }
         if(kind==='rect') key=bias==='Bullish'?'brect':bias==='Bearish'?'srect':'rect_n';
         else key=bias==='Bullish'?'bsym':bias==='Bearish'?'ssym':'sym_n';
@@ -4793,7 +4793,7 @@ const PatternEngine = (function(){
       const stop=short?Math.max(hs[hs.length-1].p,entry*1.01):(long?Math.min(ls[ls.length-1].p,entry*0.99):loEnd); // last swing on the far side, never closer than 1%
       const touches=hs.length+ls.length;
       const fit=clamp(1-(hs.reduce((s,p)=>s+Math.abs(p.p-up(p.i)),0)+ls.reduce((s,p)=>s+Math.abs(p.p-lo(p.i)),0))/touches/px/tl,0,1)*0.6+clamp((touches-4)/4,0,1)*0.4;
-      const aligned=(bias==='Bullish'&&prior>=0.03)||(bias==='Bearish'&&prior<=-0.03)||kind==='asc'||kind==='desc';
+      const aligned=(bias==='Bullish'&&prior>=0.03*ctx.g)||(bias==='Bearish'&&prior<=-0.03*ctx.g)||kind==='asc'||kind==='desc';
       const e1=brk>=0?brk:last;
       out.push(mk(ctx,{key,bias,brk:brk>=0?brk:null,i0:a.i,i1:e1,entry,stop,target,fit,aligned,vol:brk>=0?volRatio(C,brk):null,
         note:touches+' pivot touches over '+L+' bars; range narrowed to '+(shrink*100).toFixed(0)+'%'+(brk<0&&bias==='Neutral'?'; direction pending':'')+'.',
@@ -4823,22 +4823,31 @@ const PatternEngine = (function(){
     const C0=(candles||[]).filter(x=>x&&x.h>0&&x.l>0&&x.c>0).map(x=>({t:x.t,o:x.o||x.c,h:x.h,l:x.l,c:x.c,v:x.v||0}));
     if(C0.length<40) return {patterns:[],bars:C0.length,reason:'Need at least 40 bars of history.'};
     const A=atrArr(C0,14), atrPct=A[A.length-1]/C0[C0.length-1].c;
-    const dev=clamp(2.4*atrPct,0.04,0.09), tolEq=clamp(dev*0.5,0.012,0.03), minTrend=Math.max(0.08,1.5*dev);
+    // Swing sizes to look for: the classic large scale (old behaviour), then progressively smaller ones so recent, hourly and weekly
+    // formations are found too. Smaller scales never go below ~1.6x the typical bar range (that would just be noise).
+    const devMain=clamp(2.4*atrPct,0.04,0.09), floorDev=Math.max(0.012,(opts.noiseK||1.7)*atrPct), devs=[devMain];
+    while(devs.length<4){ const d=Math.max(devs[devs.length-1]*0.6,floorDev); if(d>=devs[devs.length-1]*0.85) break; devs.push(d); }
     const res=[];
     const K=C0[0].c*C0[0].c;
-    const run=(C,s)=>{
-      const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),Pfine:zigzag(C,Math.max(0.03,dev*0.5)),dev,tolEq,atrPct,minTrend};
-      res.push(...detTops(ctx),...detFlags(ctx));
-      res.push(...detCup(ctx));
-    };
-    run(C0,1); run(mirror(C0,K),-1);
-    const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,Math.max(0.025,dev*0.6)),dev,tolEq,atrPct,minTrend}; // finer swings: triangle apexes contract below the main swing size
-    res.push(...detChannels(ch));
+    const mirrored=mirror(C0,K);
+    for(const dev of devs){
+      const g=Math.min(1,dev/0.04), tolEq=dev<0.024?dev*0.5:clamp(dev*0.5,0.012,0.03), minTrend=dev>=0.04?Math.max(0.08,1.5*dev):Math.max(0.03,2*dev);
+      const run=(C,s)=>{
+        const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),Pfine:zigzag(C,Math.max(0.03*g,dev*0.5)),dev,tolEq,atrPct,minTrend,g};
+        res.push(...detTops(ctx),...detFlags(ctx));
+        res.push(...detCup(ctx));
+      };
+      run(C0,1); run(mirrored,-1);
+      const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,Math.max(0.025*g,dev*0.6)),dev,tolEq,atrPct,minTrend,g}; // finer swings: triangle apexes contract below the main swing size
+      res.push(...detChannels(ch));
+    }
+    const dev=devMain;
     let patterns=dedupe(res);
     // the generic "Continuation Pattern" is only shown when no specific continuation pattern (flag, rectangle, triangle, cup & handle) explains the same pause
     const specific=patterns.filter(p=>p.key!=='cont'&&p.status!=='Failed'&&p.type==='Continuation');
     patterns=patterns.filter(p=>p.key!=='cont'||!specific.some(q=>Math.min(q.i1,p.i1)-Math.max(q.i0,p.i0)>0));
-    patterns.sort((a,b)=>(a.brk!=null?1:0)-(b.brk!=null?1:0)||b.conf-a.conf);
+    const rank=p=>p.status==='Failed'?2:(p.brk!=null?1:0);
+    patterns.sort((a,b)=>rank(a)-rank(b)||(rank(a)===1?(a.barsSince-b.barsSince)||(b.conf-a.conf):b.conf-a.conf));
     return {patterns,bars:C0.length,dev,atrPct};
   }
   // Walk-forward replay: detect on data up to bar e only, then see what price did next (target vs stop). No look-ahead.
@@ -4915,7 +4924,7 @@ const PatternUI = (function(){
 
   function visible(){
     if(!S.res) return [];
-    return S.res.patterns.map((p,i)=>({p,i})).filter(({p})=>S.filter==='all'||(S.filter==='confirmed'?p.status==='Confirmed':S.filter==='forming'?p.status==='Forming':(S.filter==='reversal'||S.filter==='continuation')?p.type.toLowerCase()===S.filter:p.bias.toLowerCase()===S.filter));
+    return S.res.patterns.map((p,i)=>({p,i})).filter(({p})=>S.filter==='all'||(S.filter==='recent'?(p.brk==null?p.status!=='Failed':p.barsSince<=10):S.filter==='confirmed'?p.status==='Confirmed':S.filter==='forming'?p.status==='Forming':(S.filter==='reversal'||S.filter==='continuation')?p.type.toLowerCase()===S.filter:p.bias.toLowerCase()===S.filter));
   }
 
   function fullHtml(p){
@@ -4952,7 +4961,7 @@ const PatternUI = (function(){
       else if(p.status==='Forming') volTxt+='<div class="metric-sub">Wait for a break on 1.2&times;+ volume</div>';
       if(p.dry!=null) volTxt+='<div class="metric-sub">Volume while forming: '+Math.round(p.dry*100)+'% of before'+(p.dry<=0.85?' (dry-up &#10003;)':p.dry>1.15?' (expanding &#9888;)':'')+'</div>';
       const dist=p.distPct!=null?'<div class="metric-sub">Price '+(p.distPct>=0?'+':'')+p.distPct.toFixed(1)+'% vs entry</div>':'';
-      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span><div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
+      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span>'+(p.scale==='minor'?' <span class="pat-type" title="Found at a finer swing scale, so treat it as lower-weight">minor swing</span>':'')+'<div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
         '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+volTxt+'</td>'+
         '<td><div class="pat-conf"><i style="width:'+p.conf+'%"></i></div>'+p.conf+'%</td>'+
         '<td>'+lv+dist+'</td>'+

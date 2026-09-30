@@ -143,3 +143,14 @@ Next to the price you'll see one of:
   Twelve Data) in the same `getChartData()` function — the rest of the app
   doesn't need to change since it only depends on the shape returned by
   `parseChartPayload()`.
+
+## Security & health settings (optional but recommended)
+
+| Environment variable (Render) | What it does |
+|---|---|
+| `DASHBOARD_PASSCODE` | Locks the whole API behind a passcode. The page asks for it once per browser (kept 30 days). Unset = open, as before. |
+| `CHECK_ALERTS_SECRET` | Required by `/api/check-alerts`. Add the **same value** as a GitHub Actions secret named `CHECK_ALERTS_SECRET`. |
+
+The **Status** button (top right) shows Upstox token health, Telegram configuration, last alert run and lets you send a test Telegram message.
+`npm test` runs quick automated checks (also run on every push by GitHub Actions).
+Keep-alive: point a free UptimeRobot monitor (HTTP, 5 min) at `https://YOUR-APP.onrender.com/healthz`.

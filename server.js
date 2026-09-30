@@ -51,7 +51,59 @@ app.use('/api/upstox/fno', microCache(60000));
 app.use('/api/news', microCache(5 * 60000));
 app.use('/api/shareholding', microCache(30 * 60000));
 app.use('/api/fundamentals', microCache(10 * 60000));
-app.use(express.json());
+
+// ============================================================
+// SECURITY: optional passcode, rate limiting, basic headers, health tracking
+// ============================================================
+app.use(express.json({ limit: '1mb' }));
+const crypto = require('crypto');
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'geolocation=(), camera=(), microphone=()' });
+  next();
+});
+function makeLimiter(windowMs, max) {
+  const hits = new Map();
+  setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.start > windowMs) hits.delete(k); }, windowMs).unref();
+  return (req, res, next) => {
+    const now = Date.now(); const k = req.ip || 'x';
+    let h = hits.get(k); if (!h || now - h.start > windowMs) { h = { start: now, n: 0 }; hits.set(k, h); }
+    if (++h.n > max) { res.set('Retry-After', String(Math.ceil((h.start + windowMs - now) / 1000))); return res.status(429).json({ error: 'Too many requests — slow down and retry shortly' }); }
+    next();
+  };
+}
+const apiLimiter = makeLimiter(60000, 900);          // generous: the dashboard itself makes many calls
+const authLimiter = makeLimiter(15 * 60000, 10);     // passcode guesses
+app.use('/api', (req, res, next) => (req.path.startsWith('/stream') ? next() : apiLimiter(req, res, next)));
+
+const PASSCODE = process.env.DASHBOARD_PASSCODE || '';
+const authToken = () => crypto.createHash('sha256').update('dash-v1|' + PASSCODE).digest('hex');
+function readCookie(req, name) {
+  const m = (req.headers.cookie || '').split(';').map(x => x.trim()).find(x => x.startsWith(name + '='));
+  return m ? decodeURIComponent(m.slice(name.length + 1)) : '';
+}
+function safeEq(a, b) { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
+const isAuthed = req => !PASSCODE || safeEq(readCookie(req, 'dash_auth'), authToken());
+app.get('/api/auth/status', (req, res) => res.json({ required: !!PASSCODE, ok: isAuthed(req) }));
+app.post('/api/auth', authLimiter, (req, res) => {
+  if (!PASSCODE) return res.json({ ok: true, required: false });
+  const given = String((req.body && req.body.passcode) || '');
+  if (!safeEq(crypto.createHash('sha256').update(given).digest('hex'), crypto.createHash('sha256').update(PASSCODE).digest('hex'))) return res.status(401).json({ error: 'Wrong passcode' });
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.set('Set-Cookie', `dash_auth=${authToken()}; Path=/; Max-Age=${30 * 86400}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`);
+  res.json({ ok: true });
+});
+app.post('/api/logout', (req, res) => { res.set('Set-Cookie', 'dash_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax'); res.json({ ok: true }); });
+// everything under /api needs the passcode (when one is set), except auth itself and the secret-protected alert check
+app.use('/api', (req, res, next) => {
+  if (!PASSCODE || req.path.startsWith('/auth') || req.path === '/logout') return next();
+  if (req.path === '/check-alerts' && process.env.CHECK_ALERTS_SECRET) return next(); // has its own secret gate
+  if (isAuthed(req)) return next();
+  res.status(401).json({ error: 'auth required', authRequired: true });
+});
+// health bookkeeping for the status panel
+const HEALTH = { upstox: { lastOk: 0, lastErr: '', lastErrAt: 0 }, telegram: { lastSent: 0, lastErr: '', lastErrAt: 0, lastTestAt: 0 }, alerts: { lastRun: 0, lastTriggered: 0, lastSentAt: 0 }, startedAt: Date.now() };
 const PORT = process.env.PORT || 3000;
 
 // Short cache so many browser tabs / a fast refresh loop don't hammer Yahoo
@@ -434,6 +486,28 @@ app.get('/api/fno-stocks', (req, res) => lowPriority.run(true, async () => {
   res.json({ symbols: fnoCache.data, source: fnoCache.source });
 }));
 
+
+function istParts() { const d = new Date(Date.now() + 19800000); return { dow: d.getUTCDay(), mins: d.getUTCHours() * 60 + d.getUTCMinutes() }; }
+function marketState() { const { dow, mins } = istParts(); if (dow === 0 || dow === 6) return 'closed'; if (mins >= 555 && mins <= 930) return 'open'; if (mins >= 540 && mins < 555) return 'pre-open'; return 'closed'; }
+app.get('/api/status', async (req, res) => {
+  const toks = upstoxTokens();
+  let upstoxLive = null;
+  try { await upstoxFetchJson(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`); upstoxLive = true; } catch (e) { upstoxLive = false; }
+  let storage = 'not configured';
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) { try { await redisCmd('PING'); storage = 'ok'; } catch (e) { storage = 'error: ' + e.message; } }
+  res.json({
+    serverTime: new Date().toISOString(), market: marketState(), uptimeSec: Math.round((Date.now() - HEALTH.startedAt) / 1000),
+    auth: { passcodeEnabled: !!PASSCODE, alertSecretSet: !!process.env.CHECK_ALERTS_SECRET },
+    upstox: { tokensConfigured: toks.length, liveCheck: upstoxLive, lastOk: HEALTH.upstox.lastOk || null, lastError: HEALTH.upstox.lastErr || null, lastErrorAt: HEALTH.upstox.lastErrAt || null },
+    telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID), lastSent: HEALTH.telegram.lastSent || null, lastError: HEALTH.telegram.lastErr || null },
+    alerts: { lastRun: HEALTH.alerts.lastRun || null, lastTriggered: HEALTH.alerts.lastTriggered, lastMessageAt: HEALTH.alerts.lastSentAt || null },
+    storage
+  });
+});
+app.post('/api/telegram-test', makeLimiter(60000, 5), async (req, res) => {
+  try { await sendTelegram('✅ <b>Test message</b> from your NSE/BSE dashboard — Telegram alerts are working.'); HEALTH.telegram.lastTestAt = Date.now(); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
@@ -836,8 +910,9 @@ async function sendTelegram(text) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.description || 'Telegram send failed');
+  const json = await resp.json().catch(() => ({}));
+  if (!json.ok) { const m = json.description || 'Telegram send failed'; HEALTH.telegram.lastErr = m; HEALTH.telegram.lastErrAt = Date.now(); throw new Error(m); }
+  HEALTH.telegram.lastSent = Date.now(); HEALTH.telegram.lastErr = '';
   return json;
 }
 
@@ -852,7 +927,7 @@ async function sendTelegram(text) {
 // ============================================================
 app.get('/api/check-alerts', async (req, res) => {
   const secret = process.env.CHECK_ALERTS_SECRET;
-  if (secret && req.query.secret !== secret) return res.status(403).json({ error: 'forbidden' });
+  if (secret && !safeEq(req.query.secret || '', secret)) return res.status(403).json({ error: 'forbidden' });
 
   try {
     const positions = await storeGet('store:positions', []);
@@ -875,10 +950,12 @@ app.get('/api/check-alerts', async (req, res) => {
     const equitySymbols = [...new Set([...positionsToCheck.map(p => p.symbol), ...alertsToCheck.filter(a => !a.optionMeta).map(a => a.symbol)])];
     const prices = {};
     for (const sym of equitySymbols) {
-      try {
-        const data = await getChartData(`${sym}.NS`, '1d', '5m');
-        if (data && data.price != null) prices[sym] = data.price;
-      } catch (e) { /* leave unpriced, skip this symbol this run */ }
+      let px = null;
+      try { const q = await getUpstoxLTPC(await dataKeyFor(sym)); if (q && q.price != null) px = q.price; } catch (e) { /* fall back to Yahoo below */ }
+      if (px == null) {
+        try { const data = await getChartData(`${sym}.NS`, '1d', '5m'); if (data && data.price != null) px = data.price; } catch (e) { /* leave unpriced, skip this symbol this run */ }
+      }
+      if (px != null) prices[sym] = px;
     }
 
     // Option alerts fetch through the same option-chain logic the scanning
@@ -936,8 +1013,9 @@ app.get('/api/check-alerts', async (req, res) => {
     } catch (e) { /* Upstash not configured — nothing to persist, that's fine */ }
 
     for (const msg of notifications) {
-      try { await sendTelegram(msg); } catch (e) { /* Telegram not configured or failed — keep going */ }
+      try { await sendTelegram(msg); HEALTH.alerts.lastSentAt = Date.now(); } catch (e) { HEALTH.telegram.lastErr = e.message; HEALTH.telegram.lastErrAt = Date.now(); }
     }
+    HEALTH.alerts.lastRun = Date.now(); HEALTH.alerts.lastTriggered = notifications.length;
 
     res.json({ checked: equitySymbols.length + optionAlerts.length, triggered: notifications.length, notifications });
   } catch (e) {
@@ -1110,9 +1188,9 @@ async function upstoxFetchJson(url) {
     await upstoxThrottle();
     const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${tk}` } });
     const json = await resp.json().catch(() => null);
-    if (resp.ok && json && json.status === 'success') return json.data;
+    if (resp.ok && json && json.status === 'success') { HEALTH.upstox.lastOk = Date.now(); return json.data; }
     const msg = (json && (json.errors?.[0]?.message || json.message)) || `Upstox request failed (${resp.status})`;
-    lastErr = new Error(msg);
+    lastErr = new Error(msg); HEALTH.upstox.lastErr = msg; HEALTH.upstox.lastErrAt = Date.now();
     if (resp.status === 401 || resp.status === 403 || /invalid credentials|token/i.test(msg)) continue; // try the next token
     throw lastErr;
   }
@@ -1342,6 +1420,10 @@ app.get('/api/candles/:symbol', async (req, res) => {
   const errors = [];
   try { const rows = await getUpstoxCandles(sym, tf); return res.json({ symbol: sym, tf, source: 'upstox', series: rows }); }
   catch (e) { errors.push('Upstox: ' + e.message); }
+  // last-good data from Upstox (clearly flagged) beats a different vendor's numbers or an error
+  const last = candleCache[sym + '|' + tf];
+  const maxAge = (/m|h/.test(tf) && tf !== '1M') ? 30 * 60000 : 24 * 3600000;
+  if (last && Date.now() - last.time < maxAge) return res.json({ symbol: sym, tf, source: 'upstox', stale: true, ageSec: Math.round((Date.now() - last.time) / 1000), series: last.data, note: errors.join(' | ') });
   try {
     const [r, i] = YF_TF[tf] || YF_TF['5m'];
     const p = await getChartData(yahooSym(sym), r, i);

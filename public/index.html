@@ -36,6 +36,15 @@
   .search-results div:hover{background:var(--panel2);}
   .search-results .sym{font-weight:600;} .search-results .nm{color:var(--text2);font-size:12px;}
 
+  .live-tag{font-size:9px;color:var(--green);font-weight:700;}
+  .sim-tag{font-size:9px;color:var(--amber);font-weight:700;}
+  .mkt-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;background:rgba(138,148,166,.12);color:var(--text2);white-space:nowrap;}
+  .mkt-badge.open{background:rgba(38,194,129,.12);color:var(--green);} .mkt-badge.stale{background:rgba(240,169,58,.14);color:var(--amber);}
+  .ov{position:fixed;inset:0;background:rgba(5,8,14,.72);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .ov-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:90vh;overflow:auto;}
+  .ov-card h3{margin:0 0 10px;} .ov-card input{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:6px;font-size:14px;margin:8px 0;}
+  .st-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;} .st-row:last-child{border-bottom:0;}
+  .st-ok{color:var(--green);font-weight:600;} .st-bad{color:var(--red,#f0616d);font-weight:600;} .st-warn{color:var(--amber);font-weight:600;}
   .view-tabs{display:flex;gap:4px;max-width:1300px;margin:0 auto;padding:0 16px;overflow-x:auto;border-bottom:1px solid var(--border);}
   .vt-btn{background:none;border:0;border-bottom:2px solid transparent;color:var(--text2);padding:10px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
   .vt-btn:hover{color:var(--text);}
@@ -223,6 +232,7 @@
   /* Backtest */
   .bt-controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;align-items:end;margin-bottom:16px;}
   .bt-controls label{display:block;font-size:11px;color:var(--text2);margin-bottom:5px;}
+  .bt-controls input{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:12.5px;}
   .bt-controls select{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:12.5px;}
   .strategy-desc{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12.5px;color:var(--text2);line-height:1.6;margin-bottom:16px;}
   .bt-results{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;}
@@ -311,6 +321,8 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
       <span id="upstoxConnectLabel">Connect Upstox</span>
     </a>
+    <span class="mkt-badge" id="mktBadge" title="Market hours: Mon–Fri 9:15–15:30 IST (exchange holidays are not tracked)">&hellip;</span>
+    <button class="btn" id="statusBtn" title="Connection health, Telegram test">Status</button>
     <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
   </div>
 </div>
@@ -365,6 +377,14 @@
     <h4 style="margin:16px 0 4px;">Scan across all stocks</h4>
     <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
     <div id="patScanOut" style="overflow-x:auto;"></div>
+    <h4 style="margin:18px 0 4px;">Historical hit rates <span class="metric-sub">how past signals actually played out</span></h4>
+    <div class="metric-sub" style="margin-bottom:8px;">Replays up to ~5 years of real daily candles: at each step the engine sees only the past, and every freshly confirmed pattern is followed forward up to 40 bars &mdash; did price reach the target or the stop first? Costs are not included. Small samples (under 20 signals) are unreliable.</div>
+    <div class="pat-controls" style="grid-template-columns:200px auto 1fr;">
+      <div><label>Stocks to test</label><select id="patHitN"><option value="15">15 (about 1 min)</option><option value="30" selected>30 (about 2 min)</option><option value="60">60 (about 4 min)</option></select></div>
+      <button class="btn" id="patHitBtn" style="padding:9px;">Run hit-rate test</button><span></span>
+    </div>
+    <div id="patHitStatus" class="metric-sub" style="margin:6px 0;"></div>
+    <div id="patHitOut" style="overflow-x:auto;"></div>
   </section>
   <section id="sec-priceaction" class="panel">
     <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
@@ -401,20 +421,11 @@
   <section id="sec-fourpanel">
   <div class="grid cols-4" id="fourPanel"></div>
   </section>
-<div class="grid cols-2">    <div class="panel">
-      <h3>Segment revenue mix</h3>
-      <p class="desc">Business-segment split, since one blended P/E hides how a diversified company actually earns.</p>
-      <div class="chart-wrap" style="height:190px;"><canvas id="segmentChart"></canvas></div>
-      <div class="legend" id="segmentLegend"></div>
-    </div>    <div class="panel">
-      <h3 id="macroTitle">Price vs macro driver</h3>
-      <p class="desc" id="macroDesc"></p>
-      <div class="chart-wrap" style="height:180px;"><canvas id="macroChart"></canvas></div>
-    </div></div>
+
     <div class="panel">
       <h3>Sector peer comparison</h3>
       <table>
-        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>Rev growth</th></tr></thead>
+        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th></tr></thead>
         <tbody id="peersBody"></tbody>
       </table>
     </div>
@@ -429,8 +440,8 @@
     <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
   </section>
   <div class="panel">
-    <h3>Volume profile</h3>
-    <p class="desc">Volume traded at each price level around the current price.</p>
+    <h3>Price distribution</h3>
+    <p class="desc">How many of the recent daily closes fell in each price band (time-at-price from real closes &mdash; not traded volume).</p>
     <div class="chart-wrap" style="height:260px;"><canvas id="volumeChart"></canvas></div>
   </div>
 </div>
@@ -641,6 +652,11 @@
       <div><label>Lookback</label><select id="btRange"><option value="6mo">6 months</option><option value="1y" selected>1 year</option><option value="2y">2 years</option></select></div>
       <div><button class="btn" id="btRun" style="width:100%;padding:9px;">Run backtest</button></div>
     </div>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 2fr;">
+      <div><label>Charges per side (%)</label><input id="btCost" type="number" step="0.01" min="0" max="2" value="0.12"></div>
+      <div><label>Slippage per side (%)</label><input id="btSlip" type="number" step="0.01" min="0" max="2" value="0.05"></div>
+      <div class="metric-sub" style="padding-bottom:8px;">Results are <b>net of costs</b>: brokerage, STT, exchange fees, stamp duty and GST &asymp; 0.12% per side for delivery trades, plus slippage. Set both to 0 for gross results.</div>
+    </div>
     <div style="margin-bottom:14px;">
       <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;">Strategies &mdash; check one or more to add them</label>
       <div id="btStrategyList" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
@@ -668,14 +684,8 @@
     <div class="legend" id="btChartLegend"></div>
     <div id="btStatus" class="metric-sub"></div>
   </section>
-    <div class="panel">
-      <h3>200-day backtest vs buy-and-hold</h3>
-      <p class="desc">The strategy's return is now benchmarked against simply holding the stock &mdash; a gap in the original design.</p>
-      <div class="chart-wrap" style="height:200px;"><canvas id="backtestChart"></canvas></div>
-      <div class="grid cols-4" id="backtestStats" style="margin-top:12px;"></div>
-    </div>
 </div>
-  <div class="footer-note">NSE + BSE Analytics Dashboard &mdash; all figures are simulated for demonstration. See the DATA INTEGRATION POINT in script.js to wire in a real market-data feed. For educational purposes only.</div>
+  <div class="footer-note">NSE + BSE Analytics Dashboard &mdash; prices, candles, signals, patterns, shareholding and key ratios come from Upstox; news from Google News / ET / Moneycontrol. Cards marked <span class="sim-tag">SAMPLE</span> are illustrative placeholders, not market data. Educational use only &mdash; not investment advice.</div>
 </div>
 </div>
 
@@ -701,6 +711,7 @@
         const r=await _f(u,o);
         let ct=''; try{ ct=(r.headers&&r.headers.get('content-type'))||''; }catch(e){}
         const asleep=(r.status===502||r.status===503||r.status===504)||(/text\/html/.test(ct)&&r.status!==404);
+        if(r.status===401 && !/^\/api\/auth/.test(url)){ if(counted) banner(false); if(window.showLogin) window.showLogin(); return r; }
         if(!asleep){ if(counted) banner(false); return r; }
         if(!counted){ counted=true; banner(true); }
       }catch(e){ if(!counted){ counted=true; banner(true); } }
@@ -1224,9 +1235,7 @@ function buildHorizons(d){
     partsLong.push({label:'Price vs 100-day average',points:last>sma?12:-12,note:'Close '+(last>sma?'above':'below')+' the 100-day average ('+sma.toFixed(2)+').'});
     partsLong.push({label:'Distance from 52-week high',points:clampR(-(hi-last)/hi*100*0.4+4,-10,6),note:((hi-last)/hi*100).toFixed(1)+'% below the period high; near highs adds, deep drawdowns subtract.'});
   } else {
-    partsLong.push({label:'Analyst upside',points:clampR(d.upside*0.7,-20,20),note:'Upside to mean analyst target: '+fmt(d.upside,1)+'% (simulated fundamentals).'});
-    partsLong.push({label:'Revenue growth',points:clampR((d.revGrowth-8)*0.6,-12,12),note:'Growth '+fmt(d.revGrowth,1)+'% vs an 8% par (simulated).'});
-    partsLong.push({label:'Return on equity',points:clampR((d.roe-12)*0.5,-10,10),note:'ROE '+fmt(d.roe,1)+'% vs a 12% par (simulated).'});
+    partsLong.push({label:'Awaiting real price history',points:0,note:'Long-term score needs real daily history (momentum, 100-day average, distance from highs). Until it loads the score stays neutral \u2014 no sample fundamentals are used.'});
   }
   scoreLong = sumParts(partsLong);
 
@@ -1519,42 +1528,48 @@ function renderWatchlist(){
   });
 }
 
+window.FUND=window.FUND||{}; const FUND_P={};
+function loadFund(sym){
+  const c=window.FUND[sym];
+  if(c && (!c.error || Date.now()-c.at<120000)) return Promise.resolve(c);
+  if(FUND_P[sym]) return FUND_P[sym];
+  return FUND_P[sym]=fetch('/api/fundamentals/'+encodeURIComponent(sym),{cache:'no-store'}).then(r=>r.json()).then(f=>{
+    window.FUND[sym]=(f&&!f.error)?Object.assign(f,{at:Date.now()}):{error:(f&&f.error)||'unavailable',at:Date.now()}; delete FUND_P[sym]; return window.FUND[sym];
+  }).catch(e=>{ delete FUND_P[sym]; return {error:e.message,at:Date.now()}; });
+}
+const fvl=(x,dec,suf)=>x==null?'&mdash;':fmt(x,dec)+(suf||'');
+function overviewCards(d){
+  const R=!!d.realHistory, W='…';
+  if(isIndexSym(d.symbol)){
+    const hi=d.wk52High, lo=d.wk52Low;
+    return [
+      ["Last price",R?`&#8377;${fmt(d.price,2)}`:W, R?`${d.changePct>=0?'+':''}${fmt(d.changePct,2)}% today`:'',R],
+      ["52W high",R?fmt(hi,0):W, R?`${fmt((hi-d.price)/hi*100,1)}% below`:'',R],
+      ["52W low",R?fmt(lo,0):W, R?`${fmt((d.price-lo)/lo*100,1)}% above`:'',R],
+      ["RSI (14)",R?fmt(d.rsi,1):W, R?(d.rsi>=70?'Overbought zone':d.rsi<=30?'Oversold zone':'Neutral zone'):'',R],
+      ["Supertrend",R?(d.supertrendBull?'Bullish':'Bearish'):W,'ATR trend filter',R],
+      ["MACD",R?(d.macdBull?'Bullish':'Bearish'):W,'12/26/9',R]];
+  }
+  const f=window.FUND[d.symbol], have=f&&!f.error;
+  const x=(k)=>have?f[k]:null, ld=f===undefined?W:'&mdash;';
+  const volLive=!!d.volReal;
+  return [
+    ["P/E ratio", have?fvl(f.pe,1):ld, have&&f.peSector!=null?`Sector avg ${fmt(f.peSector,1)}`:'', have&&f.pe!=null],
+    ["P/B ratio", have?fvl(f.pb,2):ld, have&&f.pbSector!=null?`Sector avg ${fmt(f.pbSector,2)}`:'', have&&f.pb!=null],
+    ["ROE", have?fvl(f.roe,1,'%'):ld, have&&f.roa!=null?`ROA ${fmt(f.roa,1)}%`:'', have&&f.roe!=null],
+    ["ROCE", have?fvl(f.roce,1,'%'):ld, have&&f.roceSector!=null?`Sector ${fmt(f.roceSector,1)}%`:'', have&&f.roce!=null],
+    ["EV/EBITDA", have?fvl(f.evEbitda,1):ld, have&&f.evEbitdaSector!=null?`Sector ${fmt(f.evEbitdaSector,1)}`:'', have&&f.evEbitda!=null],
+    ["Volume (latest day)", volLive?`${fmt(d.volumeCr,2)} Cr`:(d.realHistory?'&mdash;':W), volLive&&d.avgVolumeCr!=null?`20d avg ${fmt(d.avgVolumeCr,2)} Cr`:'', volLive]];
+}
 function renderOverview(d){
-  // Show simulated data immediately — upgraded to real Upstox fundamentals below
-  const cards=[
-    ["Market cap",`&#8377;${fmt(d.marketCapT,2)} T`,''],
-    ["P/E ratio",fmt(d.pe,1),`Fwd ${fmt(d.pe*0.88,1)}`],
-    ["P/B ratio",fmt(d.pb,2),`BV &#8377;${fmt(d.bookValue,0)}`],
-    ["ROE",`${fmt(d.roe,1)}%`,`ROA ${fmt(d.roa,1)}%`],
-    ["Volume",`${fmt(d.volumeCr,2)} Cr`,`20d avg ${fmt(d.avgVolumeCr,2)} Cr`],
-    ["Beta",fmt(d.beta,2),`D/E ${fmt(d.deRatio,2)}`]
-  ];
-  document.getElementById('overviewGrid').innerHTML = cards.map(([l,v,s])=>`
-    <div class="card"><div class="card-title">${l} <span style="font-size:9px;color:var(--text3);" title="Simulated placeholder — not real data">SIM</span></div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
-
-  // Upgrade to real Upstox fundamentals in the background
-  if(isIndexSym(d.symbol)) return; // indices have no company fundamentals — keep the generated overview
-  fetch(`/api/fundamentals/${encodeURIComponent(d.symbol)}`, {cache:'no-store'})
-    .then(r=>r.json())
-    .then(f=>{
-      if(f.error || window.CURRENT?.symbol !== d.symbol) return; // stale or error
-      const tag=(live)=>live?' <span style="font-size:9px;color:var(--green);">LIVE</span>':' <span style="font-size:9px;color:var(--text3);" title="Simulated placeholder — not real data">SIM</span>';
-      const realCards=[
-        ["Market cap", `&#8377;${fmt(d.marketCapT,2)} T`, f.sectorMarketCapInr?`Sector ${f.sectorMarketCapInr}`:(f.sector||''), false],
-        ["P/E ratio", f.pe!=null ? fmt(f.pe,1) : fmt(d.pe,1), f.peSector!=null ? `Sector avg ${fmt(f.peSector,1)}` : `Fwd ${fmt(d.pe*0.88,1)}`, f.pe!=null],
-        ["P/B ratio", f.pb!=null ? fmt(f.pb,2) : fmt(d.pb,2), f.pbSector!=null ? `Sector avg ${fmt(f.pbSector,2)}` : '', f.pb!=null],
-        ["ROE", f.roe!=null ? `${fmt(f.roe,1)}%` : `${fmt(d.roe,1)}%`, f.roeSector!=null ? `Sector ${fmt(f.roeSector,1)}%` : '', f.roe!=null],
-        ["ROCE", f.roce!=null ? `${fmt(f.roce,1)}%` : '&mdash;', f.roceSector!=null ? `Sector ${fmt(f.roceSector,1)}%` : '', f.roce!=null],
-        ["EV/EBITDA", f.evEbitda!=null ? fmt(f.evEbitda,1) : '&mdash;', f.evEbitdaSector!=null ? `Sector ${fmt(f.evEbitdaSector,1)}` : (f.roa!=null?`ROA ${fmt(f.roa,1)}%`:''), f.evEbitda!=null]
-      ];
-      document.getElementById('overviewGrid').innerHTML = realCards.map(([l,v,s,live])=>`
-        <div class="card"><div class="card-title">${l}${tag(live)}</div><div class="metric-val">${v}</div><div class="metric-sub">${s}</div></div>`).join('');
-      // Also update the company description if available
-      if(f.description && document.getElementById('stockDesc')){
-        document.getElementById('stockDesc').textContent = f.description;
-      }
-    })
-    .catch(()=>{ /* keep simulated data, Upstox not reachable */ });
+  const grid=document.getElementById('overviewGrid'); if(!grid) return;
+  const tag=live=>live?' <span class="live-tag">LIVE</span>':'';
+  grid.innerHTML=overviewCards(d).map(([l,v,sub,live])=>`
+    <div class="card"><div class="card-title">${l}${tag(live)}</div><div class="metric-val">${v}</div><div class="metric-sub">${sub||''}</div></div>`).join('');
+  if(isIndexSym(d.symbol)) return;
+  if(window.FUND[d.symbol] && !window.FUND[d.symbol].error) { const f=window.FUND[d.symbol]; if(f.description&&document.getElementById('stockDesc')) document.getElementById('stockDesc').textContent=f.description; return; }
+  if(window.FUND[d.symbol] && Date.now()-window.FUND[d.symbol].at<120000) return; // recent failure — don't hammer
+  loadFund(d.symbol).then(()=>{ if(window.CURRENT && window.CURRENT.symbol===d.symbol){ renderOverview(window.CURRENT); const c=document.querySelector('#fourPanel .card'); if(c) updateFundCard(window.CURRENT); } });
 }
 
 function syntheticCandlesFromCloses(prices){
@@ -1627,6 +1642,7 @@ function renderSignal(d){
 }
 
 function renderBacktest(d){
+  if(!document.getElementById('backtestChart')) return; // simulated panel removed
   const ctx=document.getElementById('backtestChart');
   charts.backtest = new Chart(ctx,{
     type:'line',
@@ -1650,7 +1666,7 @@ function renderBacktest(d){
 }
 
 function renderSegments(d){
-  const ctx=document.getElementById('segmentChart');
+  const ctx=document.getElementById('segmentChart'); if(!ctx) return; // sample-only panel removed
   const colors=['#3d8bfd','#26c281','#f0a93a','#8b7cf6'];
   charts.segment = new Chart(ctx,{
     type:'bar',
@@ -1664,67 +1680,61 @@ function renderSegments(d){
     `<span><span class="dot" style="background:${colors[i%4]}"></span>${n} ${d.segPct[i].toFixed(0)}%</span>`).join('');
 }
 
+function fundCardInner(d){
+  const f=window.FUND[d.symbol];
+  if(isIndexSym(d.symbol)) return `<div class="card-title">Fundamentals</div><div class="metric-sub">Company ratios don't apply to an index.</div>`;
+  if(f===undefined) return `<div class="card-title">Fundamentals</div><div class="metric-sub">Loading ratios&hellip;</div>`;
+  if(f.error) return `<div class="card-title">Fundamentals</div><div class="metric-sub" style="color:var(--amber)">Ratios unavailable right now (${(f.error+'').slice(0,80)}).</div>`;
+  const row=(l,v,sec)=>`<div class="row-flex"><span class="lbl">${l}</span><span>${v}${sec!=null?` <span class="metric-sub">(sector ${fmt(sec,l==='P/B ratio'?2:1)})</span>`:''}</span></div>`;
+  return `<div class="card-title">Fundamentals <span class="live-tag">LIVE</span></div>`
+    +row('P/E ratio',fvl(f.pe,1),f.peSector)+row('P/B ratio',fvl(f.pb,2),f.pbSector)+row('ROE',fvl(f.roe,1,'%'),f.roeSector)
+    +row('ROCE',fvl(f.roce,1,'%'),f.roceSector)+row('ROA',fvl(f.roa,1,'%'),f.roaSector)+row('EV/EBITDA',fvl(f.evEbitda,1),f.evEbitdaSector)
+    +`<div class="metric-sub" style="margin-top:6px;">Source: Upstox key ratios${f.sector?' &middot; '+f.sector:''}</div>`;
+}
+function updateFundCard(d){
+  const card=[...document.querySelectorAll('#fourPanel .card')].find(c=>/^Fundamentals/.test(c.querySelector('.card-title')?.textContent||''));
+  if(card) card.innerHTML=fundCardInner(d);
+}
 function renderFourPanel(d){
-  const fundamentals=`
-    <div class="row-flex"><span class="lbl">P/E ratio</span><span>${fmt(d.pe,1)}</span></div>
-    <div class="row-flex"><span class="lbl">P/B ratio</span><span>${fmt(d.pb,2)}</span></div>
-    <div class="row-flex"><span class="lbl">EPS (TTM)</span><span>&#8377;${fmt(d.eps,2)}</span></div>
-    <div class="row-flex"><span class="lbl">Book value</span><span>&#8377;${fmt(d.bookValue,0)}</span></div>
-    <div class="row-flex"><span class="lbl">Div yield</span><span>${fmt(d.divYield,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">Net margin</span><span>${fmt(d.netMargin,1)}%</span></div>
-    <div class="row-flex"><span class="lbl">Rev growth</span><span class="${d.revGrowth>=0?'up':'down'}">${fmt(d.revGrowth,1)}%</span></div>
-    <div class="row-flex"><span class="lbl">D/E ratio</span><span>${fmt(d.deRatio,2)}</span></div>
-    <div class="row-flex"><span class="lbl">Analyst view</span><span>${d.analystConsensus}</span></div>
-    <div class="row-flex"><span class="lbl">Target &amp; upside</span><span>&#8377;${fmt(d.targetMean,0)} (${d.upside>=0?'+':''}${fmt(d.upside,1)}%)</span></div>`;
-
+  const R=!!d.realHistory, D='&mdash;';
+  const T=R?'<span class="live-tag">LIVE</span>':'<span class="sim-tag" title="Real price history is still loading">LOADING</span>';
+  const pf=v=>(R&&v!=null)?`<span class="${v>=0?'up':'down'}">${v>=0?'+':''}${fmt(v,2)}%</span>`:D;
+  const px=v=>R?`&#8377;${fmt(v,2)}`:D;
   const technical=`
-    <div class="row-flex"><span class="lbl">RSI (14)</span><span>${fmt(d.rsi,1)}</span></div>
-    <div class="row-flex"><span class="lbl">Supertrend</span><span class="${d.supertrendBull?'up':'down'}">${d.supertrendBull?'Bullish':'Bearish'}</span></div>
-    <div class="row-flex"><span class="lbl">MACD</span><span class="${d.macdBull?'up':'down'}">${d.macdBull?'Bullish':'Bearish'}</span></div>
-    <div class="row-flex"><span class="lbl">Resistance 2</span><span>&#8377;${fmt(d.resistance2,2)}</span></div>
-    <div class="row-flex"><span class="lbl">Resistance 1</span><span>&#8377;${fmt(d.resistance1,2)}</span></div>
-    <div class="row-flex"><span class="lbl">Price</span><span>&#8377;${fmt(d.price,2)}</span></div>
-    <div class="row-flex"><span class="lbl">Support 1</span><span>&#8377;${fmt(d.support1,2)}</span></div>
-    <div class="row-flex"><span class="lbl">Support 2</span><span>&#8377;${fmt(d.support2,2)}</span></div>`;
-
-  const perf=d.perf;
+    <div class="row-flex"><span class="lbl">RSI (14)</span><span>${R?fmt(d.rsi,1):D}</span></div>
+    <div class="row-flex"><span class="lbl">Supertrend</span><span class="${d.supertrendBull?'up':'down'}">${R?(d.supertrendBull?'Bullish':'Bearish'):D}</span></div>
+    <div class="row-flex"><span class="lbl">MACD</span><span class="${d.macdBull?'up':'down'}">${R?(d.macdBull?'Bullish':'Bearish'):D}</span></div>
+    <div class="row-flex"><span class="lbl">Resistance 2</span><span>${px(d.resistance2)}</span></div>
+    <div class="row-flex"><span class="lbl">Resistance 1</span><span>${px(d.resistance1)}</span></div>
+    <div class="row-flex"><span class="lbl">Price</span><span>${px(d.price)}</span></div>
+    <div class="row-flex"><span class="lbl">Support 1</span><span>${px(d.support1)}</span></div>
+    <div class="row-flex"><span class="lbl">Support 2</span><span>${px(d.support2)}</span></div>
+    <div class="metric-sub" style="margin-top:6px;">Supports/resistances = 20-day low/high (+/-3%)</div>`;
+  const perf=d.perf||{};
   const performance=`
-    <div class="row-flex"><span class="lbl">1W</span><span class="${perf.w1>=0?'up':'down'}">${fmt(perf.w1,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">1M</span><span class="${perf.m1>=0?'up':'down'}">${fmt(perf.m1,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">3M</span><span class="${perf.m3>=0?'up':'down'}">${fmt(perf.m3,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">6M</span><span class="${perf.m6>=0?'up':'down'}">${fmt(perf.m6,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">1Y</span><span class="${perf.y1>=0?'up':'down'}">${fmt(perf.y1,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">YTD</span><span class="${perf.ytd>=0?'up':'down'}">${fmt(perf.ytd,2)}%</span></div>
-    <div class="row-flex"><span class="lbl">52W range</span><span>&#8377;${fmt(d.wk52Low,0)} &ndash; &#8377;${fmt(d.wk52High,0)}</span></div>
-    <div class="row-flex"><span class="lbl">Day high / low</span><span>&#8377;${fmt(d.dayHigh,2)} / &#8377;${fmt(d.dayLow,2)}</span></div>`;
-
-  const totalHold=d.promoter+d.fii+d.dii+d.publicHold;
-  const shareholding=`
-    <div class="chart-wrap" style="height:120px;margin-bottom:8px;"><canvas id="shareChart"></canvas></div>
-    <div class="row-flex"><span class="lbl"><span class="dot" style="background:#3d8bfd;display:inline-block;"></span> Promoter</span><span>${fmt(d.promoter,1)}%</span></div>
-    <div class="row-flex"><span class="lbl"><span class="dot" style="background:#26c281;display:inline-block;"></span> FII</span><span>${fmt(d.fii,1)}%</span></div>
-    <div class="row-flex"><span class="lbl"><span class="dot" style="background:#f0a93a;display:inline-block;"></span> DII</span><span>${fmt(d.dii,1)}%</span></div>
-    <div class="row-flex"><span class="lbl"><span class="dot" style="background:#5b6472;display:inline-block;"></span> Public</span><span>${fmt(d.publicHold,1)}%</span></div>
-    <div class="metric-sub" style="margin-top:6px;">Total: ${fmt(totalHold,1)}% (fixed to always sum to 100)</div>`;
-
+    <div class="row-flex"><span class="lbl">1W</span><span>${pf(perf.w1)}</span></div>
+    <div class="row-flex"><span class="lbl">1M</span><span>${pf(perf.m1)}</span></div>
+    <div class="row-flex"><span class="lbl">3M</span><span>${pf(perf.m3)}</span></div>
+    <div class="row-flex"><span class="lbl">6M</span><span>${pf(perf.m6)}</span></div>
+    <div class="row-flex"><span class="lbl">1Y</span><span>${pf(perf.y1)}</span></div>
+    <div class="row-flex"><span class="lbl">YTD</span><span>${pf(perf.ytd)}</span></div>
+    <div class="row-flex"><span class="lbl">52W range</span><span>${R?`&#8377;${fmt(d.wk52Low,0)} &ndash; &#8377;${fmt(d.wk52High,0)}`:D}</span></div>
+    <div class="row-flex"><span class="lbl">Day high / low</span><span>${R?`&#8377;${fmt(d.dayHigh,2)} / &#8377;${fmt(d.dayLow,2)}`:D}</span></div>`;
   document.getElementById('fourPanel').innerHTML=`
-    <div class="card"><div class="card-title">Fundamentals</div>${fundamentals}</div>
-    <div class="card"><div class="card-title">Technical analysis</div>${technical}</div>
-    <div class="card"><div class="card-title">Price performance</div>${performance}</div>
-    <div class="card"><div class="card-title">Shareholding</div>${shareholding}</div>`;
-
+    <div class="card">${fundCardInner(d)}</div>
+    <div class="card"><div class="card-title">Technical analysis ${T}</div>${technical}</div>
+    <div class="card"><div class="card-title">Price performance ${T}</div>${performance}</div>
+    <div class="card"><div class="card-title">Shareholding</div><div class="metric-sub" id="shLoading">${isIndexSym(d.symbol)?'Not applicable to an index.':'Loading shareholding&hellip;'}</div></div>`;
+  if(!isIndexSym(d.symbol)){ loadFund(d.symbol).then(()=>{ if(window.CURRENT&&window.CURRENT.symbol===d.symbol) updateFundCard(d); }); }
   upgradeShareholding(d);
-  const sc=document.getElementById('shareChart');
-  charts.share = new Chart(sc,{type:'doughnut',data:{labels:['Promoter','FII','DII','Public'],
-    datasets:[{data:[d.promoter,d.fii,d.dii,d.publicHold],backgroundColor:['#3d8bfd','#26c281','#f0a93a','#5b6472'],borderWidth:0}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'65%'}});
 }
 
 
 function upgradeShareholding(d){
   if(isIndexSym(d.symbol)) return;
   fetch(`/api/shareholding/${encodeURIComponent(d.symbol)}`,{cache:'no-store'}).then(r=>r.json()).then(sh=>{
-    if(sh.error || window.CURRENT?.symbol!==d.symbol) return;
+    if(window.CURRENT?.symbol!==d.symbol) return;
+    if(sh.error){ const l=document.getElementById('shLoading'); if(l) l.textContent='Shareholding unavailable right now.'; return; }
     const C=sh.categories||{}, L=sh.latest||{};
     const defs=[['promoters','Promoters','#3d8bfd'],['fii','FII','#26c281'],['other_dii','Other DII','#f0a93a'],['mutual_funds','Mutual funds','#a970ff'],['retail_and_other','Retail & other','#5b6472']].filter(x=>L[x[0]]!=null);
     if(!defs.length) return;
@@ -1745,6 +1755,7 @@ function upgradeShareholding(d){
 }
 
 function renderMacro(d){
+  if(!document.getElementById('macroChart')) return; // sample-only panel removed
   document.getElementById('macroTitle').textContent=`Price vs ${d.macro.label}`;
   document.getElementById('macroDesc').textContent=`Indexed to 100 &mdash; a relevant macro driver for the ${d.sector.toLowerCase()} sector, missing from the original single-metric view.`;
   const ctx=document.getElementById('macroChart');
@@ -1761,38 +1772,35 @@ function renderMacro(d){
 }
 
 function renderFno(d){
-  const items=[["PCR (OI)",fmt(d.pcr,2)],["Max pain",`&#8377;${fmt(d.maxPain,0)}`],["IV (ATM)",`${fmt(d.iv,1)}%`],
-    ["OI change",`<span class="${d.oiChange>=0?'up':'down'}">${d.oiChange>=0?'+':''}${fmt(d.oiChange,1)}%</span>`]];
-  document.getElementById('fnoGrid').innerHTML=items.map(([l,v])=>`
-    <div class="card"><div class="card-title">${l}</div><div class="metric-val" style="font-size:17px;">${v}</div></div>`).join('');
-}
-
-function renderNews(d){
-  document.getElementById('newsPanel').innerHTML = d.news.map(n=>`
-    <div class="news-item"><p>${n.t}</p><div class="news-meta"><span>Simulated feed</span>&middot;<span>Today</span>&middot;
-      <span class="signal-chip ${n.s==='Positive'?'sig-buy':n.s==='Negative'?'sig-sell':'sig-hold'}">${n.s}</span></div></div>`).join('');
+  const grid=document.getElementById('fnoGrid'); if(!grid) return;
+  const isIdx=typeof FNO_INDICES!=='undefined' && FNO_INDICES.some(x=>x[0]===d.symbol);
+  if(!isIdx){ grid.innerHTML='<div class="metric-sub" style="grid-column:1/-1;">Live PCR / max pain / IV are shown for indices (table above). For this stock use <b>Options &amp; futures</b> below for the real option chain.</div>'; return; }
+  grid.innerHTML='<div class="metric-sub" style="grid-column:1/-1;">Loading&hellip;</div>';
+  fetch('/api/upstox/fno/'+d.symbol,{cache:'no-store'}).then(r=>r.json()).then(o=>{
+    if(window.CURRENT!==d) return; if(o.error) throw new Error(o.error);
+    const oi=o.totalCallOi>0?((o.totalPutOi-o.totalCallOi)/o.totalCallOi*100):null;
+    const items=[["PCR (OI)",fmt(o.pcr,2)],["Max pain",`&#8377;${fmt(o.maxPain,0)}`],["IV (ATM)",o.atmIv!=null?fmt(o.atmIv,1)+'%':'&mdash;'],["Put vs call OI",oi==null?'&mdash;':`<span class="${oi>=0?'up':'down'}">${oi>=0?'+':''}${fmt(oi,1)}%</span>`]];
+    grid.innerHTML=items.map(([l,v])=>`<div class="card"><div class="card-title">${l} <span class="live-tag">LIVE</span></div><div class="metric-val" style="font-size:17px;">${v}</div></div>`).join('');
+  }).catch(e=>{ grid.innerHTML=`<div class="metric-sub" style="grid-column:1/-1;color:var(--amber)">Option-chain data unavailable right now (${(e.message||'').slice(0,80)}).</div>`; });
 }
 
 function renderPeers(d){
-  const peers = STOCKS.filter(s=>s[2]===d.sector && s[0]!==d.symbol).slice(0,6)
-    .map(s=>generateStockData(s[0],s[1],s[2],s[3]));
-  const peersBody=document.getElementById('peersBody');
-  peersBody.innerHTML = peers.map(p=>`
-    <tr class="row-click" data-symbol="${p.symbol}"><td>${p.symbol}</td><td>&#8377;${fmt(p.price,2)}</td>
-      <td class="${p.changePct>=0?'up':'down'}">${p.changePct>=0?'+':''}${fmt(p.changePct,2)}%</td>
-      <td>${fmt(p.pe,1)}</td><td>${fmt(p.pb,2)}</td><td>${fmt(p.roe,1)}%</td>
-      <td class="${p.revGrowth>=0?'up':'down'}">${fmt(p.revGrowth,1)}%</td></tr>`).join('') || '<tr><td colspan="7" class="lbl">No other peers in this sector yet &mdash; add more rows to STOCKS.</td></tr>';
-  peersBody.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
+  const peers = STOCKS.filter(s=>s[2]===d.sector && s[0]!==d.symbol).slice(0,6);
+  const body=document.getElementById('peersBody'); if(!body) return;
+  body.innerHTML = peers.map(s=>`<tr class="row-click" data-symbol="${s[0]}"><td>${s[0]}</td><td id="pp-${s[0]}">&hellip;</td><td id="pc-${s[0]}">&hellip;</td><td id="pe-${s[0]}">&hellip;</td><td id="pb-${s[0]}">&hellip;</td><td id="pr-${s[0]}">&hellip;</td><td id="po-${s[0]}">&hellip;</td></tr>`).join('')
+    || '<tr><td colspan="7" class="lbl">No other peers in this sector in the covered list.</td></tr>';
+  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
+  const set=(id,h)=>{ const e=document.getElementById(id); if(e) e.innerHTML=h; };
+  peers.forEach(([sym])=>{
+    fetch('/api/quote/'+encodeURIComponent(sym),{cache:'no-store'}).then(r=>r.json()).then(q=>{
+      if(q.error||q.price==null) throw 0;
+      set('pp-'+sym,'&#8377;'+fmt(q.price,2));
+      const c=q.changePct; set('pc-'+sym, c==null?'&mdash;':`<span class="${c>=0?'up':'down'}">${c>=0?'+':''}${fmt(c,2)}%</span>`);
+    }).catch(()=>{ set('pp-'+sym,'&mdash;'); set('pc-'+sym,'&mdash;'); });
+    loadFund(sym).then(f=>{ const ok=f&&!f.error; set('pe-'+sym,ok?fvl(f.pe,1):'&mdash;'); set('pb-'+sym,ok?fvl(f.pb,2):'&mdash;'); set('pr-'+sym,ok?fvl(f.roe,1,'%'):'&mdash;'); set('po-'+sym,ok?fvl(f.roce,1,'%'):'&mdash;'); });
+  });
 }
 
-function newsAgo(iso){
-  const t=Date.parse(iso); if(!t) return '';
-  const m=Math.round((Date.now()-t)/60000);
-  if(m<1) return 'just now'; if(m<60) return m+' min ago'; if(m<1440) return Math.round(m/60)+' h ago';
-  if(m<10080) return Math.round(m/1440)+' d ago';
-  return new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-}
-function newsEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function renderNews(d){
   const panel = document.getElementById('newsPanel');
   panel.innerHTML = '<div class="metric-sub">Loading latest news…</div>';
@@ -1875,6 +1883,11 @@ function applyRealHistory(d, hist, livePrice){
   d.support1=lo20; d.support2=lo20*0.97; d.resistance1=hi20; d.resistance2=hi20*1.03;
   d.wk52High=Math.max(...hist.h); d.wk52Low=Math.min(...hist.l);
   d.realHistory=true; d.histHL={h:hist.h.slice(), l:hist.l.slice()};
+  { const n=closes.length, pc=k=>n>k?(closes[n-1]/closes[n-1-k]-1)*100:null;
+    let ytd=null; if(hist.t&&hist.t.length===n){ const yr=new Date(Date.now()+19800000).getUTCFullYear(); const i0=hist.t.findIndex(t=>new Date(t*1000).getUTCFullYear()===yr); if(i0>0) ytd=(closes[n-1]/closes[i0-1]-1)*100; }
+    d.perf={w1:pc(5),m1:pc(21),m3:pc(63),m6:pc(126),y1:n>=240?(closes[n-1]/closes[0]-1)*100:null,ytd};
+    d.dayHigh=hist.h[n-1]; d.dayLow=hist.l[n-1];
+    if(hist.v&&hist.v.length===n&&hist.v[n-1]>0){ d.volumeCr=hist.v[n-1]/1e7; const pv=hist.v.slice(-21,-1).filter(x=>x>0); d.avgVolumeCr=pv.length?pv.reduce((a,b)=>a+b,0)/pv.length/1e7:null; d.volReal=true; } }
   const st=computeSupertrend(closes,0.15); d.trendLine=st.trendLine;
   d.horizons=buildHorizons(d);
   const sw=d.horizons.swing;
@@ -2020,7 +2033,7 @@ function renderScreener(){
     return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong>${window.FNO_SET&&window.FNO_SET.has(d.symbol)?'<span class="fno-badge" data-fno="'+d.symbol+'" title="Options &amp; futures available — click to open the options scan">F&amp;O</span>':''}</td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
       <td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
       <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
-      <td>${d.sector==='Index'?'&mdash;':fmt(d.volumeCr,2)+' Cr'}</td></tr>`;
+      <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmt(d.volumeCr,2)+' Cr'}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
   body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
@@ -2136,6 +2149,84 @@ function gotoSection(id){
 }
 document.addEventListener('click',(e)=>{ const b=e.target.closest('#viewTabs .vt-btn'); if(b) showTab(b.dataset.vtab); });
 window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location.hash); if(m&&m[1]!==window.ACTIVE_VTAB&&!window.IN_HOME_VIEW) showTab(m[1],{noHash:true}); });
+
+
+/* ============================================================
+   LOGIN, STATUS PANEL, MARKET BADGE
+   ============================================================ */
+(function(){
+  const esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let loginOpen=false;
+  window.showLogin=function(){
+    if(loginOpen) return; loginOpen=true;
+    const ov=document.createElement('div'); ov.className='ov'; ov.id='loginOv';
+    ov.innerHTML=`<form class="ov-card" id="loginForm"><h3>Enter passcode</h3><div class="metric-sub">This dashboard is protected. Enter the passcode you set as DASHBOARD_PASSCODE.</div>
+      <input type="password" id="loginPass" autocomplete="current-password" placeholder="Passcode" autofocus>
+      <div id="loginErr" class="metric-sub" style="color:var(--red,#f0616d);min-height:16px;"></div>
+      <button class="btn" type="submit" style="width:100%;padding:9px;">Unlock</button></form>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#loginForm').addEventListener('submit',async e=>{
+      e.preventDefault(); const err=ov.querySelector('#loginErr'); err.textContent='';
+      try{
+        const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({passcode:ov.querySelector('#loginPass').value})});
+        const j=await r.json().catch(()=>({}));
+        if(r.ok&&j.ok){ location.reload(); } else err.textContent=r.status===429?'Too many attempts — wait a few minutes.':(j.error||'Wrong passcode');
+      }catch(x){ err.textContent='Could not reach the server.'; }
+    });
+    setTimeout(()=>{ const i=ov.querySelector('#loginPass'); if(i) i.focus(); },50);
+  };
+  fetch('/api/auth/status',{cache:'no-store'}).then(r=>r.json()).then(j=>{ window.AUTH_REQUIRED=!!j.required; if(j.required&&!j.ok) window.showLogin(); }).catch(()=>{});
+
+  // ---- market badge ----
+  function istNow(){ const d=new Date(Date.now()+19800000); return {dow:d.getUTCDay(), mins:d.getUTCHours()*60+d.getUTCMinutes(), str:d.toISOString().slice(11,19)}; }
+  window.marketState=function(){ const {dow,mins}=istNow(); if(dow===0||dow===6) return 'closed'; if(mins>=555&&mins<=930) return 'open'; if(mins>=540&&mins<555) return 'pre-open'; return 'closed'; };
+  function updateBadge(){
+    const el=document.getElementById('mktBadge'); if(!el) return;
+    const st=window.marketState(); const t=window.LAST_TICK; const age=t?Math.round((Date.now()-t)/1000):null;
+    let cls='mkt-badge', txt;
+    if(st==='open'){ if(age==null||age>120){ cls+=' stale'; txt=age==null?'MARKET OPEN · waiting for prices':`MARKET OPEN · prices STALE (${age>90?Math.round(age/60)+' min':age+'s'})`; } else { cls+=' open'; txt=`MARKET OPEN · updated ${age}s ago`; } }
+    else if(st==='pre-open') txt='PRE-OPEN · trading starts 9:15 IST';
+    else txt='MARKET CLOSED · showing last close'+(t?'':'');
+    el.className=cls; el.textContent=txt;
+  }
+  setInterval(updateBadge,5000); setTimeout(updateBadge,300);
+
+  // ---- status panel ----
+  function ago(ts){ if(!ts) return 'never'; const m=Math.round((Date.now()-new Date(ts))/60000); return m<1?'just now':m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':Math.round(m/1440)+' d ago'; }
+  async function openStatus(){
+    const ov=document.createElement('div'); ov.className='ov';
+    ov.innerHTML='<div class="ov-card"><h3>System status</h3><div id="stBody" class="metric-sub">Checking…</div><div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"><button class="btn" id="stTest">Send test Telegram message</button><button class="btn" id="stLogout" style="display:none;">Log out</button><button class="btn" id="stClose" style="margin-left:auto;">Close</button></div><div id="stMsg" class="metric-sub" style="margin-top:8px;"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov||e.target.id==='stClose') ov.remove(); });
+    if(window.AUTH_REQUIRED) ov.querySelector('#stLogout').style.display='';
+    ov.querySelector('#stLogout').onclick=async()=>{ await fetch('/api/logout',{method:'POST'}); location.reload(); };
+    ov.querySelector('#stTest').onclick=async()=>{
+      const m=ov.querySelector('#stMsg'); m.textContent='Sending…';
+      try{ const r=await fetch('/api/telegram-test',{method:'POST'}); const j=await r.json(); m.innerHTML=j.ok?'<span class="st-ok">Sent — check Telegram.</span>':`<span class="st-bad">Failed: ${esc(j.error)}</span>`; }catch(e){ m.innerHTML='<span class="st-bad">Could not reach server.</span>'; }
+    };
+    try{
+      const r=await fetch('/api/status',{cache:'no-store'}); const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      const row=(l,v,c)=>`<div class="st-row"><span>${l}</span><span class="${c||''}">${v}</span></div>`;
+      const feedAge=window.LAST_TICK?Math.round((Date.now()-window.LAST_TICK)/1000)+'s ago':'no tick yet';
+      ov.querySelector('#stBody').innerHTML=
+        row('Market',j.market.toUpperCase(),j.market==='open'?'st-ok':'')
+        +row('Upstox tokens',j.upstox.tokensConfigured+' configured',j.upstox.tokensConfigured?'st-ok':'st-bad')
+        +row('Upstox live check',j.upstox.liveCheck?'OK':'FAILED',j.upstox.liveCheck?'st-ok':'st-bad')
+        +(j.upstox.lastError?row('Last Upstox error',esc(String(j.upstox.lastError).slice(0,90))+' ('+ago(j.upstox.lastErrorAt)+')','st-warn'):'')
+        +row('Last price in this browser',feedAge,window.LAST_TICK&&Date.now()-window.LAST_TICK<120000?'st-ok':'st-warn')
+        +row('Telegram',j.telegram.configured?'configured':'NOT configured',j.telegram.configured?'st-ok':'st-bad')
+        +(j.telegram.lastError?row('Last Telegram error',esc(String(j.telegram.lastError).slice(0,90)),'st-warn'):'')
+        +row('Last Telegram message',ago(j.telegram.lastSent))
+        +row('Alert check last ran',ago(j.alerts.lastRun)+' (this server session)',j.alerts.lastRun?'':'st-warn')
+        +row('Saved data (Upstash)',j.storage,j.storage==='ok'?'st-ok':'st-warn')
+        +row('Passcode protection',j.auth.passcodeEnabled?'ON':'OFF',j.auth.passcodeEnabled?'st-ok':'st-warn')
+        +row('Alert-check secret',j.auth.alertSecretSet?'set':'NOT set',j.auth.alertSecretSet?'st-ok':'st-warn')
+        +row('Server up for',Math.round(j.uptimeSec/60)+' min');
+    }catch(e){ ov.querySelector('#stBody').innerHTML='<span class="st-bad">Could not load status: '+esc(e.message)+'</span>'; }
+  }
+  document.getElementById('statusBtn')?.addEventListener('click',openStatus);
+})();
 
 function showHome(){
   window.IN_HOME_VIEW = true;
@@ -2548,16 +2639,7 @@ async function renderFnoIndices(){
         <td>${fmt(pcr,2)}</td><td>${fmt(maxPain,0)}</td><td>${iv!=null?fmt(iv,1)+'%':'&ndash;'}</td>
         <td class="${oiChgPct>=0?'up':'down'}">${oiChgPct>=0?'+':''}${fmt(oiChgPct,1)}%</td>`;
     }catch(e){
-      const rnd=mulberry32(hashCode(sym+'fno'));
-      const chg=sig(rnd,-1.5,1.5);
-      const price=base*(1+chg/100);
-      const pcr=sig(rnd,0.6,1.3);
-      const maxPain=Math.round(price/100)*100;
-      const iv=sig(rnd,10,28);
-      const oiChg=sig(rnd,-8,8);
-      row.innerHTML = `<td><strong>${name}</strong> <span class="signal-chip sig-hold" style="font-size:9px;">SIMULATED</span></td><td>${fmt(price,2)}</td><td class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</td>
-        <td>${fmt(pcr,2)}</td><td>${fmt(maxPain,0)}</td><td>${fmt(iv,1)}%</td>
-        <td class="${oiChg>=0?'up':'down'}">${oiChg>=0?'+':''}${fmt(oiChg,1)}%</td>`;
+      row.innerHTML = `<td><strong>${name}</strong></td><td colspan="6" class="lbl" style="color:var(--amber)">Live option-chain data unavailable right now${e&&e.message?' ('+String(e.message).slice(0,60)+')':''} &mdash; press Refresh to retry.</td>`;
     }
   }));
 }
@@ -2653,7 +2735,7 @@ const PA_STRAT_FNS = {'5ema':strategy5Ema, 'support-resistance':strategySR, 'tre
 const PA_STRAT_LABELS = {'5ema':'5-EMA Breakout', 'support-resistance':'Support/Resistance', 'trend-pullback':'Trend Pullback'};
 
 function paBacktest(candles, stratKey){
-  const fn=PA_STRAT_FNS[stratKey];
+  const fn=PA_STRAT_FNS[stratKey], rt=btRoundTrip();
   let pos=null, wins=0, trades=0, equity=100, peak=100, maxDd=0, grossP=0, grossL=0;
   for(let i=10;i<candles.length;i++){
     const slice=candles.slice(0,i+1), c=candles[i];
@@ -2662,9 +2744,9 @@ function paBacktest(candles, stratKey){
       if(pos.side==='Buy'){ if(c.low<=pos.stop) exit=pos.stop; else if(c.high>=pos.target) exit=pos.target; }
       else { if(c.high>=pos.stop) exit=pos.stop; else if(c.low<=pos.target) exit=pos.target; }
       if(exit!=null){
-        const pnl=pos.side==='Buy'?exit-pos.entry:pos.entry-exit;
-        equity+=pnl; peak=Math.max(peak,equity); maxDd=Math.min(maxDd,equity-peak);
-        if(pnl>0){wins++;grossP+=pnl;}else{grossL+=Math.abs(pnl);}
+        const ret=(pos.side==='Buy'?exit-pos.entry:pos.entry-exit)/pos.entry-rt;   // % return on the trade, net of costs
+        equity*=(1+ret); peak=Math.max(peak,equity); maxDd=Math.min(maxDd,(equity-peak)/peak*100);
+        if(ret>0){wins++;grossP+=ret;}else{grossL+=Math.abs(ret);}
         trades++; pos=null;
       }
     }
@@ -2843,7 +2925,7 @@ function renderHeatmap(){
   // Section header: Sectors
   const sectorHeader = document.createElement('div');
   sectorHeader.style.cssText = 'grid-column:1/-1;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:2px;margin-top:8px;';
-  sectorHeader.textContent = 'SECTORS (simulated change)';
+  sectorHeader.textContent = Object.keys(window.SCREENER_LIVE||{}).length ? 'SECTORS (average change of covered stocks, live prices)' : 'SECTORS (SAMPLE until you press Scan now in the Screener)';
   grid.appendChild(sectorHeader);
 
   // Sector tiles from stock data
@@ -3025,34 +3107,34 @@ function populateCompareStockLists(){
   const sel3=document.getElementById('cmpStock3');
   if(sel3 && sel3.options.length<=1) sel3.innerHTML += STOCKS.map(s=>`<option value="${s[0]}">${s[0]} — ${s[1]}</option>`).join('');
 }
-document.getElementById('cmpRunBtn')?.addEventListener('click', ()=>{
+document.getElementById('cmpRunBtn')?.addEventListener('click', async ()=>{
   const symbols = [document.getElementById('cmpStock1').value, document.getElementById('cmpStock2').value, document.getElementById('cmpStock3').value].filter(Boolean);
   const uniqueSymbols = [...new Set(symbols)];
   if(uniqueSymbols.length<2){ alert('Pick at least 2 different stocks.'); return; }
-  const stocksData = uniqueSymbols.map(sym=>{ const r=STOCKS.find(s=>s[0]===sym); return generateStockData(r[0],r[1],r[2],r[3]); });
-
+  const btn=document.getElementById('cmpRunBtn'); btn.disabled=true; btn.textContent='Loading…';
+  try{
+    await fetchScanHistory(uniqueSymbols);
+    await Promise.all(uniqueSymbols.map(loadFund));
+  }catch(e){}
+  btn.disabled=false; btn.textContent='Compare';
+  const stocksData = uniqueSymbols.map(sym=>{ const r=STOCKS.find(s=>s[0]===sym); const d=generateStockData(r[0],r[1],r[2],r[3]); const h=window.REAL_HIST[sym]; if(h) applyRealHistory(d,h); return d; });
+  const D='&mdash;', R=d=>d.realHistory, F=(d,k,dec,suf)=>{ const f=window.FUND[d.symbol]; return (f&&!f.error&&f[k]!=null)?fmt(f[k],dec)+(suf||''):D; };
+  const pf=v=>v==null?D:`<span class="${v>=0?'up':'down'}">${v>=0?'+':''}${fmt(v,2)}%</span>`;
   const metrics = [
-    ['Price', d=>'₹'+fmt(d.price,2)],
-    ['Change', d=>(d.changePct>=0?'+':'')+d.changePct.toFixed(2)+'%'],
+    ['Price (daily close)', d=>R(d)?'₹'+fmt(d.price,2):D],
+    ['Last-day change', d=>R(d)?pf(d.changePct):D],
     ['Sector', d=>d.sector],
-    ['Market cap', d=>'₹'+fmt(d.marketCapT,2)+' T'],
-    ['P/E', d=>fmt(d.pe,1)],
-    ['P/B', d=>fmt(d.pb,2)],
-    ['ROE', d=>fmt(d.roe,1)+'%'],
-    ['Div yield', d=>fmt(d.divYield,2)+'%'],
-    ['Rev growth', d=>fmt(d.revGrowth,1)+'%'],
-    ['D/E ratio', d=>fmt(d.deRatio,2)],
-    ['RSI', d=>fmt(d.rsi,1)],
-    ['Signal', d=>d.signalLabel],
-    ['Analyst target', d=>'₹'+fmt(d.targetMean,2)+' ('+(d.upside>=0?'+':'')+d.upside.toFixed(1)+'%)'],
-    ['52W range', d=>'₹'+fmt(d.wk52Low,0)+' – ₹'+fmt(d.wk52High,0)]
+    ['P/E', d=>F(d,'pe',1)], ['P/B', d=>F(d,'pb',2)], ['ROE', d=>F(d,'roe',1,'%')], ['ROCE', d=>F(d,'roce',1,'%')], ['EV/EBITDA', d=>F(d,'evEbitda',1)],
+    ['1M return', d=>R(d)?pf(d.perf.m1):D], ['3M return', d=>R(d)?pf(d.perf.m3):D], ['1Y return', d=>R(d)?pf(d.perf.y1):D],
+    ['RSI (14)', d=>R(d)?fmt(d.rsi,1):D],
+    ['Signal (swing)', d=>R(d)?d.signalLabel:D],
+    ['52W range', d=>R(d)?'₹'+fmt(d.wk52Low,0)+' – ₹'+fmt(d.wk52High,0):D]
   ];
-
   document.getElementById('cmpTable').style.display='table';
   document.getElementById('cmpBody').innerHTML = `
     <tr><th>Metric</th>${stocksData.map(d=>`<th>${d.symbol}</th>`).join('')}</tr>
     ${metrics.map(([label,fn])=>`<tr><td class="lbl">${label}</td>${stocksData.map(d=>`<td>${fn(d)}</td>`).join('')}</tr>`).join('')}
-  `;
+    <tr><td class="lbl" colspan="${stocksData.length+1}" style="font-size:11px;">All values are live Upstox data (daily candles and key ratios); &mdash; means not available.</td></tr>`;
 });
 
 /* ============================================================
@@ -3260,6 +3342,11 @@ function strategyBollinger(closes){
 const STRATEGY_FN = {rsi:strategyRSI, macd:strategyMACD, emarsi:strategyEmaRsi, supertrend:strategySupertrend, macross:strategyMACross, bollinger:strategyBollinger};
 const STRATEGY_LABEL = {rsi:'RSI Mean Reversion', macd:'MACD Crossover', emarsi:'EMA + RSI Combined', supertrend:'Supertrend Following', macross:'MA Crossover (50/200)', bollinger:'Bollinger Breakout'};
 
+function btRoundTrip(){ // round-trip cost as a fraction (charges + slippage, both sides)
+  const g=id=>{ const e=document.getElementById(id); const v=e?parseFloat(e.value):NaN; return isNaN(v)?null:Math.max(0,v); };
+  const c=g('btCost'), sl=g('btSlip');
+  return 2*((c==null?0.12:c)+(sl==null?0.05:sl))/100;
+}
 // Converts a boolean in-position series into trade windows and summary stats.
 function statsFromBoolSeries(closes, posSeries){
   const trades=[]; let entryIdx=null;
@@ -3270,7 +3357,7 @@ function statsFromBoolSeries(closes, posSeries){
   if(entryIdx!==null) trades.push({enter:entryIdx, exit:closes.length-1});
   const equity=[100]; const tradeReturns=[]; let eq=100;
   trades.forEach(t=>{
-    const ret=(closes[t.exit]-closes[t.enter])/closes[t.enter];
+    const ret=(closes[t.exit]-closes[t.enter])/closes[t.enter]-btRoundTrip();
     tradeReturns.push(ret); eq=eq*(1+ret); equity.push(eq);
   });
   const wins=tradeReturns.filter(r=>r>0), losses=tradeReturns.filter(r=>r<=0);
@@ -3467,6 +3554,7 @@ function applyLiveQuote(d,q){
 }
 
 function refreshLiveDom(d){
+  window.LAST_TICK=Date.now();
   const lp=document.getElementById('livePrice'); if(lp) lp.textContent=fmt(d.price);
   const chg=document.getElementById('liveChg');
   if(chg){ chg.className='chg '+(d.changePct>=0?'up':'down'); chg.innerHTML=`${d.changePct>=0?'&#9650;':'&#9660;'} ${Math.abs(d.changePct).toFixed(2)}%`; }
@@ -4753,7 +4841,34 @@ const PatternEngine = (function(){
     patterns.sort((a,b)=>(a.brk!=null?1:0)-(b.brk!=null?1:0)||b.conf-a.conf);
     return {patterns,bars:C0.length,dev,atrPct};
   }
-  return {detect,LIB,zigzag,_quadFit:quadFit,_mirror:mirror};
+  // Walk-forward replay: detect on data up to bar e only, then see what price did next (target vs stop). No look-ahead.
+  function walk(candles,opts){
+    opts=opts||{}; const step=opts.step||4, H=opts.horizon||40, W=opts.win||250;
+    const C=(candles||[]).filter(x=>x&&x.h>0&&x.l>0&&x.c>0), n=C.length, seen=new Set(), out=[];
+    for(let e=Math.min(120,n-2); e<=n-2; e+=step){
+      const ws=Math.max(0,e-W+1), win=C.slice(ws,e+1);
+      let r; try{ r=detect(win); }catch(err){ continue; }
+      for(const p of r.patterns){
+        if(p.status!=='Confirmed'&&p.status!=='Weak break') continue;
+        if(p.barsSince==null||p.barsSince>3||p.entry==null||p.stop==null||p.target==null) continue;
+        if(p.bias!=='Bullish'&&p.bias!=='Bearish') continue;
+        const id=p.key+'@'+(ws+p.brk); if(seen.has(id)) continue; seen.add(id);
+        const dir=p.bias==='Bullish'?1:-1, risk=Math.abs(p.entry-p.stop), c0=win[win.length-1].c;
+        if(!(risk>0)) continue;
+        if(dir>0?(c0>=p.target||c0<=p.stop):(c0<=p.target||c0>=p.stop)) continue; // already played out when first seen
+        const rr=Math.abs(p.target-p.entry)/risk; let res=null, R=0;
+        for(let j=e+1;j<=Math.min(n-1,e+H);j++){
+          const b=C[j];
+          if(dir>0?b.l<=p.stop:b.h>=p.stop){ res='stop'; R=-1; break; }   // stop first if both touched the same day
+          if(dir>0?b.h>=p.target:b.l<=p.target){ res='target'; R=rr; break; }
+        }
+        if(!res){ if(e+H>n-1) continue; res='expired'; R=Math.max(-1,Math.min(rr,(C[e+H].c-p.entry)*dir/risk)); }
+        out.push({key:p.key,name:p.name,bias:p.bias,status:p.status,outcome:res,R,rr,t:win[win.length-1].t});
+      }
+    }
+    return out;
+  }
+  return {detect,walk,LIB,zigzag,_quadFit:quadFit,_mirror:mirror};
 })();
 
 
@@ -4779,7 +4894,7 @@ const PatternUI = (function(){
       const resp=await fetch('/api/candles/'+encodeURIComponent(S.sym)+'?tf='+encodeURIComponent(S.tf),{cache:'no-store'});
       const data=await resp.json();
       if(!resp.ok||!data.series||!data.series.length) throw new Error(data.error||'no candles returned');
-      S.src=data.source; S.candles=data.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
+      S.stale=data.stale?data.ageSec:null; S.src=data.source; S.candles=data.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
       if(S.tf==='1D') S.candles=S.candles.slice(-320);
       analyse();
     }catch(e){
@@ -4792,7 +4907,7 @@ const PatternUI = (function(){
   function analyse(){
     S.res=PatternEngine.detect(S.candles);
     const n=S.res.patterns.length;
-    $('patStatus').innerHTML=esc(S.sym)+' &middot; '+S.candles.length+' '+({'1D':'daily','1W':'weekly','1h':'hourly'}[S.tf]||S.tf)+' bars &middot; data: '+(S.src==='upstox'?'Upstox':S.src==='yahoo'?'Yahoo (fallback)':esc(S.src))+
+    $('patStatus').innerHTML=esc(S.sym)+' &middot; '+S.candles.length+' '+({'1D':'daily','1W':'weekly','1h':'hourly'}[S.tf]||S.tf)+' bars &middot; data: '+(S.stale!=null?"<span class=\"sim-tag\">STALE \u2013 last good Upstox data, "+Math.round(S.stale/60)+" min old</span> ":"")+(S.src==='upstox'?'Upstox':S.src==='yahoo'?'Yahoo (fallback)':esc(S.src))+
       ' &middot; '+(n?n+' pattern'+(n>1?'s':'')+' active':'no pattern currently qualifies');
     render();
     if(n) select(0);
@@ -4915,8 +5030,42 @@ const PatternUI = (function(){
     btn.disabled=false;
   }
 
+  /* ---------- historical hit rates ---------- */
+  function hitTable(list,meta){
+    const agg={}, add=(k,name,bias,o)=>{ const a=agg[k]||(agg[k]={name,bias,n:0,t:0,s:0,e:0,R:0}); a.n++; a[o.outcome==='target'?'t':o.outcome==='stop'?'s':'e']++; a.R+=o.R; };
+    list.forEach(o=>add(o.key,o.name,o.bias,o)); list.forEach(o=>add('_all','All patterns','',o));
+    const rows=Object.values(agg).sort((a,b)=>(a.name==='All patterns'?-1:0)-(b.name==='All patterns'?-1:0)||b.n-a.n);
+    const pc=(x,n)=>n?Math.round(x/n*100)+'%':'&mdash;';
+    const body=rows.map(a=>`<tr${a.name==='All patterns'?' style="font-weight:700;"':''}><td>${esc(a.name)}${a.bias?` <span class="${biasCls(a.bias)}" style="font-size:10px;">${a.bias}</span>`:''}</td><td>${a.n}${a.n<20?' <span class="sim-tag" title="Too few signals to trust">small sample</span>':''}</td><td class="up">${pc(a.t,a.n)}</td><td class="down">${pc(a.s,a.n)}</td><td>${pc(a.e,a.n)}</td><td class="${a.R>=0?'up':'down'}">${a.n?(a.R>=0?'+':'')+(a.R/a.n).toFixed(2)+'R':'&mdash;'}</td></tr>`).join('');
+    return `<table><thead><tr><th>Pattern</th><th>Signals</th><th>Hit target</th><th>Hit stop</th><th>Expired (40 bars)</th><th>Avg result</th></tr></thead><tbody>${body||'<tr><td colspan="6" class="lbl">No confirmed signals found in the tested history.</td></tr>'}</tbody></table>
+      <div class="metric-sub" style="margin-top:6px;">${esc(meta)} &middot; "R" = profit in units of the risk to the stop (+1R = gained as much as was risked). Hit % counts the stop first if both were touched in one day. Past results do not guarantee future results.</div>`;
+  }
+  async function hitRates(){
+    const btn=$('patHitBtn'), st=$('patHitStatus'), out=$('patHitOut'); btn.disabled=true; out.innerHTML='';
+    const N=+$('patHitN').value||30, syms=STOCKS.map(r=>r[0]).slice(0,N).concat(['NIFTY','BANKNIFTY']);
+    const all=[]; let ok=0, t0=Date.now();
+    for(let i=0;i<syms.length;i++){
+      st.textContent=`Testing ${syms[i]} (${i+1}/${syms.length})… ${all.length} signals so far`;
+      try{
+        const r=await fetch('/api/candles/'+encodeURIComponent(syms[i])+'?tf=1D',{cache:'no-store'}); const j=await r.json();
+        if(r.ok&&j.series&&j.series.length>200){
+          const C=j.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
+          await new Promise(res=>setTimeout(res,0));
+          PatternEngine.walk(C,{step:4,horizon:40}).forEach(o=>all.push(o)); ok++;
+        }
+      }catch(e){}
+      if(i%3===2){ out.innerHTML=hitTable(all,`Partial: ${ok} symbols so far`); }
+    }
+    const meta=`${ok} symbols, daily candles up to ~5 years, tested ${new Date().toLocaleDateString('en-IN')} (${Math.round((Date.now()-t0)/1000)}s)`;
+    st.textContent=''; out.innerHTML=ok?hitTable(all,meta):'<span class="down">Could not load candle history — try again shortly.</span>';
+    try{ if(ok) localStorage.setItem('patHit_v1',JSON.stringify({all,meta})); }catch(e){}
+    btn.disabled=false;
+  }
+
   /* ---------- wiring ---------- */
   function init(){
+    try{ const c=JSON.parse(localStorage.getItem('patHit_v1')||'null'); if(c&&c.all&&$('patHitOut')) $('patHitOut').innerHTML=hitTable(c.all,c.meta+' (saved from your last run)'); }catch(e){}
+    if($('patHitBtn')) $('patHitBtn').addEventListener('click',hitRates);
     if(!sectionReady()) return;
     $('patGo').addEventListener('click',()=>load());
     $('patSym').addEventListener('keydown',e=>{ if(e.key==='Enter') load(); });

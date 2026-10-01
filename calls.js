@@ -89,21 +89,24 @@ function evaluate(bars, mode, opts = {}) {
   if (best.score < MIN_SCORE) return null;
   // trend + supertrend are mandatory: never fight them
   if (!best.chk.st || !best.chk.ema) return null;
+  // never chase an exhausted move: a short at RSI<25 (or long at >78) is a bounce waiting to happen
+  if ((best.side === 'SELL' && R[n] < 25) || (best.side === 'BUY' && R[n] > 78)) return null;
 
   const side = best.side, sgn = side === 'BUY' ? 1 : -1, a = A[n];
-  const stopMult = mode === 'intraday' ? 1.5 : 1.8;
+  const stopMult = mode === 'intraday' ? 1.5 : 1.5;
   let stopDist = stopMult * a;
   // structure: stay beyond the recent swing low/high if that is further, capped
   const look = mode === 'intraday' ? 8 : 10;
   const swing = side === 'BUY' ? Math.min(...l.slice(n - look, n + 1)) : Math.max(...h.slice(n - look, n + 1));
   const structDist = Math.abs(px - swing) + 0.25 * a;
-  stopDist = Math.min(Math.max(stopDist, Math.min(structDist, 2.5 * a)), (mode === 'intraday' ? 0.025 : 0.07) * px);
+  stopDist = Math.min(Math.max(stopDist, Math.min(structDist, 2.2 * a)), (mode === 'intraday' ? 0.02 : 0.06) * px);
   stopDist = Math.max(stopDist, 0.004 * px);
   const entry = tick(px), sl = tick(entry - sgn * stopDist);
   const rr = mode === 'intraday' ? [1.2, 2, 3] : [1.5, 2.5, 4];
   const targets = rr.map(m => tick(entry + sgn * stopDist * m));
   const risk = stopDist / px * 100;
-  const riskLabel = risk < 1.5 ? 'LOW' : risk < 3.5 ? 'MEDIUM' : 'HIGH';
+  const lim = mode === 'intraday' ? [0.8, 1.6] : [2.5, 4.5]; // % stop distance bands
+  const riskLabel = risk < lim[0] ? 'LOW' : risk < lim[1] ? 'MEDIUM' : 'HIGH';
   const reasons = [];
   const f = x => r2(x);
   if (side === 'BUY') {

@@ -1648,17 +1648,21 @@ async function runCallsCycle(force) {
     callsState.found = found.length; callsState.found_buy = found.filter(f => f.side === 'BUY').length; callsState.found_sell = found.filter(f => f.side === 'SELL').length; callsState.breadth = breadth;
     // 3) log the best new ones (de-duplicated, capped per cycle)
     found.sort((a, b) => b.score - a.score);
-    const quota = { swing: 3, intraday: 4 };
+    // Global caps (not per scan): a one-sided market must not fill the board with
+    // correlated trades. Max open per mode, and max open per direction per mode.
+    const open_ = db.filter(c => !c.closed); const CAP = { swing: 8, intraday: 6 }, SIDE_CAP = { swing: 5, intraday: 4 };
+    const cnt = (m, side) => open_.filter(c => c.mode === m && (!side || c.side === side)).length;
+    const quota = { swing: Math.min(3, CAP.swing - cnt('swing')), intraday: Math.min(4, CAP.intraday - cnt('intraday')) };
     for (const f of found) {
-      if (quota[f.mode] <= 0) continue;
+      if (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode]) continue;
       const dupe = db.some(c => c.symbol === f.symbol && c.mode === f.mode && (!c.closed || nowSec - c.t < (f.mode === 'intraday' ? 86400 : 5 * 86400)));
       if (dupe) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) continue; // stale: price has already run away
       const d = ltp - f.entry; const rb = x => Math.round((x + d) * 20) / 20;
-      const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, analysis: f.analysis, t: nowSec };
+      const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, checks: f.checks, analysis: f.analysis, t: nowSec };
       Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false });
-      db.push(call); quota[f.mode]--;
+      db.push(call); open_.push(call); quota[f.mode]--;
       notes.push(`🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
     }
     if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX);

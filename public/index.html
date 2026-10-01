@@ -51,6 +51,13 @@
   .tc-ms{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin:6px 0;} .tc-ms span.hit{color:var(--green);font-weight:700;}
   .tc-an{font-size:12px;color:var(--text2);line-height:1.5;} .tc-disc{font-size:11px;color:var(--text2);margin-top:12px;border-top:1px dashed var(--border);padding-top:8px;}
   @media(max-width:560px){.tc-stats,.tc-grid{grid-template-columns:repeat(2,1fr);}}
+
+  .clk-ripple{position:fixed;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:rgba(61,139,253,.55);pointer-events:none;z-index:99999;animation:clkr .5s ease-out forwards;}
+  @keyframes clkr{to{transform:scale(5);opacity:0;}}
+  .clk-flash{outline:2px solid var(--blue) !important;outline-offset:2px;transition:outline-color .4s;}
+  .clk-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#16314f;color:#e8f0ff;border:1px solid var(--blue);padding:7px 14px;border-radius:20px;font-size:12px;z-index:99999;pointer-events:none;box-shadow:0 4px 18px rgba(0,0,0,.4);animation:clkt 1.4s ease forwards;}
+  @keyframes clkt{0%{opacity:0;transform:translate(-50%,8px);}10%,80%{opacity:1;transform:translate(-50%,0);}100%{opacity:0;}}
+  button:active,.btn:active,.tc-chip:active{transform:scale(.96);}
   .ov-card h3{margin:0 0 10px;} .ov-card input{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:6px;font-size:14px;margin:8px 0;}
   .st-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;} .st-row:last-child{border-bottom:0;}
   .st-ok{color:var(--green);font-weight:600;} .st-bad{color:var(--red,#f0616d);font-weight:600;} .st-warn{color:var(--amber);font-weight:600;}
@@ -2294,19 +2301,39 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
       <div class="metric-sub">${sc.running?'Scanning '+sc.universe+' liquid F&amp;O stocks…':'Last scan '+(sc.lastScan?Math.round((Date.now()-sc.lastScan)/60000)+' min ago':'not yet')+' · scanned '+sc.scanned+' · setups found '+sc.found}${sc.lastErr?' · <span class="st-bad">'+esc(sc.lastErr)+'</span>':''}${sc.persisted?'':' · <span style="color:var(--amber)">history is kept in memory only and resets when the server restarts (add Upstash to keep it)</span>'}</div>
       ${sc.breadth&&sc.breadth.n?`<div class="metric-sub" style="margin-top:6px;"><b>Market read (${sc.breadth.n} stocks):</b> ${Math.round(sc.breadth.above50/sc.breadth.n*100)}% trade above their 50-day average, ${Math.round(sc.breadth.stUp/sc.breadth.n*100)}% have Supertrend up &middot; setups found: ${sc.found_buy||0} buy, ${sc.found_sell||0} sell. When most stocks are in downtrends the screen will mostly produce sells &mdash; that is the market, not a bug.</div>`:''}
       ${list.length?list.map(card).join(''):'<div class="metric-sub" style="padding:24px 0;text-align:center;">'+(tab==='active'?'No active calls right now. Calls appear only when a stock passes the full checklist (trend, Supertrend, Stochastic, RSI, volume breakout).':'No closed calls yet.')+'</div>'}
+      <div class="metric-sub" style="margin-top:8px;">Server version: ${esc(data.build||'old version — redeploy not finished yet')}</div>
       <div class="tc-disc"><b>How calls are made:</b> a stock needs 5 of 6 checks (the &ldquo;5/6 checks&rdquo; tag shows how many passed; ticks show which) (price vs 5/20/50 EMA, Supertrend, Stochastic cross, RSI band, volume breakout) and Supertrend + EMA must agree. SL = ~1.5–1.8× ATR (or beyond the last swing), targets at 1.2/2/3× (intraday) or 1.5/2.5/4× (swing) the risk; the stop moves to entry after T1. If SL and a target fall in the same candle, the SL is assumed first. Intraday calls close at 3:30 pm; swing calls after 30 days. This is a rule-based screen with a measured track record &mdash; not investment advice. Every call, including losers, stays in Past.</div>`;
     body.querySelectorAll('.tc-chip').forEach(e=>e.onclick=()=>{ const g=e.dataset.g,v=e.dataset.v; if(g==='tab')tab=v; else if(g==='mode')fMode=v; else fSide=v; draw(); });
   }
   async function load(scan){ try{ const r=await fetch('/api/calls'+(scan?'?scan=1':''),{cache:'no-store'}); data=await r.json(); }catch(e){} draw(); }
   function open(){
     ov=document.createElement('div'); ov.className='ov'; ov.style.alignItems='flex-start';
-    ov.innerHTML='<div class="ov-card tc-wrap" style="max-width:820px;margin-top:20px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 style="margin:0">Trade Calls</h3><div><button class="btn" id="tcScan">Scan now</button> <button class="btn" id="tcClose">Close</button></div></div><div id="tcBody"></div></div>';
+    ov.innerHTML='<div class="ov-card tc-wrap" style="max-width:820px;margin-top:20px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 style="margin:0">Trade Calls</h3><div><button class="btn" id="tcScan">Scan now</button> <button class="btn" id="tcReset" title="Delete all logged calls and start fresh">Reset calls</button> <button class="btn" id="tcClose">Close</button></div></div><div id="tcBody"></div></div>';
     document.body.appendChild(ov);
     ov.addEventListener('click',e=>{ if(e.target===ov||e.target.id==='tcClose'){ ov.remove(); ov=null; clearInterval(timer); } });
+    ov.querySelector('#tcReset').onclick=async()=>{ if(!confirm('Delete ALL logged calls (active and past) and start fresh?')) return; try{ await fetch('/api/calls/reset',{method:'POST'}); }catch(e){} data=null; load(true); };
     ov.querySelector('#tcScan').onclick=()=>{ load(true); setTimeout(()=>load(false),8000); setTimeout(()=>load(false),25000); };
     draw(); load(false); timer=setInterval(()=>load(false),60000);
   }
   document.getElementById('callsBtn')?.addEventListener('click',open);
+})();
+
+// ---------------- click confirmation (ripple + highlight + toast on every click) ----------------
+(function(){
+  const SEL='button,a[href],.btn,[onclick],.tc-chip,.vtab,.chip,summary,label,select,input[type=checkbox],input[type=radio],[role=button],[role=tab],.search-results div,tr[data-sym],.heat-tile,.hm-tile';
+  let toastEl=null,toastT=null;
+  function toast(msg){ if(toastEl) toastEl.remove(); toastEl=document.createElement('div'); toastEl.className='clk-toast'; toastEl.textContent='✓ '+msg; document.body.appendChild(toastEl); clearTimeout(toastT); toastT=setTimeout(()=>{ if(toastEl){toastEl.remove();toastEl=null;} },1400); }
+  document.addEventListener('click',function(e){
+    try{
+      const el=e.target.closest&&e.target.closest(SEL); if(!el) return;
+      const r=document.createElement('div'); r.className='clk-ripple'; r.style.left=e.clientX+'px'; r.style.top=e.clientY+'px'; document.body.appendChild(r); setTimeout(()=>r.remove(),520);
+      el.classList.add('clk-flash'); setTimeout(()=>el.classList.remove('clk-flash'),350);
+      let label=(el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent||el.value||'').replace(/\s+/g,' ').trim();
+      if(!label) label=el.tagName.toLowerCase();
+      if(label.length>34) label=label.slice(0,32)+'…';
+      toast('Clicked: '+label);
+    }catch(x){}
+  },true);
 })();
 
 function showHome(){

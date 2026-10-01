@@ -1672,12 +1672,17 @@ async function runCallsCycle(force) {
   } catch (e) { callsState.lastErr = e.message; }
   finally { callsState.running = false; }
 }
+const BUILD = '2026-10-01-r4 (caps, calibrated risk, click feedback)';
+app.post('/api/calls/reset', async (req, res) => {
+  const db = await loadCalls(); db.length = 0; await saveCalls(); callsState.lastScan = 0;
+  res.json({ ok: true });
+});
 app.get('/api/calls', async (req, res) => {
   const db = await loadCalls();
   if (req.query.scan === '1') lowPriority.run(true, () => runCallsCycle(true));
   else lowPriority.run(true, () => runCallsCycle(false));
   const calls = db.slice().sort((a, b) => b.t - a.t);
-  res.json({ calls, stats: Calls.summarize(db), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: 90, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
+  res.json({ build: BUILD, calls, stats: Calls.summarize(db), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: 90, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

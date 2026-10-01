@@ -17,6 +17,18 @@ ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length
   const w = E.walk(C, { step: 8 }); ok(Array.isArray(w), 'walk-forward backtest runs (' + w.length + ' signals)');
 }
 
+{
+  const i = html.indexOf('const TradePlanner'), j = html.indexOf('const PlannerUI');
+  const TP = new Function('document', html.slice(i, j) + '\nreturn TradePlanner;')({ getElementById: () => null });
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+  ok(near(TP.touchProb(0.6745 * 0.02 * Math.sqrt(10), 0.02, 10), 0.5), 'trade planner: 50% touch probability maths');
+  ok(near(TP.touchProb(0.3186 * 0.02 * Math.sqrt(10), 0.02, 10), 0.75) && near(TP.touchProb(1.1503 * 0.02 * Math.sqrt(10), 0.02, 10), 0.25), 'trade planner: 25%/75% touch probabilities');
+  const D = []; let q = 100; for (let k = 0; k < 120; k++) { const o = q; q *= 1 + Math.sin(k / 5) * 0.01; D.push({ t: k, h: Math.max(o, q) * 1.005, l: Math.min(o, q) * 0.995, c: q }); }
+  const st = TP.dailyStats(D), Lg = TP.calc(q, 1, st, null), Sh = TP.calc(q, -1, st, null);
+  ok(Lg.stop < q && Lg.t1 > q && Lg.t2 > Lg.t1, 'trade planner: long levels ordered stop < price < T1 < T2');
+  ok(Sh.stop > q && Sh.t1 < q && Sh.t2 < Sh.t1, 'trade planner: short levels ordered T2 < T1 < price < stop');
+}
+
 // 2. server behaviour
 function start(env, port) { return spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), ...env }, stdio: 'ignore' }); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));

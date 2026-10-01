@@ -374,6 +374,17 @@
     <div id="patSummary" style="margin-bottom:6px;"></div>
     <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status</th><th>Confidence</th><th>Levels</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
     <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume and trend alignment &mdash; it is a ranking aid, not a probability of profit.</div>
+    <div id="patPlan" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+      <h4 style="margin:0 0 4px;">Trade planner <span class="metric-sub">stop, targets, timeline and expiry view for any price</span></h4>
+      <div class="metric-sub" style="margin-bottom:8px;">A pattern's entry is the breakout price from when it confirmed. Type the price you would actually trade at (or leave it empty for the live price) and press <b>Analyse price</b> to get a fresh stop-loss, targets, how long they may take, and whether the monthly futures &amp; options expiry gives enough time.</div>
+      <div class="pat-controls" style="grid-template-columns:1fr 1fr 1.6fr auto;">
+        <div><label>Price to analyse <a href="#" id="tpLive" style="font-size:10px;">use live price</a></label><input id="tpPx" type="number" step="0.05" min="0" placeholder="live price"></div>
+        <div><label>Direction</label><select id="tpDir"><option value="auto">Auto (from pattern / trend)</option><option value="long">Long / Buy</option><option value="short">Short / Sell</option></select></div>
+        <div><label>Based on</label><select id="tpPat"><option value="-1">Volatility only (no pattern)</option></select></div>
+        <button class="btn" id="tpGo" style="padding:9px;">Analyse price</button>
+      </div>
+      <div id="tpOut"></div>
+    </div>
     <h4 style="margin:16px 0 4px;">Scan across all stocks</h4>
     <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
     <div id="patScanOut" style="overflow-x:auto;"></div>
@@ -4961,10 +4972,14 @@ const PatternUI = (function(){
       else if(p.status==='Forming') volTxt+='<div class="metric-sub">Wait for a break on 1.2&times;+ volume</div>';
       if(p.dry!=null) volTxt+='<div class="metric-sub">Volume while forming: '+Math.round(p.dry*100)+'% of before'+(p.dry<=0.85?' (dry-up &#10003;)':p.dry>1.15?' (expanding &#9888;)':'')+'</div>';
       const dist=p.distPct!=null?'<div class="metric-sub">Price '+(p.distPct>=0?'+':'')+p.distPct.toFixed(1)+'% vs entry</div>':'';
+      let warn='';
+      if(p.status!=='Forming'&&p.status!=='Failed'&&p.entry!=null&&p.stop!=null&&S.candles.length){ const lastC=S.candles[S.candles.length-1].c; const toStop=(p.bias==='Bullish'?(p.entry-lastC):(lastC-p.entry))/Math.abs(p.entry-p.stop);
+        if(toStop>=0.6) warn='<div class="metric-sub" style="color:var(--amber)">&#9888; Price has moved '+Math.round(Math.min(toStop,1.5)*100)+'% of the way to the stop &mdash; this setup is failing. Use the Trade planner below for a fresh plan.</div>';
+        else if(p.barsSince!=null&&p.barsSince>=10) warn='<div class="metric-sub">Entry is the breakout level from '+p.barsSince+' bars ago. For a fresh entry at today\'s price use the Trade planner below.</div>'; }
       return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span>'+(p.scale==='minor'?' <span class="pat-type" title="Found at a finer swing scale, so treat it as lower-weight">minor swing</span>':'')+'<div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
         '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+volTxt+'</td>'+
         '<td><div class="pat-conf"><i style="width:'+p.conf+'%"></i></div>'+p.conf+'%</td>'+
-        '<td>'+lv+dist+'</td>'+
+        '<td>'+lv+dist+warn+'</td>'+
         '<td class="pat-logic" data-toggle="'+p.key+i+'"><span class="pat-logic-brief">'+lib.brief+'</span> <a class="pat-more">'+(op?'less ▴':'full logic ▾')+'</a></td></tr>'+
         (op?'<tr class="pat-xrow"><td colspan="6">'+fullHtml(p)+'</td></tr>':'');
     }).join('');
@@ -5106,6 +5121,210 @@ const PatternUI = (function(){
 })();
 window.PatternUI=PatternUI; window.PatternEngine=PatternEngine;
 PatternUI.init();
+
+/* ============================================================
+   TRADE PLANNER — levels, timeline and options-expiry view for any price
+   ============================================================ */
+const TradePlanner = (function(){
+  const $=id=>document.getElementById(id);
+  const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const f2=v=>v==null||isNaN(v)?'&mdash;':Number(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pct=(v,d)=>v==null||isNaN(v)?'&mdash;':(v>=0?'+':'')+v.toFixed(d==null?1:d)+'%';
+  // standard normal CDF (Abramowitz-Stegun)
+  function Phi(x){ const t=1/(1+0.2316419*Math.abs(x)), d=0.3989423*Math.exp(-x*x/2); let p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return x>0?1-p:p; }
+  // chance price touches a level a (log distance) at some point within T trading days, zero drift
+  const touchProb=(a,sig,T)=>(T<=0||sig<=0)?(a<=0?1:0):Math.min(1,2*(1-Phi(Math.abs(a)/(sig*Math.sqrt(T)))));
+  const closeBeyondProb=(a,sig,T)=>(T<=0||sig<=0)?(a<=0?1:0):1-Phi(a/(sig*Math.sqrt(T)));   // chance of finishing beyond the level at T
+  const daysFor=(a,sig,z)=>Math.pow(Math.abs(a)/(z*sig),2); // trading days for a given touch probability (z: .3186->75%, .6745->50%, 1.1503->25%)
+  const ZS={p75:0.3186,p50:0.6745,p25:1.1503};
+
+  function dailyStats(D){
+    const n=D.length, c=D.map(x=>x.c);
+    const lr=[]; for(let i=1;i<n;i++) lr.push(Math.log(c[i]/c[i-1]));
+    const sd=a=>{ const m=a.reduce((x,y)=>x+y,0)/a.length; return Math.sqrt(a.reduce((x,y)=>x+(y-m)*(y-m),0)/Math.max(1,a.length-1)); };
+    const sd60=sd(lr.slice(-60)), sd20=sd(lr.slice(-20));
+    let atr=0, k=Math.min(14,n-1); for(let i=n-k;i<n;i++){ atr+=Math.max(D[i].h-D[i].l,Math.abs(D[i].h-c[i-1]),Math.abs(D[i].l-c[i-1])); } atr/=k;
+    const sma=m=>c.length>=m?c.slice(-m).reduce((x,y)=>x+y,0)/m:null;
+    // swing highs/lows over the last ~120 bars
+    const hi=[],lo=[]; for(let i=Math.max(2,n-120);i<n-2;i++){ if(D[i].h>=Math.max(D[i-1].h,D[i-2].h,D[i+1].h,D[i+2].h)) hi.push(D[i].h); if(D[i].l<=Math.min(D[i-1].l,D[i-2].l,D[i+1].l,D[i+2].l)) lo.push(D[i].l); }
+    return {sd60,sd20,sigma:Math.max(sd60,0.0001),atr,last:c[n-1],sma20:sma(20),sma50:sma(50),sma200:sma(200),swingHighs:hi,swingLows:lo,low10:Math.min(...D.slice(-10).map(x=>x.l)),high10:Math.max(...D.slice(-10).map(x=>x.h))};
+  }
+
+  // levels for a trade at price px. s=+1 long / -1 short. pat = engine pattern or null.
+  function calc(px,s,st,pat){
+    const notes=[]; let patOk=!!pat&&pat.status!=='Forming'||!!pat;
+    const atr=st.atr, riskMin=1.2*atr, riskMax=3.5*atr;
+    let struct=null, patUsed=false;
+    if(pat&&pat.stop!=null){
+      const invalid=s>0?px<=pat.stop:px>=pat.stop;
+      if(invalid) notes.push('Price is already beyond the pattern\'s own stop ('+f2(pat.stop)+') &mdash; that pattern is invalidated, so volatility-based levels are used instead.');
+      else { struct=pat.stop; patUsed=true; }
+    }
+    if(struct==null) struct=s>0?st.low10*0.995:st.high10*1.005;
+    const byStruct=s>0?struct<=px-riskMin:struct>=px+riskMin;
+    let stop=s>0?Math.min(struct,px-riskMin):Math.max(struct,px+riskMin);
+    let risk=Math.abs(px-stop);
+    if(risk>riskMax){ notes.push('The natural stop is wide ('+(risk/px*100).toFixed(1)+'% away) &mdash; size the position smaller to keep the same rupee risk.'); }
+    // targets
+    const beyond=(lvl,min)=>s>0?lvl>=px+min:lvl<=px-min;
+    const cand=(s>0?st.swingHighs:st.swingLows).filter(l=>beyond(l,0.5*atr)).sort((a,b)=>s>0?a-b:b-a);
+    const tRes=cand.length?cand[0]:null, tR15=px+s*1.5*risk;
+    let t1=tRes!=null&&Math.abs(tRes-px)<=Math.abs(tR15-px)*1.4?tRes:tR15;
+    if(Math.abs(t1-px)<risk) t1=px+s*risk*1.2;
+    let tPat=null; if(pat&&pat.target!=null&&beyond(pat.target,risk)) tPat=pat.target; else if(pat&&pat.target!=null) notes.push('The pattern\'s measured target ('+f2(pat.target)+') is already reached or too close to give a worthwhile trade from this price.');
+    let t2=tPat!=null?tPat:px+s*3*risk;
+    if(s*(t2-t1)<=0.3*risk) t2=px+s*Math.max(3*risk,Math.abs(t1-px)+risk);
+    return {px,s,stop,risk,t1,t2,patUsed,byStruct,patTarget:tPat!=null,tRes,notes};
+  }
+
+  function tradingDaysUntil(dateStr){ // weekdays from now (IST) to expiry day inclusive; today counts by the fraction of session left
+    const nowI=new Date(Date.now()+19800000), end=new Date(dateStr+'T12:00:00Z');
+    const today=new Date(Date.UTC(nowI.getUTCFullYear(),nowI.getUTCMonth(),nowI.getUTCDate(),12));
+    if(end<today) return 0;
+    let d=0; for(let t=new Date(today.getTime()+86400000); t<=end; t=new Date(t.getTime()+86400000)){ const w=t.getUTCDay(); if(w!==0&&w!==6) d++; }
+    const mins=nowI.getUTCHours()*60+nowI.getUTCMinutes(), w0=today.getUTCDay();
+    if(w0!==0&&w0!==6){ d+= mins<555?1:mins>=930?0:(930-mins)/375; }
+    return Math.max(d,0.25);
+  }
+
+  function verdict(p){ return p>=0.55?['Reasonable chance','up']:p>=0.30?['Possible, not the base case','']:['Unlikely in this window','down']; }
+
+  return {calc,dailyStats,Phi,touchProb,closeBeyondProb,daysFor,ZS,tradingDaysUntil,verdict,f2,pct,esc,$};
+})();
+
+const PlannerUI = (function(){
+  const T=TradePlanner, $=T.$, esc=T.esc, f2=T.f2, pct=T.pct;
+  const dailyCache={};
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  async function getDaily(sym){
+    const h=window.REAL_HIST&&window.REAL_HIST[sym];
+    if(h&&h.c&&h.c.length>=60&&h.h&&h.l) return h.c.map((c,i)=>({t:h.t?h.t[i]:i,h:h.h[i],l:h.l[i],c}));
+    if(dailyCache[sym]&&Date.now()-dailyCache[sym].at<600000) return dailyCache[sym].d;
+    const r=await fetch('/api/candles/'+encodeURIComponent(sym)+'?tf=1D',{cache:'no-store'}); const j=await r.json();
+    if(!r.ok||!j.series||j.series.length<60) throw new Error(j.error||'not enough daily history');
+    const d=j.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,h:p.h||p.c,l:p.l||p.c,c:p.c})); dailyCache[sym]={d,at:Date.now()}; return d;
+  }
+  async function livePrice(sym){
+    try{ const q=await fetch('/api/quote/'+encodeURIComponent(isIndexSym(sym)?INDEX_YAHOO[sym]:sym),{cache:'no-store'}); const j=await q.json(); if(j&&j.price>0) return j.price; }catch(e){}
+    return null;
+  }
+  function refreshPatOptions(){
+    const S=PatternUI._S, sel=$('tpPat'); if(!sel) return;
+    const key=S.res?S.res.patterns.map(p=>p.key+p.i0+p.status).join('|')+'|'+S.sym+S.tf:'';
+    if(sel.dataset.key===key) return; sel.dataset.key=key;
+    const keep=sel.value;
+    sel.innerHTML='<option value="-1">Volatility only (no pattern)</option>'+(S.res?S.res.patterns.map((p,i)=>p.status==='Failed'?'':'<option value="'+i+'">'+esc(p.name+' ('+p.bias+', '+p.status+')')+'</option>').join(''):'');
+    if(keep&&[...sel.options].some(o=>o.value===keep)) sel.value=keep; else if(S.res&&S.res.patterns.length){ const i=S.res.patterns.findIndex(p=>p.status!=='Failed'); if(i>=0) sel.value=String(i); }
+  }
+
+  async function run(){
+    const out=$('tpOut'), S=PatternUI._S, sym=S.sym||(window.CURRENT&&window.CURRENT.symbol);
+    if(!sym){ out.innerHTML='<div class="metric-sub">Load a symbol in the pattern section first.</div>'; return; }
+    out.innerHTML='<div class="metric-sub">Working&hellip;</div>';
+    let D, st;
+    try{ D=await getDaily(sym); st=T.dailyStats(D); }catch(e){ out.innerHTML='<div class="metric-sub down">Could not load daily history for '+esc(sym)+': '+esc(e.message)+'</div>'; return; }
+    let px=parseFloat($('tpPx').value);
+    let pxNote='your price';
+    if(!(px>0)){ const lp=await livePrice(sym); if(lp){ px=lp; pxNote='live price'; } else { px=st.last; pxNote='last daily close'; } $('tpPx').value=px.toFixed(2); }
+    const pat=(+$('tpPat').value>=0&&S.res)?S.res.patterns[+$('tpPat').value]:null;
+    let dirSel=$('tpDir').value, s=dirSel==='long'?1:dirSel==='short'?-1:(pat?(pat.bias==='Bearish'?-1:1):(st.last>=(st.sma50||st.last)?1:-1));
+    if(dirSel==='auto'&&!pat) pxNote+=' &middot; direction from the 50-day trend';
+    const L=T.calc(px,s,st,pat), sg=st.sigma, side=s>0?'Long / Buy':'Short / Sell';
+    const warns=L.notes.slice();
+    if(pat&&pat.bias!==(s>0?'Bullish':'Bearish')) warns.push('You chose a direction opposite to the selected pattern ('+esc(pat.bias)+').');
+    if(st.sma50!=null&&((s>0&&px<st.sma50)||(s<0&&px>st.sma50))) warns.push('The daily trend is against this trade: price is '+(px<st.sma50?'below':'above')+' its 50-day average ('+f2(st.sma50)+').');
+    if(st.sma200!=null&&((s>0&&px<st.sma200)||(s<0&&px>st.sma200))) warns.push('Price is '+(px<st.sma200?'below':'above')+' the 200-day average ('+f2(st.sma200)+') &mdash; the long-term trend is against it.');
+    const cur=window.CURRENT; if(cur&&cur.symbol===sym&&cur.horizons&&cur.horizons.swing){ const sw=cur.horizons.swing; if((s>0&&/sell/i.test(sw.signal))||(s<0&&/buy/i.test(sw.signal))) warns.push('The composite swing signal is <b>'+esc(sw.signalLabel)+'</b> ('+sw.score+') &mdash; it disagrees with this direction.'); }
+    if(pat&&pat.status==='Forming') warns.push('The pattern is still forming &mdash; it has not broken out yet, so there is no confirmed entry.');
+    if(pat&&pat.status==='Weak break') warns.push('The breakout came on low volume, which raises the chance of a false break.');
+
+    const a1=Math.log(L.t1/px), a2=Math.log(L.t2/px), aS=Math.log(L.stop/px);
+    const rr=(t)=>Math.abs(t-px)/L.risk;
+    const row=(label,a,tgt)=>{
+      const t50=T.daysFor(a,sg,T.ZS.p50), t25=T.daysFor(a,sg,T.ZS.p25), t75=T.daysFor(a,sg,T.ZS.p75);
+      const fmtD=d=>d>260?'>1 year':d<1?'&lt;1 day':'~'+Math.round(d)+' d';
+      const pr=H=>Math.round(T.touchProb(a,sg,H)*100)+'%';
+      return `<tr><td><b>${label}</b><div class="metric-sub">${f2(tgt)} (${pct((tgt/px-1)*100)})</div></td><td>${fmtD(t75)} <span class="metric-sub">(75%)</span><br><b>${fmtD(t50)}</b> <span class="metric-sub">(50%)</span><br>${fmtD(t25)} <span class="metric-sub">(25%)</span></td><td>${pr(5)}</td><td>${pr(10)}</td><td>${pr(21)}</td><td>${pr(63)}</td></tr>`;
+    };
+    // horizon table
+    const intraT=px+s*0.5*st.atr, intraS=px-s*0.4*st.atr;
+    const H=[['Intraday (today)',1,intraT,intraS],['Swing (about 2 weeks)',10,L.t1,L.stop],['Positional (about 2 months)',42,L.t2,L.stop]].map(([lab,days,tg,sl])=>{
+      const p=T.touchProb(Math.log(tg/px),sg,days), v=T.verdict(p), r=Math.abs(tg-px)/Math.abs(px-sl);
+      return `<tr><td><b>${lab}</b></td><td>${f2(tg)} <span class="metric-sub">${pct((tg/px-1)*100)}</span></td><td>${f2(sl)} <span class="metric-sub">${pct((sl/px-1)*100)}</span></td><td>${r.toFixed(1)}</td><td>${Math.round(p*100)}%</td><td class="${v[1]}">${v[0]}</td></tr>`;
+    }).join('');
+    const med2=T.daysFor(a2,sg,T.ZS.p50), med1=T.daysFor(a1,sg,T.ZS.p50);
+    const cls=d=>d<=1?'intraday':d<=12?'swing (days to ~2 weeks)':d<=45?'positional (weeks to ~2 months)':'long-term (months)';
+    out.innerHTML=`
+      <div class="metric-sub" style="margin:4px 0 8px;">Analysing <b>${esc(sym)}</b> at <b>${f2(px)}</b> (${pxNote}) &middot; <b class="${s>0?'up':'down'}">${side}</b> &middot; ${pat?'based on <b>'+esc(pat.name)+'</b>':'volatility only'} &middot; typical daily move ${(sg*100).toFixed(2)}% (ATR ${f2(st.atr)})</div>
+      <div class="grid cols-4" style="margin-bottom:8px;">
+        <div class="card"><div class="card-title">Entry</div><div class="metric-val" style="font-size:17px;">${f2(px)}</div></div>
+        <div class="card"><div class="card-title">Stop-loss</div><div class="metric-val down" style="font-size:17px;">${f2(L.stop)}</div><div class="metric-sub">${pct((L.stop/px-1)*100)} &middot; ${L.patUsed&&L.byStruct?'pattern structure':'1.2&times;ATR / recent swing'}</div></div>
+        <div class="card"><div class="card-title">Target 1</div><div class="metric-val up" style="font-size:17px;">${f2(L.t1)}</div><div class="metric-sub">${pct((L.t1/px-1)*100)} &middot; R:R ${rr(L.t1).toFixed(1)}</div></div>
+        <div class="card"><div class="card-title">Target 2 ${L.patTarget?'(pattern)':'(3R)'}</div><div class="metric-val up" style="font-size:17px;">${f2(L.t2)}</div><div class="metric-sub">${pct((L.t2/px-1)*100)} &middot; R:R ${rr(L.t2).toFixed(1)}</div></div>
+      </div>
+      ${warns.length?'<div style="border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;line-height:1.5;">'+warns.map(w=>'&#9888; '+w).join('<br>')+'</div>':''}
+      <div class="metric-sub" style="margin:6px 0 4px;"><b>By trading style</b> &mdash; chance = probability price touches the target within the window, from the stock's recent volatility (no direction view)</div>
+      <div style="overflow-x:auto;"><table><thead><tr><th>Style</th><th>Target</th><th>Stop</th><th>R:R</th><th>Chance</th><th>Verdict</th></tr></thead><tbody>${H}</tbody></table></div>
+      <div class="metric-sub" style="margin:12px 0 4px;"><b>How long could it take?</b> Target 2 is a ${cls(med2)} trade; Target 1 is ${cls(med1)}.</div>
+      <div style="overflow-x:auto;"><table><thead><tr><th>Target</th><th>Trading days to reach<br><span class="metric-sub">(chance it is hit by then)</span></th><th>Within 1 week</th><th>2 weeks</th><th>1 month</th><th>3 months</th></tr></thead><tbody>${row('Target 1',a1,L.t1)}${row('Target 2',a2,L.t2)}</tbody></table></div>
+      <div id="tpFno" style="margin-top:12px;"><div class="metric-sub">Checking futures &amp; options&hellip;</div></div>
+      <div class="metric-sub" style="margin-top:10px;">Timelines and chances come from a volatility model (random-walk, no trend assumed), not a forecast &mdash; real moves cluster around news and can be faster or slower. Not investment advice.</div>`;
+    fno(sym,px,s,L,st);
+  }
+
+  async function fno(sym,px,s,L,st){
+    const box=$('tpFno');
+    try{
+      const r=await fetch('/api/options/expiries/'+encodeURIComponent(sym),{cache:'no-store'}); const j=await r.json();
+      if(!r.ok||!j.expiries||!j.expiries.length) throw new Error(j.error||'no expiries');
+      const todayI=new Date(Date.now()+19800000).toISOString().slice(0,10);
+      const exps=j.expiries.filter(e=>e>=todayI).slice(0,2);
+      if(!exps.length) throw new Error('no upcoming expiry');
+      const sg=st.sigma, lot=j.lotSize;
+      let html='<div class="metric-sub" style="margin-bottom:4px;"><b>Futures &amp; options (monthly expiry)</b>'+(lot?' &middot; lot size '+lot:'')+'</div>';
+      for(const ex of exps){
+        const T_=T.tradingDaysUntil(ex);
+        let straddle=null, chain=null;
+        try{ const cr=await fetch('/api/options/chain/'+encodeURIComponent(sym)+'?expiry='+ex,{cache:'no-store'}); const cj=await cr.json(); if(cr.ok&&cj.strikes&&cj.strikes.length) chain=cj.strikes; }catch(e){}
+        let atm=null; if(chain){ atm=chain.reduce((b,x)=>Math.abs(x.strike-px)<Math.abs(b.strike-px)?x:b,chain[0]); if(atm.ce.ltp>0&&atm.pe.ltp>0) straddle=atm.ce.ltp+atm.pe.ltp; }
+        const sgImp=straddle?(straddle/(0.798*px))/Math.sqrt(T_):null;   // daily implied vol from the ATM straddle
+        const sgUse=sgImp&&sgImp>0?sgImp:sg;
+        const mk=(lab,tg)=>{ const a=Math.log(tg/px), pt=T.touchProb(a,sgUse,T_), pc=s>0?T.closeBeyondProb(a,sgUse,T_):1-T.closeBeyondProb(a,sgUse,T_)*1; const pcl=s>0?T.closeBeyondProb(a,sgUse,T_):T.closeBeyondProb(-a,sgUse,T_); const v=T.verdict(pt);
+          return `<tr><td>${lab} ${f2(tg)}</td><td>${pct((tg/px-1)*100)}</td><td>${Math.round(pt*100)}%</td><td>${Math.round(pcl*100)}%</td><td class="${v[1]}">${v[0]}</td></tr>`; };
+        html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0;">
+          <div style="font-size:12.5px;margin-bottom:6px;"><b>Expiry ${esc(ex)}</b> &middot; about ${T_.toFixed(1)} trading days left &middot; typical move to expiry &plusmn;${(sgUse*Math.sqrt(T_)*100).toFixed(1)}%${straddle?` (market-implied; ATM straddle ${f2(straddle)})`:' (from recent volatility)'}</div>
+          <div style="overflow-x:auto;"><table><thead><tr><th>Target</th><th>Move needed</th><th>Touches it by expiry</th><th>Ends beyond it at expiry</th><th>Verdict</th></tr></thead><tbody>${mk('Target 1',L.t1)}${mk('Target 2',L.t2)}</tbody></table></div>`;
+        if(chain){
+          const sorted=chain.slice().sort((a,b)=>a.strike-b.strike), ai=sorted.findIndex(x=>x.strike===atm.strike);
+          const picks=[0,1,2].map(k=>sorted[ai+(s>0?k:-k)]).filter(Boolean);
+          const rows=picks.map(x=>{ const o=s>0?x.ce:x.pe, prem=o.ltp; if(!(prem>0)) return '';
+            const be=s>0?x.strike+prem:x.strike-prem, payoff=tg=>Math.max(0,s>0?tg-x.strike:x.strike-tg)-prem;
+            const pBE=s>0?T.closeBeyondProb(Math.log(be/px),sgUse,T_):T.closeBeyondProb(-Math.log(be/px),sgUse,T_);
+            const ok=(s>0?L.t2>be:L.t2<be);
+            return `<tr><td>${x.strike} ${s>0?'CE':'PE'}${x.strike===atm.strike?' <span class="metric-sub">ATM</span>':''}</td><td>${f2(prem)}${lot?' <span class="metric-sub">('+f2(prem*lot)+'/lot)</span>':''}</td><td>${f2(be)}</td><td>${Math.round(pBE*100)}%</td><td class="${payoff(L.t1)>=0?'up':'down'}">${pct(payoff(L.t1)/prem*100,0)}</td><td class="${payoff(L.t2)>=0?'up':'down'}">${pct(payoff(L.t2)/prem*100,0)}</td></tr>`; }).join('');
+          html+=`<div class="metric-sub" style="margin:8px 0 4px;">Option buying ideas for this ${s>0?'bullish':'bearish'} view (prices are last traded, may be stale for illiquid strikes)</div>
+            <div style="overflow-x:auto;"><table><thead><tr><th>Strike</th><th>Premium</th><th>Break-even</th><th>Chance of profit at expiry</th><th>Return if Target 1 hit at expiry</th><th>Return if Target 2 hit at expiry</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="lbl">No priced strikes found.</td></tr>'}</tbody></table></div>
+            <div class="metric-sub" style="margin-top:4px;">Returns assume the target is reached on expiry day; reaching it earlier leaves time value, reaching it late loses to time decay. Max loss when buying = the premium.</div>`;
+        } else html+='<div class="metric-sub" style="margin-top:6px;">Option chain unavailable right now &mdash; chances above use recent volatility.</div>';
+        html+='</div>';
+      }
+      box.innerHTML=html;
+    }catch(e){
+      box.innerHTML='<div class="metric-sub">No monthly futures &amp; options found for '+esc(sym)+' ('+esc(String(e.message||'').slice(0,60))+'). Index/stock F&amp;O data comes from Upstox.</div>';
+    }
+  }
+
+  function init(){
+    if(!$('tpGo')) return;
+    $('tpGo').addEventListener('click',run);
+    $('tpPx').addEventListener('keydown',e=>{ if(e.key==='Enter') run(); });
+    $('tpLive').addEventListener('click',e=>{ e.preventDefault(); $('tpPx').value=''; run(); });
+    setInterval(refreshPatOptions,1000);
+  }
+  return {init,run,_T:T};
+})();
+PlannerUI.init();
+window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
 </script>
 </body>
 </html>

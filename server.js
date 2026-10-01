@@ -1536,7 +1536,8 @@ app.get('/api/options/expiries/:symbol', async (req, res) => {
     const instrumentKey = await resolveInstrumentKey(req.params.symbol);
     const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(instrumentKey)}`);
     const expiries = [...new Set(contracts.map(c => c.expiry))].sort();
-    res.json({ symbol: req.params.symbol, expiries });
+    const lot = (contracts.find(c => c.lot_size) || {}).lot_size || null;
+    res.json({ symbol: req.params.symbol, expiries, lotSize: lot });
   } catch (e) {
     res.status(502).json({ error: e.message, symbol: req.params.symbol });
   }

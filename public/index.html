@@ -736,7 +736,7 @@
    STOCK UNIVERSE
    Add more rows here to extend coverage. exch = listing venues.
    ============================================================ */
-const STOCKS = [
+const STOCKS_RAW = [
 ["RELIANCE","Reliance Industries Ltd","Energy",1303.50],
 ["TCS","Tata Consultancy Services","IT",3850],
 ["INFY","Infosys Ltd","IT",1620],
@@ -1042,6 +1042,7 @@ const STOCKS = [
 ["DIVI","Divi's Laboratories","Pharma",5250.00],
 ["IDFCFIRSTB","IDFC First Bank","Banking",68.40]
 ];
+const STOCKS = (()=>{const seen=new Set();return STOCKS_RAW.filter(r=>!seen.has(r[0])&&seen.add(r[0]));})();
 
 const SEGMENTS_BY_SECTOR = {
   "Energy": ["Refining","Marketing","Petrochemicals","New energy"],
@@ -1570,7 +1571,7 @@ function overviewCards(d){
     ["ROE", have?fvl(f.roe,1,'%'):ld, have&&f.roa!=null?`ROA ${fmt(f.roa,1)}%`:'', have&&f.roe!=null],
     ["ROCE", have?fvl(f.roce,1,'%'):ld, have&&f.roceSector!=null?`Sector ${fmt(f.roceSector,1)}%`:'', have&&f.roce!=null],
     ["EV/EBITDA", have?fvl(f.evEbitda,1):ld, have&&f.evEbitdaSector!=null?`Sector ${fmt(f.evEbitdaSector,1)}`:'', have&&f.evEbitda!=null],
-    ["Volume (latest day)", volLive?`${fmt(d.volumeCr,2)} Cr`:(d.realHistory?'&mdash;':W), volLive&&d.avgVolumeCr!=null?`20d avg ${fmt(d.avgVolumeCr,2)} Cr`:'', volLive]];
+    ["Volume (latest day)", volLive?fmtVol(d.volShares!=null?d.volShares:d.volumeCr*1e7):(d.realHistory?'&mdash;':W), volLive&&d.avgVolumeCr!=null?`20d avg ${fmtVol(d.avgVolumeCr*1e7)}`:'', volLive]];
 }
 function renderOverview(d){
   const grid=document.getElementById('overviewGrid'); if(!grid) return;
@@ -1898,7 +1899,7 @@ function applyRealHistory(d, hist, livePrice){
     let ytd=null; if(hist.t&&hist.t.length===n){ const yr=new Date(Date.now()+19800000).getUTCFullYear(); const i0=hist.t.findIndex(t=>new Date(t*1000).getUTCFullYear()===yr); if(i0>0) ytd=(closes[n-1]/closes[i0-1]-1)*100; }
     d.perf={w1:pc(5),m1:pc(21),m3:pc(63),m6:pc(126),y1:n>=240?(closes[n-1]/closes[0]-1)*100:null,ytd};
     d.dayHigh=hist.h[n-1]; d.dayLow=hist.l[n-1];
-    if(hist.v&&hist.v.length===n&&hist.v[n-1]>0){ d.volumeCr=hist.v[n-1]/1e7; const pv=hist.v.slice(-21,-1).filter(x=>x>0); d.avgVolumeCr=pv.length?pv.reduce((a,b)=>a+b,0)/pv.length/1e7:null; d.volReal=true; } }
+    if(hist.v&&hist.v.length===n&&hist.v[n-1]>0){ d.volShares=hist.v[n-1]; d.volumeCr=hist.v[n-1]/1e7; const pv=hist.v.slice(-21,-1).filter(x=>x>0); d.avgVolumeCr=pv.length?pv.reduce((a,b)=>a+b,0)/pv.length/1e7:null; d.volReal=true; } }
   const st=computeSupertrend(closes,0.15); d.trendLine=st.trendLine;
   d.horizons=buildHorizons(d);
   const sw=d.horizons.swing;
@@ -1918,11 +1919,13 @@ async function fetchScanHistory(symbols){ // symbols = app symbols (RELIANCE, NI
   }
 }
 
+function fmtVol(n){ if(n==null||isNaN(n)) return '\u2014'; if(n>=1e7) return (n/1e7).toFixed(2)+' Cr sh'; if(n>=1e5) return (n/1e5).toFixed(2)+' L sh'; return Math.round(n/1e3)+' K sh'; }
 window.SCREENER_LIVE = window.SCREENER_LIVE || {}; // symbol -> {price, prevClose}
 function signalCounts(){
   return STOCKS.concat(INDEX_ROWS_LIST).map(s=>{
     const d = generateStockData(s[0],s[1],s[2],s[3]);
-    const live = window.SCREENER_LIVE[s[0]];
+    let live = window.SCREENER_LIVE[s[0]];
+    if(window.CURRENT && window.CURRENT.symbol===s[0] && window.CURRENT.price && live) live={...live,price:window.CURRENT.price};
     const hist = window.REAL_HIST[s[0]];
     if(hist){
       applyRealHistory(d, hist, live && live.price);
@@ -1941,18 +1944,28 @@ async function scanScreenerLive(){
   const btn=document.getElementById('screenerScanBtn');
   if(btn) btn.textContent='Scanning\u2026';
   try{ await fetchScanHistory(STOCKS.concat(INDEX_ROWS_LIST).map(s=>s[0])); }catch(e){}
+  let src='';
   try{
-    const symbols = STOCKS.concat(INDEX_ROWS_LIST).map(s=>yahooSymbol(s[0])).join(',');
-    const resp = await fetch('/api/quotes?symbols='+encodeURIComponent(symbols), {cache:'no-store'});
-    const data = await resp.json();
-    data.forEach(q=>{
-      if(q && !q.error && q.price!=null){
-        const rawSym = q.symbol||'';
-        const baseSym = rawSym.startsWith('^') ? (Object.keys(INDEX_YAHOO).find(k=>INDEX_YAHOO[k]===rawSym)||rawSym) : rawSym.replace('.NS','');
-        window.SCREENER_LIVE[baseSym] = {price:q.price, prevClose:q.prevClose};
-      }
-    });
-  }catch(e){ /* proxy not reachable — screener just keeps showing mock/simulated data */ }
+    const all=STOCKS.concat(INDEX_ROWS_LIST).map(s=>s[0]);
+    const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(all.join(',')),{cache:'no-store'});
+    if(r.ok){ const m=await r.json(); Object.keys(m).forEach(k=>{ window.SCREENER_LIVE[k]={price:m[k].price,prevClose:m[k].prevClose,volume:m[k].volume}; }); if(Object.keys(m).length) src='Upstox'; }
+  }catch(e){}
+  if(!src){
+    try{
+      const symbols = STOCKS.concat(INDEX_ROWS_LIST).map(s=>yahooSymbol(s[0])).join(',');
+      const resp = await fetch('/api/quotes?symbols='+encodeURIComponent(symbols), {cache:'no-store'});
+      const data = await resp.json();
+      data.forEach(q=>{
+        if(q && !q.error && q.price!=null){
+          const rawSym = q.symbol||'';
+          const baseSym = rawSym.startsWith('^') ? (Object.keys(INDEX_YAHOO).find(k=>INDEX_YAHOO[k]===rawSym)||rawSym) : rawSym.replace('.NS','');
+          window.SCREENER_LIVE[baseSym] = {price:q.price, prevClose:q.prevClose};
+        }
+      });
+      src='Yahoo (delayed)';
+    }catch(e){}
+  }
+  window.SCREENER_SRC = src ? {src, t:Date.now()} : null;
   if(btn) btn.innerHTML='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan now';
   renderScreener();
 }
@@ -2037,14 +2050,15 @@ function renderScreener(){
     return true;
   });
   rows.sort((a,b)=>b.horizons[displayHorizon].score-a.horizons[displayHorizon].score);
-  document.getElementById('screenerCount').innerHTML=`${rows.length} of ${all.length} &mdash; ${window.__screenerRealNote}`;
+  const ss=window.SCREENER_SRC; const priceNote=ss?` &middot; prices: <b>${ss.src}</b> as of ${new Date(ss.t).toLocaleTimeString('en-IN')}`:' &middot; <span style="color:var(--amber)">prices not live yet &mdash; press Scan now</span>';
+  document.getElementById('screenerCount').innerHTML=`${rows.length} of ${all.length} &mdash; ${window.__screenerRealNote}${priceNote}`;
   const body=document.getElementById('screenerBody');
   body.innerHTML = rows.map(d=>{
     const h = d.horizons[displayHorizon];
     return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong>${window.FNO_SET&&window.FNO_SET.has(d.symbol)?'<span class="fno-badge" data-fno="'+d.symbol+'" title="Options &amp; futures available — click to open the options scan">F&amp;O</span>':''}</td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
       <td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
       <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
-      <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmt(d.volumeCr,2)+' Cr'}</td></tr>`;
+      <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmtVol(d.volShares!=null?d.volShares:d.volumeCr*1e7)}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>selectStock(tr.dataset.symbol)));
   body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
@@ -2132,7 +2146,7 @@ function runTab(t,d,refresh){
     overview:()=>{ safe(()=>renderOverview(d)); safe(()=>renderSignal(d)); if(!refresh) safe(()=>renderNews(d)); },
     chart:()=>{ if(!refresh){ safe(()=>renderPriceChart(d)); safe(()=>populatePaStockList()); } },
     fundamentals:()=>{ safe(()=>renderFourPanel(d)); if(!refresh){ safe(()=>renderSegments(d)); safe(()=>renderMacro(d)); safe(()=>renderPeers(d)); safe(()=>renderVolumeProfile(d)); } },
-    screener:()=>{ safe(()=>renderScreener()); if(!refresh){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
+    screener:()=>{ safe(()=>renderScreener()); if(!window.SCREENER_SRC && !window.__scanning){ window.__scanning=true; scanScreenerLive().finally(()=>{window.__scanning=false;}); } if(!refresh){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
     derivatives:()=>{ safe(()=>renderFno(d)); safe(()=>renderFnoIndices()); },
     portfolio:()=>{ safe(()=>renderBacktest(d)); safe(()=>renderPositions()); safe(()=>populateBacktestStockList()); safe(()=>populateAlertStockList()); safe(()=>renderPriceAlerts()); safe(()=>renderPortfolio()); safe(()=>renderWatchlist()); }
   };
@@ -3547,7 +3561,7 @@ function applyLiveQuote(d,q){
   if(q.prevClose!=null){ d.prevClose=q.prevClose; d.changePct=(d.price/d.prevClose-1)*100; }
   if(q.dayHigh!=null) d.dayHigh=q.dayHigh;
   if(q.dayLow!=null) d.dayLow=q.dayLow;
-  if(q.volume!=null) d.volumeCr=q.volume/1e7;
+  if(q.volume!=null){ d.volumeCr=q.volume/1e7; d.volShares=q.volume; }
   if(q.series && q.series.length>=5){
     const closes=q.series.map(p=>p.c).slice(-40);
     d.prices=closes;

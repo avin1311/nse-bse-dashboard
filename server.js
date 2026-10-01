@@ -344,6 +344,35 @@ async function getUpstoxLTPC(instrumentKey) {
   return result;
 }
 
+
+// Batch live quotes straight from Upstox (same source as the stock header).
+// GET /api/quotes-live?symbols=DIXON,TCS,NIFTY  -> { SYM: {price, prevClose, changePct, volume, ts} }
+app.get('/api/quotes-live', async (req, res) => {
+  const syms = [...new Set((req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean))].slice(0, 400);
+  if (!syms.length) return res.status(400).json({ error: 'symbols required' });
+  if (!upstoxTokens().length) return res.status(503).json({ error: 'Upstox not configured' });
+  const keyOf = {};
+  await Promise.all(syms.map(async s => { try { keyOf[s] = await dataKeyFor(s); } catch (e) {} }));
+  const keys = [...new Set(Object.values(keyOf))];
+  const byKey = {};
+  for (let i = 0; i < keys.length; i += 50) {
+    const chunk = keys.slice(i, i + 50);
+    try {
+      const q = await upstoxGet(`/market-quote/quotes?instrument_key=${encodeURIComponent(chunk.join(','))}`);
+      Object.entries(q || {}).forEach(([k, e]) => { if (e) { if (e.instrument_token) byKey[e.instrument_token] = e; byKey[k] = e; } });
+    } catch (e) { /* chunk skipped; those symbols just stay absent */ }
+  }
+  const out = {}; const ts = Date.now();
+  syms.forEach(s => {
+    const k = keyOf[s]; if (!k) return;
+    const e = byKey[k] || byKey[k.replace('|', ':')]; if (!e || e.last_price == null) return;
+    const price = e.last_price;
+    const prevClose = (e.net_change != null) ? price - e.net_change : (e.ohlc && e.ohlc.close) || null;
+    out[s] = { price, prevClose, changePct: prevClose ? (price / prevClose - 1) * 100 : 0, volume: e.volume, ts };
+  });
+  res.json(out);
+});
+
 // Live quote endpoint — used by the price ticker and Home page index cards.
 // Symbol can be an equity symbol (RELIANCE, TCS etc.) or a Yahoo Finance
 // index symbol (^NSEI, ^BSESN etc. — those always fall through to Yahoo

@@ -1618,7 +1618,7 @@ async function runCallsCycle(force) {
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK.slice(0, 90);
-    const found = []; callsState.scanned = 0; let i = 0;
+    const found = []; callsState.scanned = 0; let i = 0; const breadth = { n: 0, above50: 0, stUp: 0 };
     const nowSec = Math.floor(Date.now() / 1000);
     async function worker() {
       while (i < universe.length) {
@@ -1628,6 +1628,7 @@ async function runCallsCycle(force) {
           const h = await getScanHistory(sym);
           let bars = h.c.map((_, k) => ({ t: h.t[k], h: h.h[k], l: h.l[k], c: h.c[k], v: h.v[k] }));
           if (open && mins < 915) bars = bars.slice(0, -1);
+          const rg = Calls.regime(bars); if (rg) { breadth.n++; if (rg.above50) breadth.above50++; if (rg.stUp) breadth.stUp++; }
           const sw = Calls.evaluate(bars, 'swing', { minScore: 5 });
           if (sw) found.push({ symbol: sym, ...sw });
           // intraday: 15m completed bars, new entries only 9:45–14:30 IST
@@ -1644,7 +1645,7 @@ async function runCallsCycle(force) {
     }
     function istDayEnd0(t) { return Math.floor((t + 19800) / 86400); }
     await Promise.all(Array.from({ length: 3 }, worker));
-    callsState.found = found.length;
+    callsState.found = found.length; callsState.found_buy = found.filter(f => f.side === 'BUY').length; callsState.found_sell = found.filter(f => f.side === 'SELL').length; callsState.breadth = breadth;
     // 3) log the best new ones (de-duplicated, capped per cycle)
     found.sort((a, b) => b.score - a.score);
     const quota = { swing: 3, intraday: 4 };

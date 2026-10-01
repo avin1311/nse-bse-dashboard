@@ -173,4 +173,13 @@ function summarize(calls) {
   };
 }
 
-module.exports = { ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+// Simple market-regime read of one stock: above its 50 EMA? Supertrend up?
+function regime(bars) {
+  if (!bars || bars.length < 60) return null;
+  const c = bars.map(b => b.c), h = bars.map(b => b.h), l = bars.map(b => b.l), n = c.length - 1;
+  const e50 = ema(c, 50), st = supertrend(h, l, c);
+  if (st.dir[n] == null) return null;
+  return { above50: c[n] > e50[n], stUp: st.dir[n] === 1 };
+}
+
+module.exports = { regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

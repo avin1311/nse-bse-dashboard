@@ -42,6 +42,15 @@
   .mkt-badge.open{background:rgba(38,194,129,.12);color:var(--green);} .mkt-badge.stale{background:rgba(240,169,58,.14);color:var(--amber);}
   .ov{position:fixed;inset:0;background:rgba(5,8,14,.72);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;}
   .ov-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:90vh;overflow:auto;}
+
+  .tc-wrap{max-width:820px;} .tc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0;} .tc-stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;} .tc-stat b{display:block;font-size:17px;} .tc-stat span{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;}
+  .tc-bar{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center;} .tc-chip{padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text2);font-size:12px;cursor:pointer;} .tc-chip.on{background:rgba(61,139,253,.16);color:var(--blue);border-color:var(--blue);}
+  .tc-card{border:1px solid var(--border);border-left:4px solid var(--amber);border-radius:10px;padding:12px;margin:10px 0;background:var(--panel);} .tc-card.win{border-left-color:var(--green);} .tc-card.loss{border-left-color:var(--red);}
+  .tc-h{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;} .tc-sym{font-size:17px;font-weight:700;} .tc-tags span{font-size:11px;padding:2px 8px;border-radius:10px;margin-right:4px;background:var(--panel2);border:1px solid var(--border);color:var(--text2);} .tc-tags .buy{color:var(--green);} .tc-tags .sell{color:var(--red);}
+  .tc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0;} .tc-grid div{background:var(--panel2);border-radius:6px;padding:6px 8px;font-size:11px;color:var(--text2);} .tc-grid b{display:block;font-size:14px;color:var(--text);}
+  .tc-ms{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin:6px 0;} .tc-ms span.hit{color:var(--green);font-weight:700;}
+  .tc-an{font-size:12px;color:var(--text2);line-height:1.5;} .tc-disc{font-size:11px;color:var(--text2);margin-top:12px;border-top:1px dashed var(--border);padding-top:8px;}
+  @media(max-width:560px){.tc-stats,.tc-grid{grid-template-columns:repeat(2,1fr);}}
   .ov-card h3{margin:0 0 10px;} .ov-card input{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:6px;font-size:14px;margin:8px 0;}
   .st-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;} .st-row:last-child{border-bottom:0;}
   .st-ok{color:var(--green);font-weight:600;} .st-bad{color:var(--red,#f0616d);font-weight:600;} .st-warn{color:var(--amber);font-weight:600;}
@@ -322,6 +331,7 @@
       <span id="upstoxConnectLabel">Connect Upstox</span>
     </a>
     <span class="mkt-badge" id="mktBadge" title="Market hours: Mon–Fri 9:15–15:30 IST (exchange holidays are not tracked)">&hellip;</span>
+    <button class="btn" id="callsBtn" title="Rule-based trade calls with entry, stop loss and targets">Trade Calls</button>
     <button class="btn" id="statusBtn" title="Connection health, Telegram test">Status</button>
     <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
   </div>
@@ -2251,6 +2261,50 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     }catch(e){ ov.querySelector('#stBody').innerHTML='<span class="st-bad">Could not load status: '+esc(e.message)+'</span>'; }
   }
   document.getElementById('statusBtn')?.addEventListener('click',openStatus);
+})();
+
+// ---------------- Trade Calls panel ----------------
+(function(){
+  const esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const inr=n=>n==null?'—':'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const when=t=>new Date(t*1000).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
+  const LABEL={SL_HIT:'SL HIT',TARGET_HIT:'ALL TARGETS HIT',PROFIT:'PROFIT BOOKED',BREAKEVEN:'BREAKEVEN',EXPIRED:'CLOSED (TIME)',ACTIVE:'ACTIVE'};
+  let data=null, tab='active', fMode='all', fSide='all', timer=null, ov=null;
+  function card(c){
+    const buy=c.side==='BUY', cls=c.closed?(c.pnlPct>0.05?'win':c.pnlPct<-0.05?'loss':''):'';
+    const pts=[['SL',c.sl],['Entry',c.entry],...c.targets.map((t,i)=>['T'+(i+1),t])];
+    const ms=pts.map((p,i)=>`<span class="${i>=2&&i-1<=c.targetsHit?'hit':''}">${p[0]}<br>${Number(p[1]).toLocaleString('en-IN')}</span>`).join('');
+    const pnlCls=c.pnlPct>0?'up':c.pnlPct<0?'down':'';
+    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span><span>${c.mode==='intraday'?'Intraday':'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span><span>score ${c.score}/6</span></div></div>
+      <div style="text-align:right"><span class="tc-tags"><span>${LABEL[c.status]||c.status}</span></span><div class="metric-sub">${when(c.t)}</div></div></div>
+      <div class="tc-grid"><div>ENTRY<b>${inr(c.entry)}</b></div><div>${c.closed?'EXIT':'LTP'}<b>${inr(c.closed?c.exit:c.ltp)}</b></div><div>ACTIVE SL${c.targetsHit?' (trailed)':''}<b>${inr(c.activeSl)}</b></div><div>${c.closed?'RESULT':'RUNNING P/L'}<b class="${pnlCls}">${c.pnlPct>0?'+':''}${c.pnlPct}%</b></div></div>
+      <div class="tc-ms">${ms}</div>
+      <div class="tc-an"><b>Analysis:</b> ${esc(c.analysis)}</div></div>`;
+  }
+  function draw(){
+    if(!ov) return; const body=ov.querySelector('#tcBody'); if(!data){ body.innerHTML='<div class="metric-sub">Loading…</div>'; return; }
+    const st=data.stats, sc=data.scan;
+    let list=data.calls.filter(c=>(tab==='active'?!c.closed:c.closed)&&(fMode==='all'||c.mode===fMode)&&(fSide==='all'||c.side===fSide));
+    const todayKey=Math.floor((Date.now()/1000+19800)/86400), todayN=data.calls.filter(c=>Math.floor((c.t+19800)/86400)===todayKey).length;
+    const chip=(g,v,l,cur)=>`<span class="tc-chip ${cur===v?'on':''}" data-g="${g}" data-v="${v}">${l}</span>`;
+    body.innerHTML=`<div class="tc-stats"><div class="tc-stat"><span>Total calls</span><b>${st.total}</b></div><div class="tc-stat"><span>Active</span><b>${st.active}</b></div><div class="tc-stat"><span>Today</span><b>${todayN}</b></div><div class="tc-stat"><span>Win rate (closed)</span><b>${st.winRate==null?'—':st.winRate+'%'}</b></div>
+      <div class="tc-stat"><span>Avg win</span><b class="up">${st.wins?'+'+st.avgWin+'%':'—'}</b></div><div class="tc-stat"><span>Avg loss</span><b class="down">${st.losses?st.avgLoss+'%':'—'}</b></div><div class="tc-stat"><span>Expectancy / call</span><b>${st.expectancy==null?'—':st.expectancy+'%'}</b></div><div class="tc-stat"><span>Closed</span><b>${st.closed}</b></div></div>
+      <div class="tc-bar">${chip('tab','active','Active',tab)}${chip('tab','past','Past',tab)}<span style="width:10px"></span>${chip('mode','all','All types',fMode)}${chip('mode','intraday','Intraday',fMode)}${chip('mode','swing','Swing',fMode)}<span style="width:10px"></span>${chip('side','all','Buy+Sell',fSide)}${chip('side','BUY','Buy',fSide)}${chip('side','SELL','Sell',fSide)}</div>
+      <div class="metric-sub">${sc.running?'Scanning '+sc.universe+' liquid F&amp;O stocks…':'Last scan '+(sc.lastScan?Math.round((Date.now()-sc.lastScan)/60000)+' min ago':'not yet')+' · scanned '+sc.scanned+' · setups found '+sc.found}${sc.lastErr?' · <span class="st-bad">'+esc(sc.lastErr)+'</span>':''}${sc.persisted?'':' · <span style="color:var(--amber)">history is kept in memory only and resets when the server restarts (add Upstash to keep it)</span>'}</div>
+      ${list.length?list.map(card).join(''):'<div class="metric-sub" style="padding:24px 0;text-align:center;">'+(tab==='active'?'No active calls right now. Calls appear only when a stock passes the full checklist (trend, Supertrend, Stochastic, RSI, volume breakout).':'No closed calls yet.')+'</div>'}
+      <div class="tc-disc"><b>How calls are made:</b> a stock needs 5 of 6 checks (price vs 5/20/50 EMA, Supertrend, Stochastic cross, RSI band, volume breakout) and Supertrend + EMA must agree. SL = ~1.5–1.8× ATR (or beyond the last swing), targets at 1.2/2/3× (intraday) or 1.5/2.5/4× (swing) the risk; the stop moves to entry after T1. If SL and a target fall in the same candle, the SL is assumed first. Intraday calls close at 3:30 pm; swing calls after 30 days. This is a rule-based screen with a measured track record &mdash; not investment advice. Every call, including losers, stays in Past.</div>`;
+    body.querySelectorAll('.tc-chip').forEach(e=>e.onclick=()=>{ const g=e.dataset.g,v=e.dataset.v; if(g==='tab')tab=v; else if(g==='mode')fMode=v; else fSide=v; draw(); });
+  }
+  async function load(scan){ try{ const r=await fetch('/api/calls'+(scan?'?scan=1':''),{cache:'no-store'}); data=await r.json(); }catch(e){} draw(); }
+  function open(){
+    ov=document.createElement('div'); ov.className='ov'; ov.style.alignItems='flex-start';
+    ov.innerHTML='<div class="ov-card tc-wrap" style="max-width:820px;margin-top:20px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 style="margin:0">Trade Calls</h3><div><button class="btn" id="tcScan">Scan now</button> <button class="btn" id="tcClose">Close</button></div></div><div id="tcBody"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov||e.target.id==='tcClose'){ ov.remove(); ov=null; clearInterval(timer); } });
+    ov.querySelector('#tcScan').onclick=()=>{ load(true); setTimeout(()=>load(false),8000); setTimeout(()=>load(false),25000); };
+    draw(); load(false); timer=setInterval(()=>load(false),60000);
+  }
+  document.getElementById('callsBtn')?.addEventListener('click',open);
 })();
 
 function showHome(){

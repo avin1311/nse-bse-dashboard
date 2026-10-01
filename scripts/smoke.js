@@ -29,6 +29,17 @@ ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length
   ok(Sh.stop > q && Sh.t1 < q && Sh.t2 < Sh.t1, 'trade planner: short levels ordered T2 < T1 < price < stop');
 }
 
+// calls engine: levels ordered, tracker conservative
+{
+  const C = require('../calls.js'); let sd = 3; const rn = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+  let p = 500; const bars = []; for (let i = 0; i < 400; i++) { const o = p; p *= 1 + 0.002 + 0.012 * (rn() - 0.5); bars.push({ t: 1.7e9 + i * 86400, h: Math.max(o, p) * 1.003, l: Math.min(o, p) * 0.997, c: p, v: 1e6 * (0.8 + rn()) }); }
+  let n = 0, bad = 0; for (let i = 80; i < 400; i++) { const r = C.evaluate(bars.slice(0, i + 1), 'swing'); if (!r) continue; n++; const s = r.side === 'BUY' ? 1 : -1; if (!(s * (r.entry - r.sl) > 0 && s * (r.targets[0] - r.entry) > 0 && s * (r.targets[1] - r.targets[0]) > 0 && s * (r.targets[2] - r.targets[1]) > 0)) bad++; }
+  ok(bad === 0, 'trade calls: levels ordered on ' + n + ' generated calls');
+  const call = { side: 'BUY', mode: 'swing', entry: 100, sl: 95, targets: [105, 110, 120], t: 0 };
+  ok(C.track(call, [{ t: 1, h: 106, l: 94, c: 100 }], 1e9).status === 'SL_HIT', 'trade calls: SL assumed first when both hit in one bar');
+  ok(C.track(call, [{ t: 1, h: 106, l: 99, c: 105 }, { t: 2, h: 106, l: 100, c: 101 }], 1e9).status === 'BREAKEVEN', 'trade calls: stop trails to entry after T1');
+}
+
 // 2. server behaviour
 function start(env, port) { return spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), ...env }, stdio: 'ignore' }); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -37,6 +48,7 @@ async function waitUp(base) { for (let i = 0; i < 40; i++) { try { const r = awa
   const s1 = start({ DASHBOARD_PASSCODE: '', CHECK_ALERTS_SECRET: '' }, 3911), b1 = 'http://localhost:3911';
   ok(await waitUp(b1), 'server starts');
   ok((await (await fetch(b1 + '/healthz')).text()) === 'ok', '/healthz answers ok');
+  { const r = await (await fetch(b1 + '/api/calls')).json(); ok(Array.isArray(r.calls) && r.stats && r.scan, '/api/calls responds (' + r.calls.length + ' calls)'); }
   const pg = await fetch(b1 + '/'); ok(pg.ok && (await pg.text()).includes('viewTabs'), 'home page served');
   const st = await (await fetch(b1 + '/api/status')).json(); ok(st && st.market && st.telegram, '/api/status returns health info');
   ok((await (await fetch(b1 + '/api/auth/status')).json()).required === false, 'no passcode -> open');

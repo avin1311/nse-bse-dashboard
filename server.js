@@ -1716,6 +1716,55 @@ async function runCallsCycle(force) {
   } catch (e) { callsState.lastErr = e.message; }
   finally { callsState.running = false; }
 }
+
+// ============================================================
+// GLOBAL MARKETS (for the second ticker bar). Yahoo carries the big overseas
+// indices; GIFT Nifty is read from NSE's own site (needs a session cookie) and
+// shown as unavailable if that fails — never as a made-up number.
+// ============================================================
+const GLOBAL_DEFS = [
+  { key: 'GIFTNIFTY', name: 'GIFT NIFTY' },
+  { key: 'DOW', name: 'DOW JONES', y: '^DJI' },
+  { key: 'SPX', name: 'S&P 500', y: '^GSPC' },
+  { key: 'NASDAQ', name: 'NASDAQ', y: '^IXIC' },
+  { key: 'NIKKEI', name: 'NIKKEI 225', y: '^N225' },
+  { key: 'HSI', name: 'HANG SENG', y: '^HSI' },
+];
+let nseCookie = { v: '', t: 0 };
+async function getGiftNifty() {
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+  if (!nseCookie.v || Date.now() - nseCookie.t > 10 * 60000) {
+    const r = await fetch('https://www.nseindia.com/', { headers: { 'User-Agent': ua, 'Accept': 'text/html' }, signal: AbortSignal.timeout(8000) });
+    const sc = (r.headers.getSetCookie ? r.headers.getSetCookie() : []).map(c => c.split(';')[0]).join('; ');
+    nseCookie = { v: sc, t: Date.now() };
+  }
+  const r = await fetch('https://www.nseindia.com/api/NextApi/apiClient?functionName=getGiftNifty', { headers: { 'User-Agent': ua, 'Accept': 'application/json', 'Referer': 'https://www.nseindia.com/', 'Cookie': nseCookie.v }, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('NSE HTTP ' + r.status);
+  const j = await r.json();
+  // be tolerant about field names: find the first numeric last-price and percent-change anywhere in the payload
+  const flat = {}; (function walk(o, p) { if (o && typeof o === 'object') Object.keys(o).forEach(k => walk(o[k], k)); else flat[p] = o; })(j, '');
+  const pick = (...names) => { for (const k of Object.keys(flat)) if (names.includes(k.toLowerCase())) { const n = Number(String(flat[k]).replace(/,/g, '')); if (isFinite(n)) return n; } return null; };
+  const price = pick('lastprice', 'last_price', 'last', 'ltp', 'close');
+  const chg = pick('perchange', 'pchange', 'percentchange', 'changepct', 'change_percent');
+  if (price == null) throw new Error('GIFT Nifty price not found in NSE response');
+  return { price, changePct: chg == null ? 0 : chg, source: 'nse' };
+}
+let globalCache = { t: 0, data: null };
+app.get('/api/global-quotes', async (req, res) => {
+  if (globalCache.data && Date.now() - globalCache.t < 20000) return res.json(globalCache.data);
+  const out = await Promise.all(GLOBAL_DEFS.map(async d => {
+    try {
+      if (!d.y) { const g = await getGiftNifty(); return { key: d.key, name: d.name, ...g }; }
+      const c = await getChartData(d.y, '1d', '5m');
+      if (!c || c.price == null) throw new Error('no price');
+      const changePct = c.prevClose ? (c.price / c.prevClose - 1) * 100 : 0;
+      return { key: d.key, name: d.name, price: c.price, changePct, marketState: c.marketState, source: 'yahoo' };
+    } catch (e) { return { key: d.key, name: d.name, error: String(e.message || e).slice(0, 80) }; }
+  }));
+  globalCache = { t: Date.now(), data: { items: out } };
+  res.json(globalCache.data);
+});
+
 const BUILD = '2026-10-01-r4 (caps, calibrated risk, click feedback)';
 app.post('/api/calls/reset', async (req, res) => {
   const db = await loadCalls(); db.length = 0; await saveCalls(); callsState.lastScan = 0;

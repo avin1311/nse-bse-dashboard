@@ -326,6 +326,7 @@
 <div id="alertHost"></div>
 
 <div class="ticker" id="tickerBar"></div>
+<div class="ticker" id="globalBar" style="border-top:0;"></div>
 
 <div class="header">
   <div class="search-wrap">
@@ -3768,6 +3769,17 @@ function startFallbackPoll(d) {
 }
 
 
+function renderGlobalBar(items){
+  const el=document.getElementById('globalBar'); if(!el) return;
+  el.innerHTML='<span class="idx-name" style="align-self:center;font-weight:600;padding-right:4px;" title="Overseas markets that influence the Indian open">GLOBAL</span>'+items.map(i=>{
+    if(i.error||i.price==null) return `<div title="Live price not available: ${(i.error||'').replace(/"/g,'')}"><span class="idx-name">${i.name}</span><span class="idx-val" style="color:var(--text3)">&mdash;</span></div>`;
+    const c=i.changePct||0, closed=i.marketState&&i.marketState!=='REGULAR'&&i.key!=='GIFTNIFTY';
+    return `<div title="${closed?'Market closed, showing last close':'Live'}"><span class="idx-name">${i.name}${closed?' (closed)':''}</span><span class="idx-val ${c>=0?'up':'down'}">${i.price.toLocaleString('en-IN',{maximumFractionDigits:2})} <small>${c>=0?'+':''}${c.toFixed(2)}%</small></span></div>`;}).join('');
+}
+async function refreshGlobalLive(){
+  try{ const r=await fetch('/api/global-quotes',{cache:'no-store'}); const j=await r.json(); if(j.items) renderGlobalBar(j.items); }catch(e){ /* keep last values */ }
+}
+refreshGlobalLive(); setInterval(refreshGlobalLive,60000);
 async function refreshTickerLive(){
   try{
     const syms=INDEX_LIST.map(r=>r[0]); const got={};

@@ -1723,12 +1723,12 @@ async function runCallsCycle(force) {
 // shown as unavailable if that fails — never as a made-up number.
 // ============================================================
 const GLOBAL_DEFS = [
-  { key: 'GIFTNIFTY', name: 'GIFT NIFTY' },
-  { key: 'DOW', name: 'DOW JONES', y: '^DJI' },
-  { key: 'SPX', name: 'S&P 500', y: '^GSPC' },
-  { key: 'NASDAQ', name: 'NASDAQ', y: '^IXIC' },
-  { key: 'NIKKEI', name: 'NIKKEI 225', y: '^N225' },
-  { key: 'HSI', name: 'HANG SENG', y: '^HSI' },
+  { key: 'GIFTNIFTY', name: 'GIFT NIFTY', mc: 'in;gsx' },
+  { key: 'DOW', name: 'DOW JONES', y: '^DJI', mc: 'INDU:FUT' },
+  { key: 'SPX', name: 'S&P 500', y: '^GSPC', mc: 'SPX:IND' },
+  { key: 'NASDAQ', name: 'NASDAQ', y: '^IXIC', mc: 'CCMP:IND' },
+  { key: 'NIKKEI', name: 'NIKKEI 225', y: '^N225', mc: 'JP;N225' },
+  { key: 'HSI', name: 'HANG SENG', y: '^HSI', mc: 'cn;hsi' },
 ];
 let nseCookie = { v: '', t: 0 };
 async function getGiftNifty() {
@@ -1749,17 +1749,38 @@ async function getGiftNifty() {
   if (price == null) throw new Error('GIFT Nifty price not found in NSE response');
   return { price, changePct: chg == null ? 0 : chg, source: 'nse' };
 }
+// Moneycontrol's public global-indices listing (the feed their own page uses). One call returns all rows.
+let mcCache = { t: 0, rows: null };
+async function getMcGlobal() {
+  if (mcCache.rows && Date.now() - mcCache.t < 15000) return mcCache.rows;
+  const r = await fetch('https://priceapi.moneycontrol.com/technicalCompanyData/globalMarket/getGlobalIndicesListingData?view=overview&deviceType=W', {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', 'Accept': 'application/json', 'Referer': 'https://www.moneycontrol.com/', 'Origin': 'https://www.moneycontrol.com' },
+    signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('Moneycontrol HTTP ' + r.status);
+  const j = await r.json();
+  const idx = {}; (j.header || []).forEach((h, i) => idx[h.name] = i);
+  const rows = {};
+  (j.dataList || []).forEach(g => (g.data || []).forEach(a => {
+    const price = Number(String(a[idx.price]).replace(/,/g, '')), pc = Number(String(a[idx.percent_change]).replace(/,/g, ''));
+    if (isFinite(price) && price > 0) rows[a[idx.symbol]] = { price, changePct: isFinite(pc) ? pc : 0, marketState: a[idx.state], source: 'moneycontrol' };
+  }));
+  mcCache = { t: Date.now(), rows };
+  return rows;
+}
 let globalCache = { t: 0, data: null };
 app.get('/api/global-quotes', async (req, res) => {
   if (globalCache.data && Date.now() - globalCache.t < 20000) return res.json(globalCache.data);
   const out = await Promise.all(GLOBAL_DEFS.map(async d => {
     try {
-      if (!d.y) { const g = await getGiftNifty(); return { key: d.key, name: d.name, ...g }; }
-      const c = await getChartData(d.y, '1d', '5m');
-      if (!c || c.price == null) throw new Error('no price');
-      const changePct = c.prevClose ? (c.price / c.prevClose - 1) * 100 : 0;
-      return { key: d.key, name: d.name, price: c.price, changePct, marketState: c.marketState, source: 'yahoo' };
-    } catch (e) { return { key: d.key, name: d.name, error: String(e.message || e).slice(0, 80) }; }
+      const fromMc = async () => { const rows = await getMcGlobal(); const x = rows[d.mc]; if (!x) throw new Error('not in Moneycontrol feed'); return { key: d.key, name: d.name, ...x }; };
+      if (!d.y) { try { return await fromMc(); } catch (e1) { try { const g = await getGiftNifty(); return { key: d.key, name: d.name, ...g }; } catch (e2) { throw new Error(e1.message + '; ' + e2.message); } } }
+      try {
+        const c = await getChartData(d.y, '1d', '5m');
+        if (!c || c.price == null) throw new Error('no price');
+        const changePct = c.prevClose ? (c.price / c.prevClose - 1) * 100 : 0;
+        return { key: d.key, name: d.name, price: c.price, changePct, marketState: c.marketState, source: 'yahoo' };
+      } catch (e1) { try { return await fromMc(); } catch (e2) { throw new Error(e1.message + '; ' + e2.message); } }
+    } catch (e) { return { key: d.key, name: d.name, error: String(e.message || e).slice(0, 120) }; }
   }));
   globalCache = { t: Date.now(), data: { items: out } };
   res.json(globalCache.data);

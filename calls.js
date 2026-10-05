@@ -86,11 +86,24 @@ function evaluate(bars, mode, opts = {}) {
     const chk = sides[side]; const score = Object.values(chk).filter(Boolean).length;
     if (!best || score > best.score) best = { side, chk, score };
   }
+  // Counter-trend bounce (swing only): oversold stock turning up with volume. Offered only when
+  // the trend-following checklist found nothing, and always labelled so it is not mistaken for a trend trade.
+  let bounce = false;
+  if (mode === 'swing' && !(best.score >= MIN_SCORE && best.chk.st && best.chk.ema)) {
+    const turnUp = R[n] > R[n - 1] && R[n - 1] > R[n - 2];
+    const stochCross = S.k[n] > S.d[n] && S.k[n - 1] <= S.d[n - 1] + 1 && S.k[n] < 45;
+    if (R[n - 1] <= 38 && R[n] <= 50 && turnUp && stochCross && px > e5[n] && px > c[n - 1] && c[n - 1] < e20[n - 1] && volOk && px > Math.max(h[n - 1], h[n - 2])) {
+      bounce = true;
+      best = { side: 'BUY', chk: { ema: px > e5[n], trend: false, st: ST.dir[n] === 1, stoch: true, rsi: true, vol: true }, score: 5 };
+    }
+  }
+  if (!bounce) {
   if (best.score < MIN_SCORE) return null;
   // trend + supertrend are mandatory: never fight them
   if (!best.chk.st || !best.chk.ema) return null;
+  }
   // never chase an exhausted move: a short at RSI<25 (or long at >78) is a bounce waiting to happen
-  if ((best.side === 'SELL' && R[n] < 25) || (best.side === 'BUY' && R[n] > 78)) return null;
+  if (!bounce && ((best.side === 'SELL' && R[n] < 25) || (best.side === 'BUY' && R[n] > 78))) return null;
 
   const side = best.side, sgn = side === 'BUY' ? 1 : -1, a = A[n];
   const stopMult = mode === 'intraday' ? 1.5 : 1.5;
@@ -102,14 +115,19 @@ function evaluate(bars, mode, opts = {}) {
   stopDist = Math.min(Math.max(stopDist, Math.min(structDist, 2.2 * a)), (mode === 'intraday' ? 0.02 : 0.06) * px);
   stopDist = Math.max(stopDist, 0.004 * px);
   const entry = tick(px), sl = tick(entry - sgn * stopDist);
-  const rr = mode === 'intraday' ? [1.2, 2, 3] : [1.5, 2.5, 4];
+  const rr = bounce ? [1.2, 2, 3] : mode === 'intraday' ? [1.2, 2, 3] : [1.5, 2.5, 4];
   const targets = rr.map(m => tick(entry + sgn * stopDist * m));
   const risk = stopDist / px * 100;
   const lim = mode === 'intraday' ? [0.8, 1.6] : [2.5, 4.5]; // % stop distance bands
-  const riskLabel = risk < lim[0] ? 'LOW' : risk < lim[1] ? 'MEDIUM' : 'HIGH';
+  let riskLabel = risk < lim[0] ? 'LOW' : risk < lim[1] ? 'MEDIUM' : 'HIGH';
+  if (bounce && riskLabel === 'LOW') riskLabel = 'MEDIUM'; // counter-trend is never "low risk"
   const reasons = [];
   const f = x => r2(x);
-  if (side === 'BUY') {
+  if (bounce) {
+    reasons.push(`Counter-trend bounce: RSI turned up from ${f(R[n - 2])} to ${f(R[n])} and Stochastic ${f(S.k[n])}/${f(S.d[n])} just crossed up`);
+    reasons.push(`Price ₹${f(px)} reclaimed the 5 EMA (₹${f(e5[n])}) and cleared the last two highs on volume ${f(v[n] / vAvg)}x average`);
+    reasons.push(`Still below the 50 EMA (₹${f(e50[n])}), so this is a short bounce, not a trend change; use the stop`);
+  } else if (side === 'BUY') {
     reasons.push(`Price ₹${f(px)} is above the 5 EMA (₹${f(e5[n])}) and 20 EMA (₹${f(e20[n])})`);
     reasons.push(`Supertrend supportive near ₹${f(ST.line[n])}`);
     reasons.push(`Stochastic ${f(S.k[n])}/${f(S.d[n])} with the fast line above the signal`);
@@ -124,7 +142,7 @@ function evaluate(bars, mode, opts = {}) {
   }
   return {
     side, mode, entry, sl, targets, riskLabel, score: best.score, checks: best.chk,
-    riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: reasons.join('. ') + '.',
+    riskPct: r2(risk), rr: rr[0], setup: bounce ? 'bounce' : 'trend', atr: r2(a), analysis: reasons.join('. ') + '.',
     barTime: bars[n].t,
   };
 }

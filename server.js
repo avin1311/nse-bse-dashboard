@@ -1703,8 +1703,10 @@ async function runCallsCycle(force) {
       if (dupe) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) continue; // stale: price has already run away
+      // swing signals come from yesterday's close; skip when today's price is already moving against the idea
+      if (f.mode === 'swing' && f.setup !== 'bounce' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) continue;
       const d = ltp - f.entry; const rb = x => Math.round((x + d) * 20) / 20;
-      const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, checks: f.checks, analysis: f.analysis, t: nowSec };
+      const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', checks: f.checks, analysis: f.analysis, t: nowSec };
       Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false });
       db.push(call); open_.push(call); quota[f.mode]--;
       notes.push(`🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
@@ -1786,7 +1788,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-01-r4 (caps, calibrated risk, click feedback)';
+const BUILD = '2026-10-05-r5 (bounce buys, today-direction filter)';
 app.post('/api/calls/reset', async (req, res) => {
   const db = await loadCalls(); db.length = 0; await saveCalls(); callsState.lastScan = 0;
   res.json({ ok: true });

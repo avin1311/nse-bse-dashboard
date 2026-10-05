@@ -2313,7 +2313,7 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     const pts=[['SL',c.sl],['Entry',c.entry],...c.targets.map((t,i)=>['T'+(i+1),t])];
     const ms=pts.map((p,i)=>`<span class="${i>=2&&i-1<=c.targetsHit?'hit':''}">${p[0]}<br>${Number(p[1]).toLocaleString('en-IN')}</span>`).join('');
     const pnlCls=c.pnlPct>0?'up':c.pnlPct<0?'down':'';
-    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span><span>${c.mode==='intraday'?'Intraday':'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span><span title="Checks passed out of 6">${c.score}/6 checks</span></div></div>
+    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span><span>${c.mode==='intraday'?'Intraday':'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span>${c.setup==='bounce'?'<span title="Oversold stock turning up while still below its 50 EMA. Short-lived; respect the stop.">Counter-trend bounce</span>':''}<span title="Checks passed out of 6">${c.score}/6 checks</span></div></div>
       <div style="text-align:right"><span class="tc-tags"><span>${LABEL[c.status]||c.status}</span></span><div class="metric-sub">${when(c.t)}</div></div></div>
       <div class="tc-grid"><div>ENTRY<b>${inr(c.entry)}</b></div><div>${c.closed?'EXIT':'LTP'}<b>${inr(c.closed?c.exit:c.ltp)}</b></div><div>ACTIVE SL${c.targetsHit?' (trailed)':''}<b>${inr(c.activeSl)}</b></div><div>${c.closed?'RESULT':'RUNNING P/L'}<b class="${pnlCls}">${c.pnlPct>0?'+':''}${c.pnlPct}%</b></div></div>
       <div class="tc-ms">${ms}</div>

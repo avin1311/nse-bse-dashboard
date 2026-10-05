@@ -235,7 +235,7 @@ function parseNewsFeed(xml, defaultSource) {
     const b = m[1];
     const g = tag => { const x = b.match(new RegExp('<'+tag+'(?:\\s[^>]*)?>([\\s\\S]*?)</'+tag+'>')); return x ? x[1] : ''; };
     let title = stripTags(g('title')); if (!title) continue;
-    let source = stripTags(g('source')) || defaultSource;
+    let source = stripTags(g('source')) || stripTags(g('News:Source')) || defaultSource;
     // Google News titles end with " - Publisher"
     const dash = title.lastIndexOf(' - ');
     if (dash > 20 && (!source || source === defaultSource || title.slice(dash+3) === source)) { source = title.slice(dash+3); title = title.slice(0, dash); }
@@ -249,13 +249,21 @@ function parseNewsFeed(xml, defaultSource) {
   }
   return out;
 }
-async function fetchFeed(url, source) {
+async function fetchFeed(url, source, diag) {
+  const d = { source, host: (url.match(/^https?:\/\/([^/]+)/) || [])[1] || url, status: null, n: 0, err: null };
+  if (diag) diag.push(d);
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; dashboard)' }, signal: AbortSignal.timeout(7000) });
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', 'Accept': 'application/rss+xml, application/xml, text/xml, */*;q=0.8', 'Accept-Language': 'en-IN,en;q=0.9' }, signal: AbortSignal.timeout(8000), redirect: 'follow' });
+    d.status = r.status;
     if (!r.ok) return [];
-    return parseNewsFeed(await r.text(), source);
-  } catch (e) { return []; }
+    const items = parseNewsFeed(await r.text(), source);
+    d.n = items.length;
+    return items;
+  } catch (e) { d.err = String(e && e.message || e).slice(0, 80); return []; }
 }
+const bing = q => `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss&setmkt=en-IN&qft=sortbydate%3d%221%22`;
+const yfeed = ys => `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ys)}&region=IN&lang=en-IN`;
+const INDEX_YF = { NIFTY: '^NSEI', BANKNIFTY: '^NSEBANK', SENSEX: '^BSESN' };
 const gnews = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q + ' when:7d')}&hl=en-IN&gl=IN&ceid=IN:en`;
 const NEWS_FEEDS_GENERAL = [
   ['https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146842.cms', 'Economic Times'],
@@ -291,12 +299,13 @@ app.get('/api/news/:symbol', async (req, res) => {
   const now = Date.now();
   if (newsCache[key] && now - newsCache[key].time < NEWS_TTL) return res.json(newsCache[key].data);
   try {
+    const diag = []; const ff = (u, s) => fetchFeed(u, s, diag);
     const idx = INDEX_NEWS[symbol];
     let items;
     if (idx) {
       const [specific, general] = await Promise.all([
-        Promise.all(idx.q.map(q => fetchFeed(gnews(q), 'Google News'))).then(a => a.flat()),
-        Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat())
+        Promise.all([...idx.q.map(q => ff(gnews(q), 'Google News')), ...idx.q.slice(0, 2).map(q => ff(bing(q), 'Bing News')), ...(INDEX_YF[symbol] ? [ff(yfeed(INDEX_YF[symbol]), 'Yahoo Finance')] : [])]).then(a => a.flat()),
+        Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => ff(u, s))).then(a => a.flat())
       ]);
       const seen = new Set();
       const uniq = arr => arr.filter(it => { const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
@@ -307,10 +316,10 @@ app.get('/api/news/:symbol', async (req, res) => {
       if (items.length < 8) items = items.concat(gen.filter(g => !items.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
     } else {
     const q1 = `${name || symbol} share`;
-    const queries = [[gnews(q1), 'Google News'], [gnews(`${symbol} NSE stock`), 'Google News']];
+    const queries = [[gnews(q1), 'Google News'], [gnews(`${symbol} NSE stock`), 'Google News'], [bing(q1), 'Bing News']];
     const [specific, general] = await Promise.all([
-      Promise.all(queries.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat()),
-      Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat())
+      Promise.all(queries.map(([u, s]) => ff(u, s))).then(a => a.flat()),
+      Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => ff(u, s))).then(a => a.flat())
     ]);
     const words = [symbol.toLowerCase(), ...(name ? name.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['limited','ltd','industries','india','corporation','company'].includes(w)) : [])];
     const mentions = it => { const t = (it.title + ' ' + it.description).toLowerCase(); return words.some(w => t.includes(w)); };
@@ -323,7 +332,7 @@ app.get('/api/news/:symbol', async (req, res) => {
     if (items.length < 8) items = items.concat(gen.filter(g => !genRel.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
     }
     items = items.map(i => ({ ...i, pubDate: i.ts ? new Date(i.ts).toISOString() : '', sentiment: getSentiment(i.title + ' ' + i.description) }));
-    const result = { symbol, items, fetchedAt: new Date().toISOString() };
+    const result = { symbol, items, fetchedAt: new Date().toISOString(), feeds: diag, build: 'news-r2' };
     if (items.length) newsCache[key] = { data: result, time: now };
     res.json(result);
   } catch (e) {

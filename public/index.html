@@ -1419,11 +1419,40 @@ function destroyCharts(){
   charts={};
 }
 
+function tickerPref(){ try{ return JSON.parse(localStorage.getItem('tickerPref')||'{}'); }catch(e){ return {}; } }
+function applyTickerPref(rows){
+  const p=tickerPref(), order=p.order||[], hidden=new Set(p.hidden||[]);
+  const pos=s=>{ const i=order.indexOf(s); return i<0?1000+INDEX_LIST.findIndex(r=>r[0]===s):i; };
+  return rows.filter(r=>!hidden.has(r[3])).sort((a,b)=>pos(a[3])-pos(b[3]));
+}
 function renderTicker(liveRows){
   // before live prices arrive show the index names with dashes (never made-up levels)
-  const idx = liveRows || INDEX_LIST.map(r=>[r[1].toUpperCase().replace('BSE ',''),null,null]);
-  document.getElementById('tickerBar').innerHTML = idx.map(([n,v,c,sym])=>`
+  if(liveRows) window.TICKER_ROWS=liveRows;
+  const base = window.TICKER_ROWS || INDEX_LIST.map(r=>[r[1].toUpperCase().replace('BSE ',''),null,null,r[0]]);
+  const idx = applyTickerPref(base);
+  document.getElementById('tickerBar').innerHTML = '<button class="btn" id="tickerEdit" title="Change the order of the indices or hide some" style="position:sticky;left:0;z-index:2;padding:4px 10px;font-size:12px;">Edit order</button>' + idx.map(([n,v,c,sym])=>`
     <div ${sym?`style="cursor:pointer" onclick="selectStock('${sym}')" title="Open ${n}"`:''}><span class="idx-name">${n}</span><span class="idx-val ${c==null?'':c>=0?'up':'down'}">${v==null?'&mdash;':v} <small>${c==null?'':(c>=0?'+':'')+c.toFixed(2)+'%'}</small></span></div>`).join('');
+  document.getElementById('tickerEdit').onclick=openTickerEditor;
+}
+function openTickerEditor(){
+  const p=tickerPref(); let order=(p.order&&p.order.length?p.order.filter(s=>INDEX_LIST.some(r=>r[0]===s)):[]);
+  INDEX_LIST.forEach(r=>{ if(!order.includes(r[0])) order.push(r[0]); });
+  let hidden=new Set(p.hidden||[]);
+  const ov=document.createElement('div'); ov.className='ov';
+  ov.innerHTML='<div class="ov-card" style="max-width:420px"><h3>Index bar</h3><div class="metric-sub" style="margin-bottom:8px;">Use the arrows to reorder. Untick to hide an index.</div><div id="tkList"></div><div style="display:flex;gap:8px;margin-top:14px;"><button class="btn" id="tkReset">Reset to default</button><button class="btn" id="tkDone" style="margin-left:auto;">Done</button></div></div>';
+  document.body.appendChild(ov);
+  const nm=s=>INDEX_LIST.find(r=>r[0]===s)[1];
+  function save(){ try{ localStorage.setItem('tickerPref',JSON.stringify({order,hidden:[...hidden]})); }catch(e){} renderTicker(); }
+  function draw(){
+    ov.querySelector('#tkList').innerHTML=order.map((s,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);"><label style="flex:1;display:flex;gap:8px;align-items:center;cursor:pointer;"><input type="checkbox" data-s="${s}" ${hidden.has(s)?'':'checked'}> ${nm(s)}</label><button class="btn" data-up="${i}" ${i===0?'disabled':''} aria-label="Move up">&#9650;</button><button class="btn" data-dn="${i}" ${i===order.length-1?'disabled':''} aria-label="Move down">&#9660;</button></div>`).join('');
+    ov.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.up; [order[i-1],order[i]]=[order[i],order[i-1]]; save(); draw(); });
+    ov.querySelectorAll('[data-dn]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.dn; [order[i+1],order[i]]=[order[i],order[i+1]]; save(); draw(); });
+    ov.querySelectorAll('input[data-s]').forEach(c=>c.onchange=()=>{ if(c.checked) hidden.delete(c.dataset.s); else hidden.add(c.dataset.s); save(); });
+  }
+  draw();
+  ov.querySelector('#tkReset').onclick=()=>{ try{ localStorage.removeItem('tickerPref'); }catch(e){} ov.remove(); renderTicker(); };
+  ov.querySelector('#tkDone').onclick=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
 }
 
 window.FULL_UNIVERSE = [];
@@ -1838,7 +1867,7 @@ function renderNews(d){
     .then(r=>r.json())
     .then(data=>{
       if(window.CURRENT!==d) return;
-      if(!data.items || !data.items.length) throw new Error('No news found');
+      if(!data.items || !data.items.length){ const f=(data.feeds||[]).map(x=>`${x.host}: ${x.status!=null?'HTTP '+x.status:(x.err||'no reply')}${x.status===200?' ('+x.n+' items)':''}`); panel.innerHTML='<div class="metric-sub">No headlines came back for this page.'+(f.length?'<br>Feed check: '+f.map(newsEsc).join(' &middot; '):' The server is probably still on an older version, wait for the redeploy and reload.')+' <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>'; return; }
       const safeUrl=u=>/^https?:\/\//i.test(u)?u:'#';
       const row=n=>`
         <div class="news-item">
@@ -1858,7 +1887,7 @@ function renderNews(d){
         + `<div class="metric-sub" style="margin-top:8px;">Live from Google News, Economic Times and Moneycontrol &middot; refreshed every 15 min</div>`;
     })
     .catch(()=>{
-      panel.innerHTML = '<div class="metric-sub">Couldn\'t load news right now (feeds unreachable). <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>';
+      panel.innerHTML = '<div class="metric-sub">Couldn\'t reach your dashboard server for news (network or server restarting). <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>';
     });
 }
 

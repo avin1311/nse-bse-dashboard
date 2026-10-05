@@ -1420,9 +1420,10 @@ function destroyCharts(){
 }
 
 function renderTicker(liveRows){
-  const idx = liveRows || [["NIFTY 50","24,175.7",0.71],["BANK NIFTY","58,031.6",0.0],["NIFTY IT","26,965.0",0.64],["INDIA VIX","12.29",-7.21]];
-  document.getElementById('tickerBar').innerHTML = idx.map(([n,v,c])=>`
-    <div><span class="idx-name">${n}</span><span class="idx-val ${c>=0?'up':'down'}">${v} <small>${c>=0?'+':''}${c.toFixed(2)}%</small></span></div>`).join('');
+  // before live prices arrive show the index names with dashes (never made-up levels)
+  const idx = liveRows || INDEX_LIST.map(r=>[r[1].toUpperCase().replace('BSE ',''),null,null]);
+  document.getElementById('tickerBar').innerHTML = idx.map(([n,v,c,sym])=>`
+    <div ${sym?`style="cursor:pointer" onclick="selectStock('${sym}')" title="Open ${n}"`:''}><span class="idx-name">${n}</span><span class="idx-val ${c==null?'':c>=0?'up':'down'}">${v==null?'&mdash;':v} <small>${c==null?'':(c>=0?'+':'')+c.toFixed(2)+'%'}</small></span></div>`).join('');
 }
 
 window.FULL_UNIVERSE = [];
@@ -3740,12 +3741,15 @@ function startFallbackPoll(d) {
 
 async function refreshTickerLive(){
   try{
-    const defs=[['NIFTY 50','NIFTY'],['BANK NIFTY','BANKNIFTY'],['NIFTY IT','NIFTYIT'],['INDIA VIX','INDIAVIX']];
-    const res=await Promise.all(defs.map(([n,s])=>fetch('/api/quote/'+s,{cache:'no-store'}).then(r=>r.json()).then(q=>({n,q})).catch(()=>({n,q:null}))));
-    const rows=res.filter(x=>x.q && !x.q.error && x.q.price!=null).map(x=>[x.n, x.q.price.toLocaleString('en-IN',{maximumFractionDigits:2}), x.q.changePct||0]);
+    const syms=INDEX_LIST.map(r=>r[0]); const got={};
+    try{ const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(syms.join(',')),{cache:'no-store'}); if(r.ok){ const m=await r.json(); Object.keys(m).forEach(k=>{ got[k]={price:m[k].price,changePct:m[k].changePct}; }); } }catch(e){}
+    const missing=syms.filter(s=>!got[s]);
+    await Promise.all(missing.map(s=>fetch('/api/quote/'+s,{cache:'no-store'}).then(r=>r.json()).then(q=>{ if(q&&!q.error&&q.price!=null) got[s]={price:q.price,changePct:q.changePct}; }).catch(()=>{})));
+    const rows=INDEX_LIST.filter(r=>got[r[0]]).map(r=>[r[1].replace('BSE ','').toUpperCase(), got[r[0]].price.toLocaleString('en-IN',{maximumFractionDigits:2}), got[r[0]].changePct||0, r[0]]);
     if(rows.length) renderTicker(rows);
   }catch(e){ /* keep showing the last known values */ }
 }
+refreshTickerLive();
 setInterval(refreshTickerLive, 15000);
 
 searchInput.addEventListener('focus',()=>{if(searchInput.value)searchResults.style.display='block';});

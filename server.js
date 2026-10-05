@@ -260,8 +260,30 @@ const gnews = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q 
 const NEWS_FEEDS_GENERAL = [
   ['https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146842.cms', 'Economic Times'],
   ['https://www.moneycontrol.com/rss/latestnews.xml', 'Moneycontrol'],
-  ['https://www.moneycontrol.com/rss/marketreports.xml', 'Moneycontrol']
+  ['https://www.moneycontrol.com/rss/marketreports.xml', 'Moneycontrol'],
+  ['https://www.livemint.com/rss/markets', 'Mint'],
+  ['https://www.business-standard.com/rss/markets-106.rss', 'Business Standard']
 ];
+// What to search for on an index page: Google News phrases (index + its biggest members) and
+// keywords that make a general-feed headline relevant. broad=true: every market headline counts.
+const INDEX_NEWS = {
+  NIFTY: { q: ['Nifty 50 today', 'Nifty 50 stocks Reliance HDFC Bank Infosys ICICI Bank TCS', 'Sensex Nifty market news'], kw: ['nifty','sensex','market','stocks','reliance','hdfc','infosys','icici','tcs','fii','rbi'], broad: true },
+  SENSEX: { q: ['Sensex today', 'Sensex Nifty market news', 'BSE Sensex stocks'], kw: ['sensex','nifty','market','stocks'], broad: true },
+  BANKNIFTY: { q: ['Bank Nifty today', 'Bank Nifty stocks HDFC Bank ICICI Bank SBI Axis Bank Kotak', 'banking stocks India RBI'], kw: ['bank','banking','hdfc','icici','sbi','axis','kotak','rbi','nbfc','lender'] },
+  NIFTYIT: { q: ['Nifty IT today', 'IT stocks TCS Infosys Wipro HCL Tech Tech Mahindra', 'Indian IT services stocks'], kw: ['infosys','tcs','wipro','hcl','tech mahindra','ltimindtree','it stocks','it services','nasscom'] },
+  NIFTYFMCG: { q: ['Nifty FMCG today', 'FMCG stocks HUL ITC Nestle Britannia', 'FMCG sector India'], kw: ['fmcg','hindustan unilever','hul','itc','nestle','britannia','dabur','tata consumer'] },
+  NIFTYPHARMA: { q: ['Nifty Pharma today', 'pharma stocks Sun Pharma Cipla Dr Reddys', 'pharma sector India'], kw: ['pharma','sun pharma','cipla','dr reddy','lupin','usfda','drug'] },
+  NIFTYAUTO: { q: ['Nifty Auto today', 'auto stocks Maruti Tata Motors Mahindra Bajaj', 'auto sales India'], kw: ['auto','maruti','tata motors','mahindra','bajaj auto','hero motocorp','eicher','car sales','two-wheeler'] },
+  NIFTYMETAL: { q: ['Nifty Metal today', 'metal stocks Tata Steel JSW Steel Hindalco Vedanta', 'steel aluminium prices India'], kw: ['metal','steel','tata steel','jsw','hindalco','vedanta','coal','aluminium','copper'] },
+  NIFTYREALTY: { q: ['Nifty Realty today', 'realty stocks DLF Godrej Properties Lodha', 'real estate sector India'], kw: ['realty','real estate','dlf','godrej properties','lodha','housing','property'] },
+  NIFTYENERGY: { q: ['Nifty Energy today', 'energy stocks Reliance ONGC NTPC Power Grid', 'crude oil India stocks'], kw: ['energy','oil','ongc','reliance','ntpc','power','crude','gas','coal india'] },
+  NIFTYINFRA: { q: ['Nifty Infra today', 'infrastructure stocks L&T Adani Ports', 'infrastructure India capex'], kw: ['infra','infrastructure','l&t','larsen','adani ports','capex','construction'] },
+  NIFTYPSUBANK: { q: ['Nifty PSU Bank today', 'PSU bank stocks SBI Bank of Baroda PNB Canara', 'public sector banks India'], kw: ['psu bank','sbi','bank of baroda','pnb','canara','public sector bank','union bank'] },
+  NIFTYMIDCAP: { q: ['Nifty Midcap today', 'midcap stocks India rally', 'midcap smallcap market India'], kw: ['midcap','smallcap','mid-cap','small-cap'], broad: true },
+  NIFTYSMALLCAP: { q: ['Nifty Smallcap today', 'smallcap stocks India', 'midcap smallcap market India'], kw: ['smallcap','midcap','small-cap','mid-cap'], broad: true },
+  NIFTYNXT50: { q: ['Nifty Next 50 today', 'Nifty Next 50 stocks', 'Sensex Nifty market news'], kw: ['next 50','nifty','market'], broad: true },
+  INDIAVIX: { q: ['India VIX today', 'India VIX volatility market', 'Sensex Nifty market news'], kw: ['vix','volatility','nifty','market'], broad: true },
+};
 app.get('/api/news/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const name = String(req.query.name || '').replace(/[^\w &.\-]/g, '').trim().slice(0, 60);
@@ -269,10 +291,23 @@ app.get('/api/news/:symbol', async (req, res) => {
   const now = Date.now();
   if (newsCache[key] && now - newsCache[key].time < NEWS_TTL) return res.json(newsCache[key].data);
   try {
-    const isIndex = /^(NIFTY|BANKNIFTY|FINNIFTY|SENSEX|MIDCPNIFTY|INDIAVIX|NIFTY\w*|BSE\w*)$/.test(symbol) && !name;
-    const q1 = isIndex ? `${symbol} Indian stock market` : `${name || symbol} share`;
-    const queries = [[gnews(q1), 'Google News']];
-    if (!isIndex) queries.push([gnews(`${symbol} NSE stock`), 'Google News']);
+    const idx = INDEX_NEWS[symbol];
+    let items;
+    if (idx) {
+      const [specific, general] = await Promise.all([
+        Promise.all(idx.q.map(q => fetchFeed(gnews(q), 'Google News'))).then(a => a.flat()),
+        Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat())
+      ]);
+      const seen = new Set();
+      const uniq = arr => arr.filter(it => { const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
+      const spec = uniq(specific).sort((a, b) => b.ts - a.ts);
+      const gen = uniq(general).sort((a, b) => b.ts - a.ts);
+      const rel = gen.filter(it => { const t = (it.title + ' ' + it.description).toLowerCase(); return idx.kw.some(w => t.includes(w)); });
+      items = [...spec, ...(idx.broad ? gen : rel)].sort((a, b) => b.ts - a.ts).slice(0, 25).map(i => ({ ...i, scope: 'stock' }));
+      if (items.length < 8) items = items.concat(gen.filter(g => !items.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
+    } else {
+    const q1 = `${name || symbol} share`;
+    const queries = [[gnews(q1), 'Google News'], [gnews(`${symbol} NSE stock`), 'Google News']];
     const [specific, general] = await Promise.all([
       Promise.all(queries.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat()),
       Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => fetchFeed(u, s))).then(a => a.flat())
@@ -284,9 +319,9 @@ app.get('/api/news/:symbol', async (req, res) => {
     const spec = uniq(specific).sort((a, b) => b.ts - a.ts);
     const gen = uniq(general).sort((a, b) => b.ts - a.ts);
     const genRel = gen.filter(mentions);
-    let items = [...spec, ...genRel].sort((a, b) => b.ts - a.ts).slice(0, 15).map(i => ({ ...i, scope: 'stock' }));
-    // pad with the latest general market headlines if the stock itself has little news
+    items = [...spec, ...genRel].sort((a, b) => b.ts - a.ts).slice(0, 15).map(i => ({ ...i, scope: 'stock' }));
     if (items.length < 8) items = items.concat(gen.filter(g => !genRel.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
+    }
     items = items.map(i => ({ ...i, pubDate: i.ts ? new Date(i.ts).toISOString() : '', sentiment: getSentiment(i.title + ' ' + i.description) }));
     const result = { symbol, items, fetchedAt: new Date().toISOString() };
     if (items.length) newsCache[key] = { data: result, time: now };

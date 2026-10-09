@@ -48,6 +48,7 @@ async function waitUp(base) { for (let i = 0; i < 40; i++) { try { const r = awa
   const s1 = start({ DASHBOARD_PASSCODE: '', CHECK_ALERTS_SECRET: '' }, 3911), b1 = 'http://localhost:3911';
   ok(await waitUp(b1), 'server starts');
   ok((await (await fetch(b1 + '/healthz')).text()) === 'ok', '/healthz answers ok');
+  { const r = await (await fetch(b1 + '/api/calls/monitor')).json(); ok(Array.isArray(r.active) && Array.isArray(r.events) && r.today && r.today.date, '/api/calls/monitor responds'); }
   { const r = await (await fetch(b1 + '/api/calls')).json(); ok(Array.isArray(r.calls) && r.stats && r.scan, '/api/calls responds (' + r.calls.length + ' calls)'); }
   const pg = await fetch(b1 + '/'); ok(pg.ok && (await pg.text()).includes('viewTabs'), 'home page served');
   const st = await (await fetch(b1 + '/api/status')).json(); ok(st && st.market && st.telegram, '/api/status returns health info');

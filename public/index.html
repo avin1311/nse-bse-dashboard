@@ -51,6 +51,20 @@
   .tc-ms{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin:6px 0;} .tc-ms span.hit{color:var(--green);font-weight:700;}
   .tc-an{font-size:12px;color:var(--text2);line-height:1.5;} .tc-disc{font-size:11px;color:var(--text2);margin-top:12px;border-top:1px dashed var(--border);padding-top:8px;}
   @media(max-width:560px){.tc-stats,.tc-grid{grid-template-columns:repeat(2,1fr);}}
+  .cm{position:fixed;inset:0;z-index:8900;background:var(--bg,#0b0f17);overflow:auto;padding:14px 16px 40px;}
+  .cm-in{max-width:1180px;margin:0 auto;} .cm-top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:10px;} .cm-top h3{margin:0;font-size:20px;}
+  .cm-live{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;} .cm-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;} .cm-dot.off{background:var(--text2);}
+  .cm-cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:14px;align-items:start;} @media(max-width:900px){.cm-cols{grid-template-columns:1fr;}}
+  .cm-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;} .cm-box h4{margin:0 0 8px;font-size:14px;}
+  .cm-row{display:grid;grid-template-columns:minmax(90px,1.1fr) 1.3fr 1fr 1fr;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--border);font-size:12px;} .cm-row:first-of-type{border-top:0;}
+  .cm-row b{font-size:14px;} .cm-sub{color:var(--text2);font-size:11px;} .cm-b{color:var(--green);} .cm-s{color:var(--red);}
+  .cm-bar{position:relative;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;margin:4px 0;} .cm-bar i{position:absolute;top:0;bottom:0;} .cm-mark{position:absolute;top:-2px;width:3px;height:12px;background:#fff;border-radius:2px;}
+  .cm-ev{padding:8px 0;border-top:1px solid var(--border);font-size:12px;} .cm-ev:first-of-type{border-top:0;} .cm-ev.good b{color:var(--green);} .cm-ev.bad b{color:var(--red);}
+  .cm-flash{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:9500;padding:12px 18px;border-radius:10px;font-weight:700;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:92vw;animation:cmin .25s ease-out;} .cm-flash.good{background:#0f5a35;color:#d6ffe8;border:1px solid #1fbf75;} .cm-flash.bad{background:#6a1620;color:#ffe0e3;border:1px solid #ff5a6a;} .cm-flash.info{background:#1d2b44;color:#dbe8ff;border:1px solid #3d8bfd;}
+  @keyframes cmin{from{opacity:0;transform:translate(-50%,-10px);}to{opacity:1;transform:translate(-50%,0);}}
+  .cm-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;} .cm-kpis div{background:var(--panel2);border-radius:8px;padding:8px 10px;font-size:10px;text-transform:uppercase;color:var(--text2);letter-spacing:.4px;} .cm-kpis b{display:block;font-size:16px;color:var(--text);text-transform:none;letter-spacing:0;}
+  @media(max-width:560px){.cm-row{grid-template-columns:1fr 1fr;} .cm-kpis{grid-template-columns:repeat(2,1fr);}}
+
 
   .clk-ripple{position:fixed;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:rgba(61,139,253,.55);pointer-events:none;z-index:99999;animation:clkr .5s ease-out forwards;}
   @keyframes clkr{to{transform:scale(5);opacity:0;}}
@@ -339,6 +353,7 @@
       <span id="upstoxConnectLabel">Connect Upstox</span>
     </a>
     <span class="mkt-badge" id="mktBadge" title="Market hours: Mon–Fri 9:15–15:30 IST (exchange holidays are not tracked)">&hellip;</span>
+    <button class="btn" id="monBtn" title="Live monitor for all trade calls, alerts and end-of-day summary">Calls Monitor</button>
     <button class="btn" id="callsBtn" title="Rule-based trade calls with entry, stop loss and targets">Trade Calls</button>
     <button class="btn" id="statusBtn" title="Connection health, Telegram test">Status</button>
     <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
@@ -2347,6 +2362,97 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     draw(); load(false); timer=setInterval(()=>load(false),60000);
   }
   document.getElementById('callsBtn')?.addEventListener('click',open);
+})();
+
+
+// ---------------- Calls Monitor: live watch of every call, sound + screen alerts, EOD summaries ----------------
+(function(){
+  const esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const num=n=>n==null?'—':Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const sg=n=>n==null?'—':(n>0?'+':'')+n+'%';
+  const tm=t=>new Date(t*1000).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
+  const dt=t=>new Date(t*1000).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
+  const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
+  let data=null, view=null, timer=null, sound=LS.get('cmSound',false), actx=null, inited=false;
+  // ---- sound (Web Audio; needs one click to unlock) ----
+  function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
+  function tone(f,t0,d,type,vol){ const o=actx.createOscillator(), g=actx.createGain(); o.type=type||'sine'; o.frequency.value=f; g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(vol||0.25,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+d); o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0+d+0.05); }
+  function beep(kind){ if(!sound||!ensureAudio()) return; const t=actx.currentTime;
+    if(kind==='good'){ tone(660,t,.18); tone(880,t+.17,.18); tone(1320,t+.34,.35); }
+    else if(kind==='bad'){ tone(300,t,.25,'sawtooth',.2); tone(220,t+.28,.25,'sawtooth',.2); tone(300,t+.56,.25,'sawtooth',.2); tone(220,t+.84,.4,'sawtooth',.2); }
+    else { tone(740,t,.15); tone(740,t+.2,.15); } }
+  // ---- on-screen alert ----
+  function flash(ev){ const d=document.createElement('div'); d.className='cm-flash '+(ev.level||'info'); d.textContent=ev.text.replace(/<[^>]+>/g,''); d.style.top=(16+document.querySelectorAll('.cm-flash').length*54)+'px'; document.body.appendChild(d); setTimeout(()=>d.remove(),ev.level==='info'?6000:12000); d.onclick=()=>d.remove();
+    try{ if(window.Notification&&Notification.permission==='granted'&&document.hidden) new Notification('Trade call alert',{body:d.textContent}); }catch(e){} }
+  function handleNew(events){
+    let seen=LS.get('cmSeen',null); const ids=events.map(e=>e.id);
+    if(seen==null){ LS.set('cmSeen',ids); return; }       // first ever load: don't replay history
+    const fresh=events.filter(e=>!seen.includes(e.id)).reverse();
+    fresh.forEach(e=>{ flash(e); beep(e.level); if(e.kind==='NEW') addToWatchlist(e.symbol); });
+    if(fresh.length) LS.set('cmSeen',ids.concat(seen).slice(0,300));
+  }
+  function addToWatchlist(sym){ try{ if(window.WATCHLIST&&!window.WATCHLIST.includes(sym)){ window.WATCHLIST.push(sym); if(typeof renderWatchlist==='function') renderWatchlist(); } }catch(e){} }
+  async function poll(){
+    if(document.hidden&&!LS.get('cmBg',true)) return;
+    try{ const r=await fetch('/api/calls/monitor',{cache:'no-store'}); if(!r.ok) throw 0; data=await r.json();
+      (data.active||[]).forEach(c=>addToWatchlist(c.symbol)); handleNew(data.events||[]); }catch(e){ if(data) data.stale=true; }
+    if(view) draw();
+  }
+  function schedule(){ clearInterval(timer); timer=setInterval(poll, (data&&data.market==='open')?15000:60000); }
+  // ---- screen ----
+  function row(c){
+    const sgn=c.side==='BUY'?1:-1, pts=[c.sl,c.entry,...c.targets], lo=Math.min(...pts), hi=Math.max(...pts), pos=x=>((x-lo)/(hi-lo)*100).toFixed(1);
+    const px=c.ltp!=null?Math.min(hi,Math.max(lo,c.ltp)):c.entry, nxt=c.targets[c.targetsHit||0];
+    const toSl=Math.abs(c.ltp-c.activeSl)/c.ltp*100, toT=nxt!=null?Math.abs(nxt-c.ltp)/c.ltp*100:null;
+    const L=Math.min(pos(c.sl),pos(c.targets[2])), R=Math.max(pos(c.sl),pos(c.targets[2]));
+    return `<div class="cm-row"><div><b>${esc(c.symbol)}</b><div class="cm-sub"><span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> · ${c.mode==='intraday'?'Intraday':'Swing'} · ${esc(c.riskLabel)}</div><div class="cm-sub">${dt(c.t)}</div></div>
+      <div><div class="cm-bar"><i style="left:${pos(c.sl)}%;width:${Math.abs(pos(c.entry)-pos(c.sl))}%;background:rgba(255,90,106,.45)"></i><i style="left:${Math.min(pos(c.entry),pos(c.targets[2]))}%;width:${Math.abs(pos(c.targets[2])-pos(c.entry))}%;background:rgba(31,191,117,.45)"></i><span class="cm-mark" style="left:calc(${pos(px)}% - 1px)"></span></div>
+        <div class="cm-sub">SL ${num(c.activeSl)}${c.targetsHit?' (trailed)':''} · Entry ${num(c.entry)} · T${(c.targetsHit||0)+1} ${nxt!=null?num(nxt):'—'}</div></div>
+      <div><b>${num(c.ltp)}</b><div class="cm-sub">LTP</div></div>
+      <div><b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b><div class="cm-sub">${c.targetsHit?('T'+c.targetsHit+' done · '):''}SL ${toSl.toFixed(1)}% away${toT!=null?' · T'+((c.targetsHit||0)+1)+' '+toT.toFixed(1)+'% away':''}</div></div></div>`;
+  }
+  function eodBox(x,title){
+    if(!x) return '';
+    return `<div class="cm-box"><h4>${title||'End of day '+esc(x.date)}</h4><div class="cm-kpis"><div>New calls<b>${x.created.total}</b></div><div>Closed<b>${x.closed.total}</b></div><div>Wins / losses<b>${x.closed.wins} / ${x.closed.losses}</b></div><div>Net closed<b class="${x.closed.netPct>0?'cm-b':x.closed.netPct<0?'cm-s':''}">${sg(x.closed.netPct)}</b></div>
+      <div>Targets hit<b>${x.targetHits}</b></div><div>Stops hit<b>${x.slHits}</b></div><div>Open now<b>${x.active.total}</b></div><div>Open running<b class="${x.active.openPnlPct>0?'cm-b':x.active.openPnlPct<0?'cm-s':''}">${sg(x.active.openPnlPct)}</b></div></div>
+      <div class="cm-sub" style="margin-top:8px;">New: buy ${x.created.buy}, sell ${x.created.sell}; intraday ${x.created.intraday}, swing ${x.created.swing}.${x.best?` Best ${esc(x.best.symbol)} ${sg(x.best.pnlPct)}.`:''}${x.worst&&x.best&&x.worst.symbol!==x.best.symbol?` Worst ${esc(x.worst.symbol)} ${sg(x.worst.pnlPct)}.`:''} ${x.allTime&&x.allTime.winRate!=null?`All-time win rate ${x.allTime.winRate}% over ${x.allTime.closed} closed, expectancy ${sg(x.allTime.expectancy)} per call.`:''}</div>
+      ${x.closedList&&x.closedList.length?`<div style="margin-top:8px;font-size:12px;">${x.closedList.map(c=>`<div class="cm-ev"><b>${esc(c.symbol)}</b> <span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> ${c.mode} · ${esc(String(c.status).replace('_',' '))} · <b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b></div>`).join('')}</div>`:''}</div>`;
+  }
+  function draw(){
+    if(!view) return; const b=view.querySelector('#cmBody'); if(!data){ b.innerHTML='<div class="metric-sub">Loading…</div>'; return; }
+    const act=data.active||[], evs=data.events||[], today=data.today, eod=data.eod||[];
+    const pn=act.reduce((s,c)=>s+(c.pnlPct||0),0);
+    const sec=(a,f)=>a.filter(f);
+    b.innerHTML=`
+      <div class="cm-kpis" style="margin-bottom:12px;"><div>Watching<b>${act.length}</b></div><div>In profit<b class="cm-b">${sec(act,c=>c.pnlPct>0.05).length}</b></div><div>In loss<b class="cm-s">${sec(act,c=>c.pnlPct<-0.05).length}</b></div><div>Combined running<b class="${pn>0?'cm-b':pn<0?'cm-s':''}">${sg(Math.round(pn*100)/100)}</b></div></div>
+      <div class="cm-cols"><div>
+        <div class="cm-box"><h4>Live watchlist <span class="cm-sub">(every call is added here automatically and watched until it closes)</span></h4>
+          ${act.length?act.map(row).join(''):'<div class="metric-sub">No active calls right now. New calls appear here the moment they are generated.</div>'}</div>
+        ${eodBox(today,'Today so far ('+esc(today.date)+')')}
+      </div><div>
+        <div class="cm-box"><h4>Alerts</h4>${evs.length?evs.slice(0,40).map(e=>`<div class="cm-ev ${e.level}"><b>${esc(e.kind==='NEW'?'NEW':e.kind==='SL'?'STOP LOSS':e.kind==='EXPIRED'?'EXPIRED':e.kind==='BE'?'STOPPED AT ENTRY':'TARGET '+e.kind.slice(1))}</b> ${esc(e.symbol)} ${e.side}<div class="cm-sub">${esc(e.text.replace(/<[^>]+>/g,''))} · ${dt(e.t)}</div></div>`).join(''):'<div class="metric-sub">No alerts yet. Target and stop-loss hits will show here, play a sound, and go to Telegram.</div>'}</div>
+        <div class="cm-box"><h4>Daily summaries <button class="btn" id="cmEodNow" style="float:right;font-size:11px;">Generate today's</button></h4>
+          ${eod.length?eod.map(x=>`<details class="cm-ev"><summary><b>${esc(x.date)}</b> · ${x.created.total} new · ${x.closed.wins}W/${x.closed.losses}L · ${sg(x.closed.netPct)}</summary>${eodBox(x,'')}</details>`).join(''):'<div class="metric-sub">The first summary is sent after 3:40 pm IST on the next trading day with calls. Use the button to see today\'s now.</div>'}</div>
+      </div></div>
+      <div class="tc-disc">${data.upstox?'':'<b style="color:var(--red)">Upstox is not connected, so live prices cannot update.</b> '}${data.persisted?'History is saved.':'<b>Storage (Upstash) is not set up, so calls and summaries are lost when the server restarts.</b>'} Prices refresh every ${data.market==='open'?'15':'60'} seconds while this page is open; the server also checks every 5 minutes through the scheduled check even when the page is closed, and sends Telegram alerts. Sound only plays while this page is open in a browser tab. Rule-based screen, not investment advice.</div>`;
+    b.querySelector('#cmEodNow').onclick=async e=>{ e.target.textContent='Working…'; try{ await fetch('/api/calls/eod/run',{method:'POST'}); }catch(x){} await poll(); };
+    const sb=view.querySelector('#cmSnd'); sb.textContent=sound?'🔊 Sound on':'🔇 Sound off';
+    view.querySelector('#cmLive').innerHTML=`<span class="cm-dot ${data.stale?'off':''}"></span>${data.stale?'Connection lost, retrying':(data.market==='open'?'Live':'Market closed')} · updated ${tm(Math.floor(Date.now()/1000))}`;
+  }
+  function open(){
+    if(view) return; view=document.createElement('div'); view.className='cm';
+    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔇 Sound off</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
+    document.body.appendChild(view);
+    view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; };
+    view.querySelector('#cmSnd').onclick=()=>{ sound=!sound; LS.set('cmSound',sound); if(sound){ ensureAudio(); beep('info'); } draw(); };
+    view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k); };
+    view.querySelector('#cmNote').onclick=async()=>{ try{ const r=await Notification.requestPermission(); alert(r==='granted'?'Browser alerts on: you will get a pop-up when this tab is in the background.':'Browser alerts were not allowed.'); }catch(e){ alert('This browser does not support alerts.'); } };
+    draw(); poll().then(schedule);
+  }
+  document.getElementById('monBtn')?.addEventListener('click',open);
+  // background watcher: runs even when the screen is closed, so alerts and sound still fire anywhere in the app
+  function start(){ if(inited) return; inited=true; poll().then(schedule); document.addEventListener('visibilitychange',()=>{ if(!document.hidden) poll(); }); }
+  setTimeout(start,4000);
 })();
 
 // ---------------- click confirmation (ripple + highlight + toast on every click) ----------------

@@ -1090,7 +1090,7 @@ app.get('/api/check-alerts', async (req, res) => {
     }
     HEALTH.alerts.lastRun = Date.now(); HEALTH.alerts.lastTriggered = notifications.length;
 
-    try { lowPriority.run(true, () => runCallsCycle(false)); } catch (e) {}
+    try { lowPriority.run(true, async () => { await runCallsCycle(false); await liveMonitor(); await maybeEod(); }); } catch (e) {}
     res.json({ checked: equitySymbols.length + optionAlerts.length, triggered: notifications.length, notifications });
   } catch (e) {
     res.status(502).json({ error: e.message });
@@ -1646,6 +1646,118 @@ async function trackCall(call) {
     Object.assign(call, st);
   } catch (e) { /* keep last state */ }
 }
+
+// ---- Call events (target / stop hits), live monitor and end-of-day summary ----
+let evDb = null;
+async function loadEvents() { if (!evDb) { const a = await storeGet('store:calls-events', []); evDb = Array.isArray(a) ? a : []; } return evDb; }
+async function emitEvent(e, tg = true) {
+  const db = await loadEvents();
+  if (db.some(x => x.id === e.id)) return;
+  db.push(e); if (db.length > 300) db.splice(0, db.length - 300);
+  try { await storeSet('store:calls-events', db); } catch (x) { /* memory only */ }
+  if (tg) { try { await sendTelegram(e.text + '\n<i>Rule-based screen, not advice.</i>'); } catch (x) {} }
+}
+function callEvents(c, before) {
+  const out = []; const now = Math.floor(Date.now() / 1000);
+  const base = { callId: c.id, symbol: c.symbol, side: c.side, mode: c.mode, t: now };
+  const pct = x => (x > 0 ? '+' : '') + x + '%';
+  for (let i = before.hit + 1; i <= (c.targetsHit || 0); i++) {
+    const px = c.targets[i - 1];
+    out.push({ ...base, id: c.id + ':T' + i, kind: 'T' + i, level: 'good', price: px, pnlPct: null,
+      text: `🎯 <b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? '. Stop moved to entry.' : '') });
+  }
+  if (c.closed && !before.closed && c.status !== 'TARGET_HIT') {
+    const k = c.status === 'SL_HIT' ? 'SL' : c.status === 'EXPIRED' ? 'EXPIRED' : 'BE';
+    const icon = k === 'SL' ? '🛑' : k === 'EXPIRED' ? '⏱' : '⚪';
+    const word = k === 'SL' ? 'hit its stop loss' : k === 'EXPIRED' ? 'expired' : 'was stopped at entry (after a target)';
+    out.push({ ...base, id: c.id + ':' + k, kind: k, level: k === 'SL' ? 'bad' : 'info', price: c.exit, pnlPct: c.pnlPct,
+      text: `${icon} <b>${c.symbol}</b> ${c.side} (${c.mode}) ${word} at ₹${c.exit} (${pct(c.pnlPct)})` });
+  } else if (c.closed && !before.closed) {
+    out[out.length - 1] && (out[out.length - 1].text += ` (${pct(c.pnlPct)}). All targets done, call closed.`);
+  }
+  return out;
+}
+async function applyTrack(c) {
+  const before = { hit: c.targetsHit || 0, closed: !!c.closed };
+  await trackCall(c);
+  if (c.closed && !before.closed) c.closedAt = c.exitT || Math.floor(Date.now() / 1000);
+  for (const e of callEvents(c, before)) await emitEvent(e, true);
+}
+let lastLive = 0;
+async function liveMonitor() {
+  if (Date.now() - lastLive < 15000) return; lastLive = Date.now();
+  if (!upstoxTokens().length) return;
+  const db = await loadCalls(); const act = db.filter(c => !c.closed); if (!act.length) return;
+  let changed = false;
+  for (const c of act) {
+    try {
+      const q = await getUpstoxLTPC(await dataKeyFor(c.symbol));
+      if (q.price == null) continue;
+      const sgn = c.side === 'BUY' ? 1 : -1;
+      c.ltp = q.price; c.pnlPct = Math.round(sgn * (q.price - c.entry) / c.entry * 10000) / 100; changed = true;
+      const nextT = c.targets[c.targetsHit || 0];
+      const trig = sgn === 1 ? (q.price <= c.activeSl || (nextT != null && q.price >= nextT)) : (q.price >= c.activeSl || (nextT != null && q.price <= nextT));
+      if (trig) { const live = c.ltp; await applyTrack(c); if (!c.closed) c.ltp = live; }
+    } catch (e) { /* skip this call this round */ }
+  }
+  if (changed) await saveCalls();
+}
+function istDateKey(t) { return new Date((t + 19800) * 1000).toISOString().slice(0, 10); }
+async function loadEod() { const a = await storeGet('store:calls-eod', []); return Array.isArray(a) ? a : []; }
+function buildEod(db, events, day) {
+  const r2 = x => Math.round(x * 100) / 100;
+  const slim = c => ({ symbol: c.symbol, side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0 });
+  const created = db.filter(c => istDateKey(c.t) === day);
+  const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day);
+  const active = db.filter(c => !c.closed);
+  const wins = closed.filter(c => c.pnlPct > 0.05), losses = closed.filter(c => c.pnlPct < -0.05);
+  const sum = a => a.reduce((s, c) => s + c.pnlPct, 0);
+  const evs = events.filter(e => istDateKey(e.t) === day);
+  const sorted = closed.slice().sort((a, b) => b.pnlPct - a.pnlPct);
+  return {
+    date: day, built: Math.floor(Date.now() / 1000),
+    created: { total: created.length, buy: created.filter(c => c.side === 'BUY').length, sell: created.filter(c => c.side === 'SELL').length, intraday: created.filter(c => c.mode === 'intraday').length, swing: created.filter(c => c.mode === 'swing').length },
+    closed: { total: closed.length, wins: wins.length, losses: losses.length, flat: closed.length - wins.length - losses.length, netPct: r2(sum(closed)), winRate: wins.length + losses.length ? r2(wins.length / (wins.length + losses.length) * 100) : null },
+    targetHits: evs.filter(e => /^T\d$/.test(e.kind)).length, slHits: evs.filter(e => e.kind === 'SL').length,
+    active: { total: active.length, openPnlPct: r2(sum(active)), inProfit: active.filter(c => c.pnlPct > 0.05).length, inLoss: active.filter(c => c.pnlPct < -0.05).length, list: active.map(slim) },
+    best: sorted[0] ? slim(sorted[0]) : null, worst: sorted.length ? slim(sorted[sorted.length - 1]) : null,
+    closedList: sorted.map(slim),
+    allTime: Calls.summarize(db),
+  };
+}
+function eodText(x) {
+  const sg = n => (n > 0 ? '+' : '') + n + '%';
+  let t = `📊 <b>Trade Calls: end of day ${x.date}</b>\n`;
+  t += `New today: ${x.created.total} (buy ${x.created.buy}, sell ${x.created.sell}; intraday ${x.created.intraday}, swing ${x.created.swing})\n`;
+  t += `Closed today: ${x.closed.total}, wins ${x.closed.wins}, losses ${x.closed.losses}, net ${sg(x.closed.netPct)}` + (x.closed.winRate != null ? `, win rate ${x.closed.winRate}%` : '') + '\n';
+  t += `Targets hit: ${x.targetHits}, stops hit: ${x.slHits}\n`;
+  t += `Still open: ${x.active.total} (${x.active.inProfit} in profit, ${x.active.inLoss} in loss, combined running ${sg(x.active.openPnlPct)})\n`;
+  if (x.best) t += `Best: ${x.best.symbol} ${sg(x.best.pnlPct)}\n`;
+  if (x.worst && x.worst.symbol !== (x.best && x.best.symbol)) t += `Worst: ${x.worst.symbol} ${sg(x.worst.pnlPct)}\n`;
+  if (x.allTime.winRate != null) t += `All-time: ${x.allTime.closed} closed, win rate ${x.allTime.winRate}%, expectancy ${sg(x.allTime.expectancy)} per call\n`;
+  return t + '<i>Rule-based screen, not advice.</i>';
+}
+let eodRunning = false;
+async function runEod(day, force) {
+  if (eodRunning) return null; eodRunning = true;
+  try {
+    const list = await loadEod();
+    if (!force && list.some(x => x.date === day)) return null;
+    if (upstoxTokens().length) { callsState.lastScan = 0; await runCallsCycle(true); }
+    const db = await loadCalls(); const ev = await loadEvents();
+    const x = buildEod(db, ev, day);
+    if (!force && !x.created.total && !x.closed.total && !x.active.total) return null;
+    const out = list.filter(y => y.date !== day); out.push(x); out.sort((a, b) => a.date < b.date ? -1 : 1);
+    try { await storeSet('store:calls-eod', out.slice(-45)); } catch (e) {}
+    try { await sendTelegram(eodText(x)); } catch (e) {}
+    return x;
+  } finally { eodRunning = false; }
+}
+async function maybeEod() {
+  const { dow, mins } = istParts();
+  if (dow < 1 || dow > 5 || mins < 940) return; // after 15:40 IST on trading days
+  try { await runEod(istDateKey(Math.floor(Date.now() / 1000)), false); } catch (e) {}
+}
 async function runCallsCycle(force) {
   if (callsState.running) return;
   if (!force && Date.now() - callsState.lastScan < SCAN_EVERY) return;
@@ -1655,10 +1767,7 @@ async function runCallsCycle(force) {
     const db = await loadCalls();
     const notes = [];
     // 1) update outcomes of active calls
-    for (const c of db.filter(x => !x.closed)) {
-      const was = c.closed; await trackCall(c);
-      if (c.closed && !was) notes.push(`${c.status === 'SL_HIT' ? '🛑' : c.pnlPct > 0 ? '✅' : '⚪'} ${c.symbol} ${c.side} ${c.mode} closed: ${c.status.replace('_', ' ')} (${c.pnlPct > 0 ? '+' : ''}${c.pnlPct}%)`);
-    }
+    for (const c of db.filter(x => !x.closed)) await applyTrack(c);
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK.slice(0, 90);
@@ -1709,6 +1818,7 @@ async function runCallsCycle(force) {
       const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', checks: f.checks, analysis: f.analysis, t: nowSec };
       Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false });
       db.push(call); open_.push(call); quota[f.mode]--;
+      await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}` }, false);
       notes.push(`🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
     }
     if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX);
@@ -1788,7 +1898,21 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-05-r5 (bounce buys, today-direction filter)';
+const BUILD = '2026-10-09-r6 (monitor screen, alerts, EOD)';
+
+app.get('/api/calls/monitor', async (req, res) => {
+  const db = await loadCalls();
+  lowPriority.run(true, async () => { try { await runCallsCycle(false); await liveMonitor(); await maybeEod(); } catch (e) {} });
+  const ev = await loadEvents(); const eod = await loadEod();
+  const active = db.filter(c => !c.closed).sort((a, b) => b.t - a.t);
+  const day = istDateKey(Math.floor(Date.now() / 1000));
+  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, events: ev.slice(-80).reverse(),
+    today: buildEod(db, ev, day), eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
+});
+app.post('/api/calls/eod/run', async (req, res) => {
+  try { const day = istDateKey(Math.floor(Date.now() / 1000)); const x = await runEod(day, true); res.json({ ok: true, summary: x }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/calls/reset', async (req, res) => {
   const db = await loadCalls(); db.length = 0; await saveCalls(); callsState.lastScan = 0;
   res.json({ ok: true });

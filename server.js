@@ -1758,6 +1758,25 @@ async function maybeEod() {
   if (dow < 1 || dow > 5 || mins < 940) return; // after 15:40 IST on trading days
   try { await runEod(istDateKey(Math.floor(Date.now() / 1000)), false); } catch (e) {}
 }
+
+// Index context for gating calls: daily trend bias plus today's move. Cached 3 minutes.
+let idxCtx = { t: 0, v: null };
+async function getIndexContext() {
+  if (idxCtx.v && Date.now() - idxCtx.t < 180000) return idxCtx.v;
+  const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
+  let v = { dailyBias: 'MIXED', todayPct: null, intradayBias: 'MIXED' };
+  try {
+    const rows = await getUpstoxCandles('NIFTY', '1D'); let bars = toBars(rows);
+    if (open && mins < 915) bars = bars.slice(0, -1);
+    v.dailyBias = Calls.marketBias(bars.slice(-150));
+    const q = await getUpstoxLTPC(await dataKeyFor('NIFTY'));
+    const prev = (open && mins < 915) ? rows[rows.length - 2] : rows[rows.length - 1];
+    if (q.price != null && prev && prev.c) v.todayPct = Math.round((q.price / prev.c - 1) * 10000) / 100;
+    if (v.todayPct != null) v.intradayBias = v.todayPct > 0.3 ? 'BULL' : v.todayPct < -0.3 ? 'BEAR' : 'MIXED';
+  } catch (e) { v.err = e.message; }
+  idxCtx = { t: Date.now(), v };
+  return v;
+}
 async function runCallsCycle(force) {
   if (callsState.running) return;
   if (!force && Date.now() - callsState.lastScan < SCAN_EVERY) return;
@@ -1771,6 +1790,9 @@ async function runCallsCycle(force) {
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK.slice(0, 90);
+    const ictx = await getIndexContext(); callsState.market = ictx;
+    // swing: block trades against the index's daily trend, and against a >0.5% move today
+    const swingBias = ictx.todayPct != null && ictx.todayPct > 0.5 ? 'BULL' : ictx.todayPct != null && ictx.todayPct < -0.5 ? 'BEAR' : ictx.dailyBias;
     const found = []; callsState.scanned = 0; let i = 0; const breadth = { n: 0, above50: 0, stUp: 0 };
     const nowSec = Math.floor(Date.now() / 1000);
     async function worker() {
@@ -1782,14 +1804,14 @@ async function runCallsCycle(force) {
           let bars = h.c.map((_, k) => ({ t: h.t[k], h: h.h[k], l: h.l[k], c: h.c[k], v: h.v[k] }));
           if (open && mins < 915) bars = bars.slice(0, -1);
           const rg = Calls.regime(bars); if (rg) { breadth.n++; if (rg.above50) breadth.above50++; if (rg.stUp) breadth.stUp++; }
-          const sw = Calls.evaluate(bars, 'swing', { minScore: 5 });
+          const sw = Calls.evaluate(bars, 'swing', { minScore: 5, bias: swingBias });
           if (sw) found.push({ symbol: sym, ...sw });
           // intraday: 15m completed bars, new entries only 9:45–14:30 IST
-          if (open && mins >= 585 && mins <= 870) {
+          if (open && mins >= 615 && mins <= 840) {
             let rows = toBars(await getUpstoxCandles(sym, '15m'));
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
-            const id = Calls.evaluate(rows.slice(-300), 'intraday', { minScore: 5 });
+            const id = Calls.evaluate(rows.slice(-300), 'intraday', { minScore: 5, bias: ictx.intradayBias });
             if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) found.push({ symbol: sym, ...id });
           }
           callsState.scanned++;
@@ -1803,9 +1825,9 @@ async function runCallsCycle(force) {
     found.sort((a, b) => b.score - a.score);
     // Global caps (not per scan): a one-sided market must not fill the board with
     // correlated trades. Max open per mode, and max open per direction per mode.
-    const open_ = db.filter(c => !c.closed); const CAP = { swing: 8, intraday: 6 }, SIDE_CAP = { swing: 5, intraday: 4 };
+    const open_ = db.filter(c => !c.closed); const CAP = { swing: 6, intraday: 4 }, SIDE_CAP = { swing: 4, intraday: 3 };
     const cnt = (m, side) => open_.filter(c => c.mode === m && (!side || c.side === side)).length;
-    const quota = { swing: Math.min(3, CAP.swing - cnt('swing')), intraday: Math.min(4, CAP.intraday - cnt('intraday')) };
+    const quota = { swing: Math.min(2, CAP.swing - cnt('swing')), intraday: Math.min(2, CAP.intraday - cnt('intraday')) };
     for (const f of found) {
       if (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode]) continue;
       const dupe = db.some(c => c.symbol === f.symbol && c.mode === f.mode && (!c.closed || nowSec - c.t < (f.mode === 'intraday' ? 86400 : 5 * 86400)));
@@ -1898,7 +1920,30 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-09-r6 (monitor screen, alerts, EOD)';
+const BUILD = '2026-10-09-r7 (strategy v2: market gate, pullback entries, wider stops)';
+// Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
+// Runs in the background (first run takes a minute or two); poll the same URL for the result.
+let btJob = { state: 'idle', result: null, startedAt: 0, progress: 0, err: null };
+async function runBacktest() {
+  btJob = { state: 'running', result: null, startedAt: Date.now(), progress: 0, err: null };
+  try {
+    const bars = {}; const syms = FNO_FALLBACK.slice(0, 90); let i = 0;
+    async function worker() { while (i < syms.length) { const sym = syms[i++]; try { const h = await getScanHistory(sym); bars[sym] = h.c.map((_, k) => ({ t: h.t[k], h: h.h[k], l: h.l[k], c: h.c[k], v: h.v[k] })); } catch (e) {} btJob.progress = Math.round(i / syms.length * 100); } }
+    await Promise.all(Array.from({ length: 3 }, worker));
+    let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-300); } catch (e) {}
+    const n = Object.keys(bars).length;
+    const result = { symbols: n, bars: n ? bars[Object.keys(bars)[0]].length : 0, indexUsed: !!idx,
+      oldRules: Calls.backtest(bars, { legacy: true, useGate: false }),
+      newRules: Calls.backtest(bars, { idxBars: idx }),
+      newRulesNoGate: Calls.backtest(bars, { useGate: false }) };
+    btJob = { state: 'done', result, startedAt: btJob.startedAt, finishedAt: Date.now(), progress: 100, err: null };
+  } catch (e) { btJob = { ...btJob, state: 'error', err: e.message }; }
+}
+app.get('/api/calls/backtest', (req, res) => {
+  if (req.query.run === '1' && btJob.state !== 'running') lowPriority.run(true, () => runBacktest());
+  res.json(btJob);
+});
+
 
 app.get('/api/calls/monitor', async (req, res) => {
   const db = await loadCalls();

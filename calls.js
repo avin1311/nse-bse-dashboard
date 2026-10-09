@@ -63,22 +63,29 @@ function evaluate(bars, mode, opts = {}) {
   const vAvg = v.slice(n - 20, n).reduce((a, b) => a + b, 0) / 20;
   const volOk = vAvg > 0 && v[n] >= 1.2 * vAvg;
   const hi20 = Math.max(...h.slice(n - 20, n)), lo20 = Math.min(...l.slice(n - 20, n));
+  const V2 = !opts.legacy;
+  // v2: prefer pullbacks inside a trend over extended breakouts. A "rejection" is a recent poke at the
+  // 20 EMA that failed (price back below/above the 5 EMA and the prior close).
+  const hi3 = Math.max(...h.slice(n - 3, n + 1)), lo3 = Math.min(...l.slice(n - 3, n + 1));
+  const rejSell = hi3 >= e20[n] * 0.995 && px < e5[n] && px < c[n - 1];
+  const rejBuy = lo3 <= e20[n] * 1.005 && px > e5[n] && px > c[n - 1];
+  const extended = Math.abs(px - e20[n]) / A[n] > 1.6;
   const sides = {
     BUY: {
       ema: px > e5[n] && e5[n] > e20[n],
       trend: px > e50[n] && e20[n] >= e20[n - 3],
       st: ST.dir[n] === 1,
       stoch: S.k[n] > S.d[n] && S.k[n] < 90,
-      rsi: R[n] >= 55 && R[n] <= 72,
-      vol: volOk && px >= hi20 * 0.995, // breakout (or within 0.5%) on volume
+      rsi: V2 ? (R[n] >= 48 && R[n] <= 66) : (R[n] >= 55 && R[n] <= 72),
+      vol: (volOk && px >= hi20 * 0.995) || (V2 && volOk && rejBuy), // breakout on volume, or a volume-backed pullback bounce
     },
     SELL: {
       ema: px < e5[n] && e5[n] < e20[n],
       trend: px < e50[n] && e20[n] <= e20[n - 3],
       st: ST.dir[n] === -1,
       stoch: S.k[n] < S.d[n] && S.k[n] > 10,
-      rsi: R[n] <= 45 && R[n] >= 28,
-      vol: volOk && px <= lo20 * 1.005,
+      rsi: V2 ? (R[n] <= 52 && R[n] >= 34) : (R[n] <= 45 && R[n] >= 28),
+      vol: (volOk && px <= lo20 * 1.005) || (V2 && volOk && rejSell),
     },
   };
   let best = null;
@@ -101,24 +108,30 @@ function evaluate(bars, mode, opts = {}) {
   if (best.score < MIN_SCORE) return null;
   // trend + supertrend are mandatory: never fight them
   if (!best.chk.st || !best.chk.ema) return null;
+  if (V2) {
+    if (extended) return null; // already stretched away from the 20 EMA: the move has been made, risk of snap-back
+    // never trade against the market's own trend / today's direction (opts.bias comes from the index)
+    if (opts.bias === 'BULL' && best.side === 'SELL') return null;
+    if (opts.bias === 'BEAR' && best.side === 'BUY') return null;
+  }
   }
   // never chase an exhausted move: a short at RSI<25 (or long at >78) is a bounce waiting to happen
   if (!bounce && ((best.side === 'SELL' && R[n] < 25) || (best.side === 'BUY' && R[n] > 78))) return null;
 
   const side = best.side, sgn = side === 'BUY' ? 1 : -1, a = A[n];
-  const stopMult = mode === 'intraday' ? 1.5 : 1.5;
+  const stopMult = V2 ? (mode === 'intraday' ? 1.8 : 2.0) : 1.5;
   let stopDist = stopMult * a;
   // structure: stay beyond the recent swing low/high if that is further, capped
   const look = mode === 'intraday' ? 8 : 10;
   const swing = side === 'BUY' ? Math.min(...l.slice(n - look, n + 1)) : Math.max(...h.slice(n - look, n + 1));
   const structDist = Math.abs(px - swing) + 0.25 * a;
-  stopDist = Math.min(Math.max(stopDist, Math.min(structDist, 2.2 * a)), (mode === 'intraday' ? 0.02 : 0.06) * px);
+  stopDist = Math.min(Math.max(stopDist, Math.min(structDist, (V2 ? 2.8 : 2.2) * a)), (mode === 'intraday' ? 0.025 : (V2 ? 0.075 : 0.06)) * px);
   stopDist = Math.max(stopDist, 0.004 * px);
   const entry = tick(px), sl = tick(entry - sgn * stopDist);
-  const rr = bounce ? [1.2, 2, 3] : mode === 'intraday' ? [1.2, 2, 3] : [1.5, 2.5, 4];
+  const rr = V2 ? (mode === 'intraday' ? [1, 1.8, 2.8] : [1, 2, 3]) : (bounce ? [1.2, 2, 3] : mode === 'intraday' ? [1.2, 2, 3] : [1.5, 2.5, 4]);
   const targets = rr.map(m => tick(entry + sgn * stopDist * m));
   const risk = stopDist / px * 100;
-  const lim = mode === 'intraday' ? [0.8, 1.6] : [2.5, 4.5]; // % stop distance bands
+  const lim = mode === 'intraday' ? (V2 ? [0.9, 1.8] : [0.8, 1.6]) : (V2 ? [3, 5.5] : [2.5, 4.5]); // % stop distance bands
   let riskLabel = risk < lim[0] ? 'LOW' : risk < lim[1] ? 'MEDIUM' : 'HIGH';
   if (bounce && riskLabel === 'LOW') riskLabel = 'MEDIUM'; // counter-trend is never "low risk"
   const reasons = [];
@@ -203,4 +216,44 @@ function regime(bars) {
   return { above50: c[n] > e50[n], stUp: st.dir[n] === 1 };
 }
 
-module.exports = { regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+
+// Market bias from index daily bars: BULL / BEAR / MIXED. Used as a gate so calls never fight the index.
+function marketBias(idxBars) {
+  if (!idxBars || idxBars.length < 60) return 'MIXED';
+  const c = idxBars.map(b => b.c), h = idxBars.map(b => b.h), l = idxBars.map(b => b.l), n = c.length - 1;
+  const e20 = ema(c, 20), e50 = ema(c, 50), st = supertrend(h, l, c);
+  const up = (c[n] > e50[n] ? 1 : 0) + (e20[n] > e50[n] ? 1 : 0) + (st.dir[n] === 1 ? 1 : 0);
+  return up === 3 ? 'BULL' : up === 0 ? 'BEAR' : 'MIXED';
+}
+
+/**
+ * Walk-forward backtest of the swing engine on daily bars. For each symbol and each day it asks evaluate()
+ * using only data up to that day, opens the call at that day's close, then replays later bars with track().
+ * Conservative: SL assumed first inside a bar; one open call per symbol; 5-day cool-off after a close.
+ * barsBySym: { SYM: [{t,h,l,c,v}] }, idxBars optional (enables the market-bias gate).
+ */
+function backtest(barsBySym, opts = {}) {
+  const out = []; const far = 4e9;
+  for (const sym of Object.keys(barsBySym)) {
+    const bars = barsBySym[sym]; if (!bars || bars.length < 120) continue;
+    let freeFrom = 0;
+    for (let i = 80; i < bars.length - 1; i++) {
+      if (bars[i].t < freeFrom) continue;
+      let bias = 'MIXED';
+      if (opts.idxBars) { const idx = opts.idxBars.filter(b => b.t <= bars[i].t); bias = marketBias(idx.slice(-120)); }
+      const ev = evaluate(bars.slice(Math.max(0, i - 200), i + 1), 'swing', { minScore: 5, legacy: opts.legacy, bias: opts.useGate === false ? 'MIXED' : bias });
+      if (!ev) continue;
+      const call = { t: bars[i].t, side: ev.side, mode: 'swing', entry: ev.entry, sl: ev.sl, targets: ev.targets };
+      const st = track(call, bars, far);
+      out.push({ sym, t: bars[i].t, side: ev.side, setup: ev.setup, risk: ev.riskLabel, status: st.status, pnlPct: st.pnlPct, closed: st.closed, bias });
+      freeFrom = st.closed ? (st.exitT || bars[i].t) + 5 * 86400 : bars[bars.length - 1].t + 1;
+    }
+  }
+  const done = out.filter(x => x.closed);
+  const agg = a => { const w = a.filter(x => x.pnlPct > 0.05), l = a.filter(x => x.pnlPct < -0.05); const sum = a.reduce((s, x) => s + x.pnlPct, 0);
+    return { n: a.length, winRate: w.length + l.length ? r2(w.length / (w.length + l.length) * 100) : null, avgPct: a.length ? r2(sum / a.length) : null, totalPct: r2(sum) }; };
+  return { all: agg(done), buy: agg(done.filter(x => x.side === 'BUY')), sell: agg(done.filter(x => x.side === 'SELL')), bounce: agg(done.filter(x => x.setup === 'bounce')), open: out.length - done.length,
+    byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = agg(done.filter(x => x.bias === b)), o), {}) };
+}
+
+module.exports = { marketBias, backtest, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

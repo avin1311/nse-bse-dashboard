@@ -2399,6 +2399,19 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     if(view) draw();
   }
   function schedule(){ clearInterval(timer); timer=setInterval(poll, (data&&data.market==='open')?15000:60000); }
+
+  let bt=null, btTimer=null;
+  function btHtml(){
+    if(!bt) return 'Replays the rules over the past year of daily data for the 90 stocks, to show whether they have a real edge. Takes a minute or two.';
+    if(bt.state==='running') return 'Running… '+bt.progress+'% (loading history)';
+    if(bt.state==='error') return '<span class="cm-s">Failed: '+esc(bt.err)+'</span>';
+    if(bt.state!=='done') return 'Not run yet.';
+    const r=bt.result, row=(n,x)=>`<tr><td>${n}</td><td>${x.all.n}</td><td>${x.all.winRate==null?'—':x.all.winRate+'%'}</td><td class="${x.all.avgPct>0?'cm-b':'cm-s'}">${sg(x.all.avgPct)}</td><td>${sg(x.buy.avgPct)} (${x.buy.n})</td><td>${sg(x.sell.avgPct)} (${x.sell.n})</td></tr>`;
+    return `<table style="width:100%;font-size:11px;border-collapse:collapse;"><tr style="color:var(--text2);text-align:left"><th>Rules</th><th>Trades</th><th>Win</th><th>Avg/trade</th><th>Buys</th><th>Sells</th></tr>${row('Old',r.oldRules)}${row('New + market gate',r.newRules)}${row('New, no gate',r.newRulesNoGate)}</table>
+      <div style="margin-top:6px;">${r.symbols} stocks, ${r.bars} daily bars each. Average % per closed call before brokerage and slippage; a call needs to average clearly above zero to be worth following. Past results do not guarantee future ones.</div>`;
+  }
+  async function pollBt(){ try{ const r=await fetch('/api/calls/backtest',{cache:'no-store'}); bt=await r.json(); }catch(e){} const o=view&&view.querySelector('#cmBtOut'); if(o) o.innerHTML=btHtml(); if(bt&&bt.state==='running') btTimer=setTimeout(pollBt,4000); else { const b=view&&view.querySelector('#cmBt'); if(b) b.textContent='Run backtest'; } }
+  function runBt(){ clearTimeout(btTimer); bt={state:'running',progress:0}; const o=view.querySelector('#cmBtOut'); if(o) o.innerHTML=btHtml(); fetch('/api/calls/backtest?run=1',{cache:'no-store'}).then(()=>setTimeout(pollBt,3000)).catch(()=>{}); }
   // ---- screen ----
   function row(c){
     const sgn=c.side==='BUY'?1:-1, pts=[c.sl,c.entry,...c.targets], lo=Math.min(...pts), hi=Math.max(...pts), pos=x=>((x-lo)/(hi-lo)*100).toFixed(1);
@@ -2431,10 +2444,12 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
         ${eodBox(today,'Today so far ('+esc(today.date)+')')}
       </div><div>
         <div class="cm-box"><h4>Alerts</h4>${evs.length?evs.slice(0,40).map(e=>`<div class="cm-ev ${e.level}"><b>${esc(e.kind==='NEW'?'NEW':e.kind==='SL'?'STOP LOSS':e.kind==='EXPIRED'?'EXPIRED':e.kind==='BE'?'STOPPED AT ENTRY':'TARGET '+e.kind.slice(1))}</b> ${esc(e.symbol)} ${e.side}<div class="cm-sub">${esc(e.text.replace(/<[^>]+>/g,''))} · ${dt(e.t)}</div></div>`).join(''):'<div class="metric-sub">No alerts yet. Target and stop-loss hits will show here, play a sound, and go to Telegram.</div>'}</div>
+        <div class="cm-box"><h4>Strategy backtest <button class="btn" id="cmBt" style="float:right;font-size:11px;">Run backtest</button></h4><div id="cmBtOut" class="cm-sub">${btHtml()}</div></div>
         <div class="cm-box"><h4>Daily summaries <button class="btn" id="cmEodNow" style="float:right;font-size:11px;">Generate today's</button></h4>
           ${eod.length?eod.map(x=>`<details class="cm-ev"><summary><b>${esc(x.date)}</b> · ${x.created.total} new · ${x.closed.wins}W/${x.closed.losses}L · ${sg(x.closed.netPct)}</summary>${eodBox(x,'')}</details>`).join(''):'<div class="metric-sub">The first summary is sent after 3:40 pm IST on the next trading day with calls. Use the button to see today\'s now.</div>'}</div>
       </div></div>
       <div class="tc-disc">${data.upstox?'':'<b style="color:var(--red)">Upstox is not connected, so live prices cannot update.</b> '}${data.persisted?'History is saved.':'<b>Storage (Upstash) is not set up, so calls and summaries are lost when the server restarts.</b>'} Prices refresh every ${data.market==='open'?'15':'60'} seconds while this page is open; the server also checks every 5 minutes through the scheduled check even when the page is closed, and sends Telegram alerts. Sound only plays while this page is open in a browser tab. Rule-based screen, not investment advice.</div>`;
+    b.querySelector('#cmBt').onclick=runBt;
     b.querySelector('#cmEodNow').onclick=async e=>{ e.target.textContent='Working…'; try{ await fetch('/api/calls/eod/run',{method:'POST'}); }catch(x){} await poll(); };
     const sb=view.querySelector('#cmSnd'); sb.textContent=sound?'🔊 Sound on':'🔇 Sound off';
     view.querySelector('#cmLive').innerHTML=`<span class="cm-dot ${data.stale?'off':''}"></span>${data.stale?'Connection lost, retrying':(data.market==='open'?'Live':'Market closed')} · updated ${tm(Math.floor(Date.now()/1000))}`;

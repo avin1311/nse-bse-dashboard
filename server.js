@@ -1694,7 +1694,7 @@ async function liveMonitor() {
       const q = await getUpstoxLTPC(await dataKeyFor(c.symbol));
       if (q.price == null) continue;
       const sgn = c.side === 'BUY' ? 1 : -1;
-      c.ltp = q.price; c.pnlPct = Math.round(sgn * (q.price - c.entry) / c.entry * 10000) / 100; changed = true;
+      c.ltp = q.price; c.pnlPct = Math.round((sgn * (q.price - c.entry) / c.entry * 100 - (c.costPct != null ? c.costPct : Calls.costPct(c.mode))) * 100) / 100; changed = true;
       const nextT = c.targets[c.targetsHit || 0];
       const trig = sgn === 1 ? (q.price <= c.activeSl || (nextT != null && q.price >= nextT)) : (q.price >= c.activeSl || (nextT != null && q.price <= nextT));
       if (trig) { const live = c.ltp; await applyTrack(c); if (!c.closed) c.ltp = live; }
@@ -1759,6 +1759,15 @@ async function maybeEod() {
   try { await runEod(istDateKey(Math.floor(Date.now() / 1000)), false); } catch (e) {}
 }
 
+
+// Daily history strictly from Upstox (the same exchange feed the dashboard's own chart uses). No Yahoo fallback:
+// if Upstox cannot supply a symbol it is skipped rather than silently mixing in different numbers.
+async function getHistUpstox(sym, maxBars) {
+  const rows = await getUpstoxCandles(appSym(sym), '1D');
+  if (!rows || rows.length < 80) throw new Error('not enough Upstox history for ' + sym);
+  return toBars(rows).slice(-(maxBars || 500));
+}
+
 // Index context for gating calls: daily trend bias plus today's move. Cached 3 minutes.
 let idxCtx = { t: 0, v: null };
 async function getIndexContext() {
@@ -1768,7 +1777,7 @@ async function getIndexContext() {
   try {
     const rows = await getUpstoxCandles('NIFTY', '1D'); let bars = toBars(rows);
     if (open && mins < 915) bars = bars.slice(0, -1);
-    v.dailyBias = Calls.marketBias(bars.slice(-150));
+    v.dailyBias = Calls.marketBias(bars.slice(-150)); v.idxBars = bars.slice(-400);
     const q = await getUpstoxLTPC(await dataKeyFor('NIFTY'));
     const prev = (open && mins < 915) ? rows[rows.length - 2] : rows[rows.length - 1];
     if (q.price != null && prev && prev.c) v.todayPct = Math.round((q.price / prev.c - 1) * 10000) / 100;
@@ -1800,18 +1809,19 @@ async function runCallsCycle(force) {
         const sym = universe[i++];
         try {
           // swing: daily bars (drop today's still-forming bar until 15:15)
-          const h = await getScanHistory(sym);
-          let bars = h.c.map((_, k) => ({ t: h.t[k], h: h.h[k], l: h.l[k], c: h.c[k], v: h.v[k] }));
+          let bars = await getHistUpstox(sym, 300);
           if (open && mins < 915) bars = bars.slice(0, -1);
           const rg = Calls.regime(bars); if (rg) { breadth.n++; if (rg.above50) breadth.above50++; if (rg.stUp) breadth.stUp++; }
-          const sw = Calls.evaluate(bars, 'swing', { minScore: 5, bias: swingBias });
+          // swing entries only 10:00–15:25 IST on trading days (never at the 9:15 open, never after the close on a stale price)
+          const swingWindow = open && mins >= 600 && mins <= 925;
+          const sw = swingWindow ? Calls.evaluate(bars, 'swing', { minScore: 5, bias: swingBias, idxBars: ictx.idxBars, exit: process.env.CALLS_EXIT || 'B' }) : null;
           if (sw) found.push({ symbol: sym, ...sw });
-          // intraday: 15m completed bars, new entries only 9:45–14:30 IST
-          if (open && mins >= 615 && mins <= 840) {
+          // intraday: 15m completed bars, new entries only 10:15–14:00 IST (off if CALLS_INTRADAY=off)
+          if (open && mins >= 615 && mins <= 840 && process.env.CALLS_INTRADAY !== 'off') {
             let rows = toBars(await getUpstoxCandles(sym, '15m'));
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
-            const id = Calls.evaluate(rows.slice(-300), 'intraday', { minScore: 5, bias: ictx.intradayBias });
+            const id = Calls.evaluate(rows.slice(-300), 'intraday', { minScore: 5, bias: ictx.intradayBias, idxTodayPct: ictx.todayPct });
             if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) found.push({ symbol: sym, ...id });
           }
           callsState.scanned++;
@@ -1822,22 +1832,24 @@ async function runCallsCycle(force) {
     await Promise.all(Array.from({ length: 3 }, worker));
     callsState.found = found.length; callsState.found_buy = found.filter(f => f.side === 'BUY').length; callsState.found_sell = found.filter(f => f.side === 'SELL').length; callsState.breadth = breadth;
     // 3) log the best new ones (de-duplicated, capped per cycle)
-    found.sort((a, b) => b.score - a.score);
-    // Global caps (not per scan): a one-sided market must not fill the board with
-    // correlated trades. Max open per mode, and max open per direction per mode.
-    const open_ = db.filter(c => !c.closed); const CAP = { swing: 6, intraday: 4 }, SIDE_CAP = { swing: 4, intraday: 3 };
+    // best first: higher score, then the stronger relative-strength gap. Fewer, better calls.
+    found.sort((a, b) => b.score - a.score || Math.abs(b.rs || 0) - Math.abs(a.rs || 0));
+    const open_ = db.filter(c => !c.closed); const CAP = { swing: 5, intraday: 3 }, SIDE_CAP = { swing: 3, intraday: 2 }, DAY_CAP = { swing: 3, intraday: 2 };
     const cnt = (m, side) => open_.filter(c => c.mode === m && (!side || c.side === side)).length;
-    const quota = { swing: Math.min(2, CAP.swing - cnt('swing')), intraday: Math.min(2, CAP.intraday - cnt('intraday')) };
+    const dayNo = t => Math.floor((t + 19800) / 86400), today = dayNo(nowSec);
+    const madeToday = m => db.filter(c => c.mode === m && dayNo(c.t) === today).length;
+    // one new call per mode per scan (no clusters), within open / per-side / per-day caps
+    const quota = { swing: Math.min(1, CAP.swing - cnt('swing'), DAY_CAP.swing - madeToday('swing')), intraday: Math.min(1, CAP.intraday - cnt('intraday'), DAY_CAP.intraday - madeToday('intraday')) };
     for (const f of found) {
       if (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode]) continue;
-      const dupe = db.some(c => c.symbol === f.symbol && c.mode === f.mode && (!c.closed || nowSec - c.t < (f.mode === 'intraday' ? 86400 : 5 * 86400)));
-      if (dupe) continue;
+      // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
+      if (db.some(c => c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) continue; // stale: price has already run away
       // swing signals come from yesterday's close; skip when today's price is already moving against the idea
       if (f.mode === 'swing' && f.setup !== 'bounce' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) continue;
       const d = ltp - f.entry; const rb = x => Math.round((x + d) * 20) / 20;
-      const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', checks: f.checks, analysis: f.analysis, t: nowSec };
+      const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', engine: f.engine || 'v3', rs: f.rs == null ? null : f.rs, costPct: Calls.costPct(f.mode), checks: f.checks, analysis: f.analysis, t: nowSec };
       Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false });
       db.push(call); open_.push(call); quota[f.mode]--;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}` }, false);
@@ -1920,22 +1932,45 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-09-r7 (strategy v2: market gate, pullback entries, wider stops)';
+const BUILD = '2026-10-09-r8 (engine v3: evidence families, pullback entries, trailing exits, costs, per-call backtest)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
+const yieldLoop = () => new Promise(r => setImmediate(r));
 let btJob = { state: 'idle', result: null, startedAt: 0, progress: 0, err: null };
+let btUni = { t: 0, trades: null, running: false, progress: 0, err: null, loaded: 0, total: 0, exit: 'B' };
+let uniBarsCache = { t: 0, bars: null, idx: null };
+// History for the call universe, from Upstox only (no Yahoo fallback); symbols Upstox cannot supply are counted and skipped.
+async function loadUniverseBars(onProgress) {
+  if (uniBarsCache.bars && Date.now() - uniBarsCache.t < 6 * 3600000) return uniBarsCache;
+  const bars = {}; const syms = FNO_FALLBACK.slice(0, 90); let i = 0, done = 0;
+  async function worker() { while (i < syms.length) { const sym = syms[i++]; try { bars[sym] = await getHistUpstox(sym, 750); } catch (e) {} done++; if (onProgress) onProgress(Math.round(done / syms.length * 100)); } }
+  await Promise.all(Array.from({ length: 3 }, worker));
+  let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-800); } catch (e) {}
+  const res = { t: Date.now(), bars, idx, total: syms.length };
+  if (Object.keys(bars).length) uniBarsCache = res; // never cache an empty result (Upstox may just be down)
+  return res;
+}
+const stripTrades = r => ({ all: r.all, buy: r.buy, sell: r.sell, bounce: r.bounce, open: r.open, byBias: r.byBias });
 async function runBacktest() {
   btJob = { state: 'running', result: null, startedAt: Date.now(), progress: 0, err: null };
   try {
-    const bars = {}; const syms = FNO_FALLBACK.slice(0, 90); let i = 0;
-    async function worker() { while (i < syms.length) { const sym = syms[i++]; try { const h = await getScanHistory(sym); bars[sym] = h.c.map((_, k) => ({ t: h.t[k], h: h.h[k], l: h.l[k], c: h.c[k], v: h.v[k] })); } catch (e) {} btJob.progress = Math.round(i / syms.length * 100); } }
-    await Promise.all(Array.from({ length: 3 }, worker));
-    let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-300); } catch (e) {}
-    const n = Object.keys(bars).length;
-    const result = { symbols: n, bars: n ? bars[Object.keys(bars)[0]].length : 0, indexUsed: !!idx,
-      oldRules: Calls.backtest(bars, { legacy: true, useGate: false }),
-      newRules: Calls.backtest(bars, { idxBars: idx }),
-      newRulesNoGate: Calls.backtest(bars, { useGate: false }) };
+    const U = await loadUniverseBars(pr => { btJob.progress = Math.round(pr * 0.4); });
+    const n = Object.keys(U.bars).length;
+    if (!n) throw new Error('Upstox returned no history (is it connected?)');
+    const variants = [
+      ['oldRules', { engine: 'v2', legacy: true, useGate: false }],
+      ['v2Rules', { engine: 'v2', idxBars: U.idx }],
+      ['v3ExitA', { exit: 'A', idxBars: U.idx }],
+      ['v3ExitB', { exit: 'B', idxBars: U.idx }],
+      ['v3ExitC', { exit: 'C', idxBars: U.idx }],
+    ];
+    const result = { symbols: n, requested: U.total, bars: Math.max(...Object.values(U.bars).map(b => b.length)), indexUsed: !!U.idx, source: 'Upstox daily candles', costPct: { swing: Calls.costPct('swing'), intraday: Calls.costPct('intraday') } };
+    for (let k = 0; k < variants.length; k++) {
+      const r = await Calls.backtest(U.bars, variants[k][1], yieldLoop);
+      result[variants[k][0]] = stripTrades(r);
+      if (variants[k][0] === 'v3ExitB') btUni = { ...btUni, t: Date.now(), trades: r.trades, exit: 'B', loaded: n, total: U.total, running: false };
+      btJob.progress = 40 + Math.round((k + 1) / variants.length * 60);
+    }
     btJob = { state: 'done', result, startedAt: btJob.startedAt, finishedAt: Date.now(), progress: 100, err: null };
   } catch (e) { btJob = { ...btJob, state: 'error', err: e.message }; }
 }
@@ -1944,6 +1979,63 @@ app.get('/api/calls/backtest', (req, res) => {
   res.json(btJob);
 });
 
+// Per-call backtest: replay the SAME rules (same side, same setup type, same exits) on the previous data of that
+// stock (and, for swing calls, of the whole universe) and report win / loss percentages. Data = Upstox candles, or
+// a TradingView CSV export sent by the page (never Yahoo).
+async function ensureUniverseTrades() {
+  if (btUni.trades && Date.now() - btUni.t < 6 * 3600000) return;
+  if (btUni.running || btJob.state === 'running') return;
+  btUni.running = true; btUni.progress = 0; btUni.err = null;
+  (async () => {
+    try {
+      const U = await loadUniverseBars(pr => { btUni.progress = Math.round(pr * 0.5); });
+      if (!Object.keys(U.bars).length) throw new Error('Upstox returned no history (is it connected?)');
+      const r = await Calls.backtest(U.bars, { exit: 'B', idxBars: U.idx }, yieldLoop);
+      btUni = { ...btUni, t: Date.now(), trades: r.trades, loaded: Object.keys(U.bars).length, total: U.total, running: false, progress: 100 };
+    } catch (e) { btUni.running = false; btUni.err = e.message; }
+  })();
+}
+async function backtestOneCall(spec, supplied) {
+  const sym = spec.symbol, intraday = spec.mode === 'intraday';
+  let bars, source;
+  if (supplied && supplied.length >= 120) { bars = supplied; source = 'TradingView export you uploaded'; }
+  else { source = 'Upstox ' + (intraday ? '15-minute' : 'daily') + ' candles'; bars = intraday ? toBars(await getUpstoxCandles(sym, '15m')) : await getHistUpstox(sym, 750); }
+  if (!bars || bars.length < 120) throw new Error('Only ' + (bars ? bars.length : 0) + ' candles available for ' + sym + ' (need at least 120)');
+  let trades;
+  if (intraday) { let idx15 = null; try { idx15 = toBars(await getUpstoxCandles('NIFTY', '15m')); } catch (e) {} trades = await Calls.walkIntraday(sym, bars, { idxBars15: idx15 }, yieldLoop); }
+  else { let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-800); } catch (e) {} trades = await Calls.walkSwing(sym, bars, { exit: process.env.CALLS_EXIT || 'B', idxBars: idx }, yieldLoop); }
+  const done = trades.filter(x => x.closed);
+  const same = done.filter(x => x.side === spec.side && (spec.setup === 'bounce') === (x.setup === 'bounce'));
+  const days = Math.round((bars[bars.length - 1].t - bars[0].t) / 86400);
+  const out = { symbol: sym, mode: spec.mode, side: spec.side, setup: spec.setup || 'trend', source, candles: bars.length, days, from: bars[0].t, to: bars[bars.length - 1].t,
+    costPct: Calls.costPct(spec.mode), sameKind: Calls.mkAgg(same), allSignals: Calls.mkAgg(done),
+    recent: same.slice(-12).reverse().map(x => ({ t: x.t, status: x.status, pnlPct: x.pnlPct, targetsHit: x.targetsHit, bias: x.bias })) };
+  if (intraday) out.universe = { state: 'na', note: 'Upstox keeps about 4 weeks of 15-minute history, so intraday calls are tested on this stock only.' };
+  else {
+    await ensureUniverseTrades();
+    if (btUni.trades) { const u = btUni.trades.filter(x => x.closed && x.side === spec.side && (spec.setup === 'bounce') === (x.setup === 'bounce')); out.universe = { state: 'done', stocks: btUni.loaded, ...Calls.mkAgg(u) }; }
+    else out.universe = { state: btUni.err ? 'error' : 'running', progress: btUni.progress, err: btUni.err };
+  }
+  return out;
+}
+async function specFromReq(q) {
+  const db = await loadCalls(); const c = q.id ? db.find(x => x.id === q.id) : null;
+  if (c) return { symbol: c.symbol, mode: c.mode, side: c.side, setup: c.setup || 'trend' };
+  if (!q.symbol || !/^(BUY|SELL)$/.test(q.side) || !/^(swing|intraday)$/.test(q.mode)) throw new Error('call not found');
+  return { symbol: String(q.symbol).toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), mode: q.mode, side: q.side, setup: q.setup === 'bounce' ? 'bounce' : 'trend' };
+}
+app.get('/api/calls/backtest-call', async (req, res) => {
+  try { const spec = await specFromReq(req.query); res.json(await new Promise((ok, no) => lowPriority.run(true, () => backtestOneCall(spec).then(ok, no)))); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/calls/backtest-call', async (req, res) => {
+  try {
+    const spec = await specFromReq({ ...req.body, id: req.body && req.body.id });
+    const raw = Array.isArray(req.body && req.body.bars) ? req.body.bars : [];
+    const bars = raw.map(r => ({ t: +r.t, o: +r.o, h: +r.h, l: +r.l, c: +r.c, v: +r.v || 0 })).filter(r => isFinite(r.t) && r.h >= r.l && r.c > 0).sort((a, b) => a.t - b.t).slice(-3000);
+    res.json(await new Promise((ok, no) => lowPriority.run(true, () => backtestOneCall(spec, bars).then(ok, no))));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 
 app.get('/api/calls/monitor', async (req, res) => {
   const db = await loadCalls();

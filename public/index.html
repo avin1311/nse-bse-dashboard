@@ -2316,6 +2316,72 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
   document.getElementById('statusBtn')?.addEventListener('click',openStatus);
 })();
 
+
+// ---------------- per-call backtest (button on Trade Calls cards and Calls Monitor rows) ----------------
+window.cbtBtn=function(c){
+  const a=t=>String(t==null?'':t).replace(/[&<>"]/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[x]));
+  return `<button class="btn cbt-btn" data-cbt="${a(c.id)}" data-sym="${a(c.symbol)}" data-mode="${a(c.mode)}" data-side="${a(c.side)}" data-setup="${a(c.setup||'trend')}" title="Replay this call's rules on previous data to see how often it won or lost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg> Backtest</button>`;
+};
+(function(){
+  const esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const sg=n=>n==null?'—':(n>0?'+':'')+n+'%';
+  const fd=t=>new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'});
+  const STAT={SL_HIT:'Stop hit',TARGET_HIT:'All targets',PROFIT:'Stopped in profit',BREAKEVEN:'Stopped at entry',EXPIRED:'Time exit',ACTIVE:'Open'};
+  let ov=null, spec=null, timer=null, last=null, token=0;
+  const pct=(n,d)=>d?Math.round(n/d*100):0;
+  function kind(a){ return a.n?`<div class="cm-kpis"><div>Signals<b>${a.n}</b></div><div>Wins<b class="cm-b">${a.wins} (${pct(a.wins,a.n)}%)</b></div><div>Losses<b class="cm-s">${a.losses} (${pct(a.losses,a.n)}%)</b></div><div>Break-even / flat<b>${a.flat} (${pct(a.flat,a.n)}%)</b></div>
+      <div>Win rate (wins vs losses)<b>${a.winRate==null?'—':a.winRate+'%'}</b></div><div>Avg per trade<b class="${a.avgPct>0?'cm-b':'cm-s'}">${sg(a.avgPct)}</b></div><div>Avg win<b class="cm-b">${a.wins?sg(a.avgWin):'—'}</b></div><div>Avg loss<b class="cm-s">${a.losses?sg(a.avgLoss):'—'}</b></div></div>`:'<div class="metric-sub">No closed signals of this kind in the data.</div>'; }
+  function render(r){
+    const b=ov.querySelector('#cbtBody'); last=r;
+    if(r.error){ b.innerHTML='<div class="cm-s">Could not run: '+esc(r.error)+'</div>'+csvBox(); wire(); return; }
+    const u=r.universe||{};
+    const kindName=`${r.side} ${r.mode}${r.setup==='bounce'?' counter-trend bounce':''}`;
+    b.innerHTML=`<div class="cm-sub" style="margin-bottom:8px;">Data: <b>${esc(r.source)}</b>, ${r.candles} candles over ${r.days} days (${fd(r.from)} to ${fd(r.to)}). Same rules, same stops and targets, one trade at a time, ${r.costPct}% round-trip costs included in every result.</div>
+      <div class="cm-box"><h4>${esc(r.symbol)}: past ${esc(kindName)} signals</h4>${kind(r.sameKind)}${r.sameKind.n&&r.sameKind.n<10?`<div class="cm-sub" style="margin-top:6px;">Only ${r.sameKind.n} past signal${r.sameKind.n===1?'':'s'} on this one stock: too few to judge. Use the all-stocks line below.</div>`:''}</div>
+      <div class="cm-box"><h4>All stocks: same kind of call</h4>${u.state==='done'?`<div class="cm-sub" style="margin-bottom:6px;">${u.stocks} stocks, up to 3 years of daily Upstox candles.</div>${kind(u)}`:u.state==='running'?'<div class="cm-sub" id="cbtUni">Running on all 90 stocks… '+(u.progress||0)+'% (a minute or two the first time)</div>':u.state==='na'?'<div class="cm-sub">'+esc(u.note)+'</div>':'<div class="cm-s">'+esc(u.err||'Not available')+'</div>'}</div>
+      ${r.recent&&r.recent.length?`<div class="cm-box"><h4>Latest signals on ${esc(r.symbol)}</h4>${r.recent.map(x=>`<div class="cm-ev"><b>${fd(x.t)}</b> · ${esc(STAT[x.status]||x.status)}${x.targetsHit?' (T'+x.targetsHit+')':''} · <b class="${x.pnlPct>0.05?'cm-b':x.pnlPct<-0.05?'cm-s':''}">${sg(x.pnlPct)}</b> <span class="cm-sub">market ${esc(String(x.bias||'').toLowerCase())}</span></div>`).join('')}</div>`:''}
+      ${csvBox()}<div class="tc-disc">Past results do not guarantee future ones, and a small sample can mislead. Results are net of the assumed costs.</div>`;
+    wire();
+    if(u.state==='running'){ clearTimeout(timer); const my=token; timer=setTimeout(()=>{ if(my===token&&ov) go(null,true); },5000); }
+  }
+  function csvBox(){ return `<div class="cm-box"><h4>Use TradingView data instead</h4><div class="cm-sub" style="margin-bottom:6px;">TradingView has no feed this dashboard can read directly. In TradingView, open this stock's chart on the same timeframe (${spec&&spec.mode==='intraday'?'15 minutes':'1 day'}), choose <b>Export chart data</b> (a paid-plan feature) and pick the file here.</div><input type="file" id="cbtCsv" accept=".csv,text/csv" style="width:auto"> <span class="cm-sub" id="cbtCsvMsg"></span></div>`; }
+  function parseCsv(txt,mode){
+    const lines=txt.replace(/\r/g,'').split('\n').filter(x=>x.trim()); if(lines.length<2) throw new Error('The file looks empty');
+    const hd=lines[0].split(',').map(x=>x.trim().replace(/^"|"$/g,'').toLowerCase());
+    const ix=n=>hd.findIndex(h=>n.some(k=>h===k||h.startsWith(k)));
+    const it=ix(['time','date','datetime']), io=ix(['open']), ih=ix(['high']), il=ix(['low']), ic=ix(['close']), iv=ix(['volume','vol']);
+    if(it<0||ih<0||il<0||ic<0) throw new Error('Could not find time, high, low and close columns');
+    const out=[];
+    for(let k=1;k<lines.length;k++){ const c=lines[k].split(',').map(x=>x.trim().replace(/^"|"$/g,'')); let t;
+      const raw=c[it]; if(/^\d{9,13}$/.test(raw)){ t=+raw; if(t>1e12) t=Math.floor(t/1000); }
+      else { const m=/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(raw);
+        if(m&&mode==='swing') t=Date.UTC(+m[1],+m[2]-1,+m[3],12)/1000; else { t=Math.floor(Date.parse(raw)/1000); } }
+      const h=+c[ih], l=+c[il], cl=+c[ic]; if(!isFinite(t)||!isFinite(h)||!isFinite(l)||!isFinite(cl)) continue;
+      out.push({t,o:io>=0?+c[io]:cl,h,l,c:cl,v:iv>=0?+c[iv]||0:0}); }
+    if(out.length<120) throw new Error('Only '+out.length+' usable rows; need at least 120');
+    return out; }
+  function wire(){ const f=ov.querySelector('#cbtCsv'); if(!f) return; f.onchange=async()=>{ const m=ov.querySelector('#cbtCsvMsg'); try{ const txt=await f.files[0].text(); const bars=parseCsv(txt,spec.mode); m.textContent='Running on '+bars.length+' rows…'; go(bars); }catch(e){ m.textContent=e.message; m.style.color='var(--red)'; } }; }
+  async function go(bars,poll){
+    const my=++token; if(!poll) ov.querySelector('#cbtBody').innerHTML='<div class="metric-sub">Replaying the rules on previous data… this takes a few seconds.</div>';
+    try{
+      let r;
+      if(bars){ r=await (await fetch('/api/calls/backtest-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...spec,bars})})).json(); }
+      else { const q=new URLSearchParams(spec).toString(); r=await (await fetch('/api/calls/backtest-call?'+q,{cache:'no-store'})).json(); }
+      if(my===token&&ov) render(r);
+    }catch(e){ if(my===token&&ov) render({error:e.message}); }
+  }
+  function open(b){
+    if(ov) ov.remove(); clearTimeout(timer);
+    spec={id:b.dataset.cbt,symbol:b.dataset.sym,mode:b.dataset.mode,side:b.dataset.side,setup:b.dataset.setup};
+    ov=document.createElement('div'); ov.className='ov'; ov.style.alignItems='flex-start'; ov.style.zIndex=9600;
+    ov.innerHTML=`<div class="ov-card" style="max-width:760px;margin-top:20px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 style="margin:0">Backtest: ${esc(spec.symbol)} ${esc(spec.side)} ${esc(spec.mode)}</h3><button class="btn" id="cbtClose">Close</button></div><div id="cbtBody"></div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov||e.target.id==='cbtClose'){ ov.remove(); ov=null; clearTimeout(timer); token++; } });
+    go(null);
+  }
+  document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-cbt]'); if(b){ e.preventDefault(); open(b); } });
+})();
+
 // ---------------- Trade Calls panel ----------------
 (function(){
   const esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -2329,10 +2395,10 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     const ms=pts.map((p,i)=>`<span class="${i>=2&&i-1<=c.targetsHit?'hit':''}">${p[0]}<br>${Number(p[1]).toLocaleString('en-IN')}</span>`).join('');
     const pnlCls=c.pnlPct>0?'up':c.pnlPct<0?'down':'';
     return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span><span>${c.mode==='intraday'?'Intraday':'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span>${c.setup==='bounce'?'<span title="Oversold stock turning up while still below its 50 EMA. Short-lived; respect the stop.">Counter-trend bounce</span>':''}<span title="Checks passed out of 6">${c.score}/6 checks</span></div></div>
-      <div style="text-align:right"><span class="tc-tags"><span>${LABEL[c.status]||c.status}</span></span><div class="metric-sub">${when(c.t)}</div></div></div>
+      <div style="text-align:right"><span class="tc-tags"><span>${LABEL[c.status]||c.status}</span></span><div class="metric-sub">${when(c.t)}</div><div style="margin-top:4px">${window.cbtBtn(c)}</div></div></div>
       <div class="tc-grid"><div>ENTRY<b>${inr(c.entry)}</b></div><div>${c.closed?'EXIT':'LTP'}<b>${inr(c.closed?c.exit:c.ltp)}</b></div><div>ACTIVE SL${c.targetsHit?' (trailed)':''}<b>${inr(c.activeSl)}</b></div><div>${c.closed?'RESULT':'RUNNING P/L'}<b class="${pnlCls}">${c.pnlPct>0?'+':''}${c.pnlPct}%</b></div></div>
       <div class="tc-ms">${ms}</div>
-      ${c.checks?`<div class="tc-tags" style="margin:4px 0;">${[['ema','5/20 EMA'],['trend','50 EMA trend'],['st','Supertrend'],['stoch','Stochastic'],['rsi','RSI'],['vol','Volume breakout']].map(k=>`<span style="color:var(--${c.checks[k[0]]?'green':'text2'})">${c.checks[k[0]]?'✓':'✗'} ${k[1]}</span>`).join('')}</div>`:''}
+      ${c.checks?`<div class="tc-tags" style="margin:4px 0;">${(('entry' in c.checks)?[['trend','Trend'],['entry','Pullback entry'],['mom','Momentum'],['rs','Vs index'],['vol','Volume'],['mkt','Market']]:[['ema','5/20 EMA'],['trend','50 EMA trend'],['st','Supertrend'],['stoch','Stochastic'],['rsi','RSI'],['vol','Volume breakout']]).map(k=>`<span style="color:var(--${c.checks[k[0]]?'green':'text2'})">${c.checks[k[0]]?'✓':'✗'} ${k[1]}</span>`).join('')}</div>`:''}
       <div class="tc-an"><b>Analysis:</b> ${esc(c.analysis)}</div></div>`;
   }
   function draw(){
@@ -2348,7 +2414,7 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
       ${sc.breadth&&sc.breadth.n?`<div class="metric-sub" style="margin-top:6px;"><b>Market read (${sc.breadth.n} stocks):</b> ${Math.round(sc.breadth.above50/sc.breadth.n*100)}% trade above their 50-day average, ${Math.round(sc.breadth.stUp/sc.breadth.n*100)}% have Supertrend up &middot; setups found: ${sc.found_buy||0} buy, ${sc.found_sell||0} sell. When most stocks are in downtrends the screen will mostly produce sells &mdash; that is the market, not a bug.</div>`:''}
       ${list.length?list.map(card).join(''):'<div class="metric-sub" style="padding:24px 0;text-align:center;">'+(tab==='active'?'No active calls right now. Calls appear only when a stock passes the full checklist (trend, Supertrend, Stochastic, RSI, volume breakout).':'No closed calls yet.')+'</div>'}
       <div class="metric-sub" style="margin-top:8px;">Server version: ${esc(data.build||'old version — redeploy not finished yet')}</div>
-      <div class="tc-disc"><b>How calls are made:</b> a stock needs 5 of 6 checks (the &ldquo;5/6 checks&rdquo; tag shows how many passed; ticks show which) (price vs 5/20/50 EMA, Supertrend, Stochastic cross, RSI band, volume breakout) and Supertrend + EMA must agree. SL = ~1.5–1.8× ATR (or beyond the last swing), targets at 1.2/2/3× (intraday) or 1.5/2.5/4× (swing) the risk; the stop moves to entry after T1. If SL and a target fall in the same candle, the SL is assumed first. Intraday calls close at 3:30 pm; swing calls after 30 days. This is a rule-based screen with a measured track record &mdash; not investment advice. Every call, including losers, stays in Past.</div>`;
+      <div class="tc-disc"><b>How calls are made (engine v3):</b> a stock needs 5 of 6 checks from different families: trend (50/20 EMA and Supertrend agree, mandatory), a pullback entry (price pulled back to the 20 EMA and turned, mandatory, never stretched), momentum (RSI and Stochastic agree), strength against the index (20 days for swing, today for intraday), volume (vs normal for that time of day for intraday) and the market backdrop. Calls never go against the index trend. SL = about 2&times; the average daily range (or beyond the pullback low/high); targets at 1.5/3/4.5&times; the risk for swing and 1/2/3&times; for intraday; the stop moves to entry after T1 and to T1 after T2. Results are net of assumed costs (0.15% swing, 0.10% intraday). Swing calls are made 10:00&ndash;15:25 and intraday calls 10:15&ndash;14:00 IST, at most one new call per scan, never two open calls on one stock. Intraday calls close at 3:30 pm; swing calls after 30 days. Use the Backtest button on any call to see how its kind of call did on previous data. This is a rule-based screen with a measured track record &mdash; not investment advice.</div>`;
     body.querySelectorAll('.tc-chip').forEach(e=>e.onclick=()=>{ const g=e.dataset.g,v=e.dataset.v; if(g==='tab')tab=v; else if(g==='mode')fMode=v; else fSide=v; draw(); });
   }
   async function load(scan){ try{ const r=await fetch('/api/calls'+(scan?'?scan=1':''),{cache:'no-store'}); data=await r.json(); }catch(e){} draw(); }
@@ -2402,13 +2468,13 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
 
   let bt=null, btTimer=null;
   function btHtml(){
-    if(!bt) return 'Replays the rules over the past year of daily data for the 90 stocks, to show whether they have a real edge. Takes a minute or two.';
+    if(!bt) return 'Replays old and new rules over up to 3 years of daily Upstox data for the 90 stocks, to show whether they have a real edge. Takes a minute or two.';
     if(bt.state==='running') return 'Running… '+bt.progress+'% (loading history)';
     if(bt.state==='error') return '<span class="cm-s">Failed: '+esc(bt.err)+'</span>';
     if(bt.state!=='done') return 'Not run yet.';
-    const r=bt.result, row=(n,x)=>`<tr><td>${n}</td><td>${x.all.n}</td><td>${x.all.winRate==null?'—':x.all.winRate+'%'}</td><td class="${x.all.avgPct>0?'cm-b':'cm-s'}">${sg(x.all.avgPct)}</td><td>${sg(x.buy.avgPct)} (${x.buy.n})</td><td>${sg(x.sell.avgPct)} (${x.sell.n})</td></tr>`;
-    return `<table style="width:100%;font-size:11px;border-collapse:collapse;"><tr style="color:var(--text2);text-align:left"><th>Rules</th><th>Trades</th><th>Win</th><th>Avg/trade</th><th>Buys</th><th>Sells</th></tr>${row('Old',r.oldRules)}${row('New + market gate',r.newRules)}${row('New, no gate',r.newRulesNoGate)}</table>
-      <div style="margin-top:6px;">${r.symbols} stocks, ${r.bars} daily bars each. Average % per closed call before brokerage and slippage; a call needs to average clearly above zero to be worth following. Past results do not guarantee future ones.</div>`;
+    const r=bt.result, row=(n,x)=>`<tr><td>${n}</td><td>${x.all.n}</td><td>${x.all.winRate==null?'—':x.all.winRate+'%'}</td><td>${x.all.n?Math.round(x.all.losses/x.all.n*100)+'%':'—'}</td><td class="${x.all.avgPct>0?'cm-b':'cm-s'}">${sg(x.all.avgPct)}</td><td>${sg(x.buy.avgPct)} (${x.buy.n})</td><td>${sg(x.sell.avgPct)} (${x.sell.n})</td></tr>`;
+    return `<table style="width:100%;font-size:11px;border-collapse:collapse;"><tr style="color:var(--text2);text-align:left"><th>Rules</th><th>Trades</th><th>Win</th><th>Loss</th><th>Avg/trade</th><th>Buys</th><th>Sells</th></tr>${row('Old (9 Oct)',r.oldRules)}${row('v2 + index gate',r.v2Rules)}${row('v3, exit A (1/2/3R)',r.v3ExitA)}${row('v3, exit B (1.5/3/4.5R)',r.v3ExitB)}${row('v3, exit C (2/4/6R)',r.v3ExitC)}</table>
+      <div style="margin-top:6px;">${r.symbols} of ${r.requested} stocks loaded, up to ${r.bars} daily candles each. Source: ${esc(r.source)} (no Yahoo). Costs of ${r.costPct.swing}% per swing trade are included. Win and loss are shares of all trades; the rest are break-even. A rule needs to average clearly above zero to be worth following. Past results do not guarantee future ones.</div>`;
   }
   async function pollBt(){ try{ const r=await fetch('/api/calls/backtest',{cache:'no-store'}); bt=await r.json(); }catch(e){} const o=view&&view.querySelector('#cmBtOut'); if(o) o.innerHTML=btHtml(); if(bt&&bt.state==='running') btTimer=setTimeout(pollBt,4000); else { const b=view&&view.querySelector('#cmBt'); if(b) b.textContent='Run backtest'; } }
   function runBt(){ clearTimeout(btTimer); bt={state:'running',progress:0}; const o=view.querySelector('#cmBtOut'); if(o) o.innerHTML=btHtml(); fetch('/api/calls/backtest?run=1',{cache:'no-store'}).then(()=>setTimeout(pollBt,3000)).catch(()=>{}); }
@@ -2418,7 +2484,7 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     const px=c.ltp!=null?Math.min(hi,Math.max(lo,c.ltp)):c.entry, nxt=c.targets[c.targetsHit||0];
     const toSl=Math.abs(c.ltp-c.activeSl)/c.ltp*100, toT=nxt!=null?Math.abs(nxt-c.ltp)/c.ltp*100:null;
     const L=Math.min(pos(c.sl),pos(c.targets[2])), R=Math.max(pos(c.sl),pos(c.targets[2]));
-    return `<div class="cm-row"><div><b>${esc(c.symbol)}</b><div class="cm-sub"><span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> · ${c.mode==='intraday'?'Intraday':'Swing'} · ${esc(c.riskLabel)}</div><div class="cm-sub">${dt(c.t)}</div></div>
+    return `<div class="cm-row"><div><b>${esc(c.symbol)}</b><div class="cm-sub"><span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> · ${c.mode==='intraday'?'Intraday':'Swing'} · ${esc(c.riskLabel)}</div><div class="cm-sub">${dt(c.t)}</div><div style="margin-top:4px">${window.cbtBtn(c)}</div></div>
       <div><div class="cm-bar"><i style="left:${pos(c.sl)}%;width:${Math.abs(pos(c.entry)-pos(c.sl))}%;background:rgba(255,90,106,.45)"></i><i style="left:${Math.min(pos(c.entry),pos(c.targets[2]))}%;width:${Math.abs(pos(c.targets[2])-pos(c.entry))}%;background:rgba(31,191,117,.45)"></i><span class="cm-mark" style="left:calc(${pos(px)}% - 1px)"></span></div>
         <div class="cm-sub">SL ${num(c.activeSl)}${c.targetsHit?' (trailed)':''} · Entry ${num(c.entry)} · T${(c.targetsHit||0)+1} ${nxt!=null?num(nxt):'—'}</div></div>
       <div><b>${num(c.ltp)}</b><div class="cm-sub">LTP</div></div>

@@ -52,7 +52,7 @@ function tick(x) { return Math.round(x * 20) / 20; } // NSE price tick 0.05
  * bars: [{t,o?,h,l,c,v}] oldest -> newest. mode: 'swing' | 'intraday'.
  * Returns a call object or null (no setup), plus the checklist for transparency.
  */
-function evaluate(bars, mode, opts = {}) {
+function evaluateV2(bars, mode, opts = {}) {
   const MIN_SCORE = opts.minScore || 5;
   if (!bars || bars.length < 60) return null;
   const c = bars.map(b => b.c), h = bars.map(b => b.h), l = bars.map(b => b.l), v = bars.map(b => b.v || 0);
@@ -166,6 +166,8 @@ function evaluate(bars, mode, opts = {}) {
  * After T1 the stop trails to entry (breakeven). Intraday calls expire at the
  * close of the day they were made (square-off); swing calls after 30 days.
  */
+const COST = { intraday: Number(process.env.COST_INTRADAY_PCT) || 0.10, swing: Number(process.env.COST_SWING_PCT) || 0.15 }; // round-trip % (brokerage, charges, slippage)
+function costPct(mode) { return COST[mode] != null ? COST[mode] : COST.swing; }
 function track(call, bars, nowSec) {
   const sgn = call.side === 'BUY' ? 1 : -1;
   let sl = call.sl, hit = 0, status = 'ACTIVE', exit = null, exitT = null, last = call.entry;
@@ -178,7 +180,7 @@ function track(call, bars, nowSec) {
     for (let i = hit; i < call.targets.length; i++) {
       const tHit = sgn === 1 ? b.h >= call.targets[i] : b.l <= call.targets[i];
       if (!tHit) break;
-      hit = i + 1; if (hit === 1) sl = call.entry; // trail to entry
+      hit = i + 1; if (hit === 1) sl = call.entry; else if (hit === 2) sl = call.targets[0]; // trail: entry after T1, T1 after T2
       if (hit === call.targets.length) { status = 'TARGET_HIT'; exit = call.targets[i]; exitT = b.t; }
     }
     last = b.c;
@@ -188,15 +190,16 @@ function track(call, bars, nowSec) {
   const ltp = after.length ? after[after.length - 1].c : call.entry;
   const closed = status !== 'ACTIVE';
   const px = closed ? exit : ltp;
-  const pnlPct = sgn * (px - call.entry) / call.entry * 100;
-  return { status, targetsHit: hit, activeSl: sl, ltp: r2(ltp), exit: closed ? r2(exit) : null, exitT, pnlPct: r2(pnlPct), closed };
+  const gross = sgn * (px - call.entry) / call.entry * 100;
+  const cost = call.costPct != null ? call.costPct : costPct(call.mode);
+  return { status, targetsHit: hit, activeSl: sl, ltp: r2(ltp), exit: closed ? r2(exit) : null, exitT, pnlPct: r2(gross - cost), grossPct: r2(gross), costPct: cost, closed };
 }
 // 15:30 IST of the day containing epoch seconds t
 function istDayEnd(t) { const d = new Date((t + 19800) * 1000); const mid = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000 - 19800; return mid + 15 * 3600 + 30 * 60; }
 
 function summarize(calls) {
   const done = calls.filter(c => c.closed);
-  const wins = done.filter(c => c.pnlPct > 0.05), loss = done.filter(c => c.pnlPct < -0.05);
+  const wins = done.filter(c => c.pnlPct > 0.05 && c.status !== 'BREAKEVEN'), loss = done.filter(c => c.pnlPct < -0.05 && c.status !== 'BREAKEVEN');
   const avg = a => a.length ? a.reduce((s, c) => s + c.pnlPct, 0) / a.length : 0;
   const decided = wins.length + loss.length;
   return {
@@ -226,34 +229,180 @@ function marketBias(idxBars) {
   return up === 3 ? 'BULL' : up === 0 ? 'BEAR' : 'MIXED';
 }
 
-/**
- * Walk-forward backtest of the swing engine on daily bars. For each symbol and each day it asks evaluate()
- * using only data up to that day, opens the call at that day's close, then replays later bars with track().
- * Conservative: SL assumed first inside a bar; one open call per symbol; 5-day cool-off after a close.
- * barsBySym: { SYM: [{t,h,l,c,v}] }, idxBars optional (enables the market-bias gate).
- */
-function backtest(barsBySym, opts = {}) {
-  const out = []; const far = 4e9;
-  for (const sym of Object.keys(barsBySym)) {
-    const bars = barsBySym[sym]; if (!bars || bars.length < 120) continue;
-    let freeFrom = 0;
-    for (let i = 80; i < bars.length - 1; i++) {
-      if (bars[i].t < freeFrom) continue;
-      let bias = 'MIXED';
-      if (opts.idxBars) { const idx = opts.idxBars.filter(b => b.t <= bars[i].t); bias = marketBias(idx.slice(-120)); }
-      const ev = evaluate(bars.slice(Math.max(0, i - 200), i + 1), 'swing', { minScore: 5, legacy: opts.legacy, bias: opts.useGate === false ? 'MIXED' : bias });
-      if (!ev) continue;
-      const call = { t: bars[i].t, side: ev.side, mode: 'swing', entry: ev.entry, sl: ev.sl, targets: ev.targets };
-      const st = track(call, bars, far);
-      out.push({ sym, t: bars[i].t, side: ev.side, setup: ev.setup, risk: ev.riskLabel, status: st.status, pnlPct: st.pnlPct, closed: st.closed, bias });
-      freeFrom = st.closed ? (st.exitT || bars[i].t) + 5 * 86400 : bars[bars.length - 1].t + 1;
-    }
+
+// ---------------------------------------------------------------------------------------------
+// Engine v3. Six checks from different families (so the score is real evidence, not one signal
+// counted five times): trend, pullback entry, momentum, strength vs the index, participation, market.
+// ---------------------------------------------------------------------------------------------
+const EXITS = { A: [1, 2, 3], B: [1.5, 3, 4.5], C: [2, 4, 6] };
+function upto(arr, t) { // index of last element with .t <= t, or -1
+  let lo = 0, hi = arr.length - 1, r = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m].t <= t) { r = m; lo = m + 1; } else hi = m - 1; }
+  return r;
+}
+const istDayNo = t => Math.floor((t + 19800) / 86400);
+function slotVolRatio(bars, n) { // volume vs the same 15-minute slot on previous days
+  const slot = Math.floor(((bars[n].t + 19800) % 86400) / 900), day = istDayNo(bars[n].t);
+  const prev = [];
+  for (let i = n - 1; i >= 0 && prev.length < 10; i--) if (istDayNo(bars[i].t) !== day && Math.floor(((bars[i].t + 19800) % 86400) / 900) === slot) prev.push(bars[i].v || 0);
+  if (prev.length < 4) return null;
+  const avg = prev.reduce((a, b) => a + b, 0) / prev.length;
+  return avg > 0 ? (bars[n].v || 0) / avg : null;
+}
+function evaluate(bars, mode, opts = {}) {
+  if (opts.engine === 'v2') return evaluateV2(bars, mode, opts);
+  if (!bars || bars.length < 60) return null;
+  const intraday = mode === 'intraday';
+  const c = bars.map(b => b.c), h = bars.map(b => b.h), l = bars.map(b => b.l), v = bars.map(b => b.v || 0);
+  const n = c.length - 1, px = c[n];
+  const e5 = ema(c, 5), e20 = ema(c, 20), e50 = ema(c, 50);
+  const R = rsi(c), A = atr(h, l, c), S = stoch(h, l, c), ST = supertrend(h, l, c);
+  if (A[n] == null || R[n] == null || S.k[n] == null || S.d[n] == null || ST.dir[n] == null || !R[n - 2]) return null;
+  const a = A[n];
+  const hi3 = Math.max(...h.slice(n - 3, n + 1)), lo3 = Math.min(...l.slice(n - 3, n + 1));
+  const extended = Math.abs(px - e20[n]) / a > 1.6;
+  // participation: swing = volume vs 20-day average; intraday = vs the same time slot on earlier days
+  let volRatio;
+  if (intraday) volRatio = slotVolRatio(bars, n);
+  else { const va = v.slice(n - 20, n).reduce((x, y) => x + y, 0) / 20; volRatio = va > 0 ? v[n] / va : null; }
+  const volNeed = intraday ? 1.2 : 1.1;
+  // relative strength vs the index
+  let rs = null;
+  if (intraday) {
+    if (opts.idxTodayPct != null) { let k = n; while (k > 0 && istDayNo(bars[k].t) === istDayNo(bars[n].t)) k--; const pc = c[k]; if (pc > 0 && istDayNo(bars[k].t) !== istDayNo(bars[n].t)) rs = (px / pc - 1) * 100 - opts.idxTodayPct; }
+  } else if (opts.idxBars && opts.idxBars.length > 30 && n >= 20) {
+    const i1 = upto(opts.idxBars, bars[n].t), i0 = upto(opts.idxBars, bars[n - 20].t);
+    if (i1 >= 0 && i0 >= 0 && opts.idxBars[i0].c > 0) rs = ((px / c[n - 20] - 1) - (opts.idxBars[i1].c / opts.idxBars[i0].c - 1)) * 100;
   }
-  const done = out.filter(x => x.closed);
-  const agg = a => { const w = a.filter(x => x.pnlPct > 0.05), l = a.filter(x => x.pnlPct < -0.05); const sum = a.reduce((s, x) => s + x.pnlPct, 0);
-    return { n: a.length, winRate: w.length + l.length ? r2(w.length / (w.length + l.length) * 100) : null, avgPct: a.length ? r2(sum / a.length) : null, totalPct: r2(sum) }; };
-  return { all: agg(done), buy: agg(done.filter(x => x.side === 'BUY')), sell: agg(done.filter(x => x.side === 'SELL')), bounce: agg(done.filter(x => x.setup === 'bounce')), open: out.length - done.length,
-    byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = agg(done.filter(x => x.bias === b)), o), {}) };
+  const rsNeed = intraday ? 0.3 : 1.0;
+  const bias = opts.bias || 'MIXED';
+  const sides = {
+    BUY: {
+      trend: px > e50[n] && e20[n] > e50[n] && e20[n] >= e20[n - 3] && ST.dir[n] === 1,
+      entry: !extended && lo3 <= e20[n] * 1.005 && px > e5[n] && px > c[n - 1],
+      mom: R[n] >= 45 && R[n] <= 68 && S.k[n] > S.d[n] && S.k[n] < 88,
+      rs: rs != null && rs > rsNeed,
+      vol: volRatio != null && volRatio >= volNeed,
+      mkt: bias === 'BULL',
+    },
+    SELL: {
+      trend: px < e50[n] && e20[n] < e50[n] && e20[n] <= e20[n - 3] && ST.dir[n] === -1,
+      entry: !extended && hi3 >= e20[n] * 0.995 && px < e5[n] && px < c[n - 1],
+      mom: R[n] >= 32 && R[n] <= 55 && S.k[n] < S.d[n] && S.k[n] > 12,
+      rs: rs != null && rs < -rsNeed,
+      vol: volRatio != null && volRatio >= volNeed,
+      mkt: bias === 'BEAR',
+    },
+  };
+  let best = null;
+  for (const side of ['BUY', 'SELL']) {
+    const chk = sides[side]; const score = Object.values(chk).filter(Boolean).length;
+    if (!best || score > best.score) best = { side, chk, score };
+  }
+  let setup = 'trend';
+  const trendOk = best.score >= 5 && best.chk.trend && best.chk.entry && !(bias === 'BULL' && best.side === 'SELL') && !(bias === 'BEAR' && best.side === 'BUY');
+  // counter-trend bounce (swing only), labelled as such
+  let bounceCalc = false;
+  if (!trendOk) {
+    if (intraday) return null;
+    const va = v.slice(n - 20, n).reduce((x, y) => x + y, 0) / 20;
+    const turnUp = R[n] > R[n - 1] && R[n - 1] > R[n - 2];
+    const stochCross = S.k[n] > S.d[n] && S.k[n - 1] <= S.d[n - 1] + 1 && S.k[n] < 45;
+    if (R[n - 1] <= 38 && R[n] <= 50 && turnUp && stochCross && px > e5[n] && px > c[n - 1] && c[n - 1] < e20[n - 1] && va > 0 && v[n] >= 1.2 * va && px > Math.max(h[n - 1], h[n - 2]) && bias !== 'BEAR') {
+      bounceCalc = true; setup = 'bounce';
+      const chk = { trend: false, entry: true, mom: true, rs: rs != null && rs > 0, vol: true, mkt: bias === 'BULL' };
+      best = { side: 'BUY', chk, score: Object.values(chk).filter(Boolean).length };
+    } else return null;
+  }
+  const side = best.side, sgn = side === 'BUY' ? 1 : -1;
+  const stopMult = intraday ? 1.6 : 2.0;
+  const extreme = side === 'BUY' ? lo3 : hi3;
+  const structDist = Math.abs(px - extreme) + 0.25 * a;
+  let stopDist = Math.max(stopMult * a, Math.min(structDist, (intraday ? 2.4 : 3.0) * a));
+  stopDist = Math.min(stopDist, (intraday ? 0.025 : 0.075) * px); stopDist = Math.max(stopDist, 0.004 * px);
+  const entry = tick(px), sl = tick(entry - sgn * stopDist);
+  const rr = intraday || bounceCalc ? [1, 2, 3] : (EXITS[opts.exit] || EXITS.B);
+  const targets = rr.map(m => tick(entry + sgn * stopDist * m));
+  const risk = stopDist / px * 100, lim = intraday ? [0.9, 1.8] : [3, 5.5];
+  let riskLabel = risk < lim[0] ? 'LOW' : risk < lim[1] ? 'MEDIUM' : 'HIGH';
+  if (bounceCalc && riskLabel === 'LOW') riskLabel = 'MEDIUM';
+  const f = x => r2(x), reasons = [];
+  if (bounceCalc) {
+    reasons.push(`Counter-trend bounce: RSI turned up from ${f(R[n - 2])} to ${f(R[n])} and Stochastic ${f(S.k[n])}/${f(S.d[n])} just crossed up`);
+    reasons.push(`Price ₹${f(px)} reclaimed the 5 EMA (₹${f(e5[n])}) and cleared the last two highs`);
+    reasons.push(`Still below the 50 EMA (₹${f(e50[n])}), so this is a short bounce, not a trend change; use the stop`);
+  } else {
+    reasons.push(side === 'BUY' ? `Uptrend: price ₹${f(px)} above the 50 EMA (₹${f(e50[n])}), 20 EMA above 50 EMA, Supertrend up` : `Downtrend: price ₹${f(px)} below the 50 EMA (₹${f(e50[n])}), 20 EMA below 50 EMA, Supertrend down`);
+    reasons.push(side === 'BUY' ? `Pullback to the 20 EMA (₹${f(e20[n])}) held and price turned back up through the 5 EMA` : `Rally to the 20 EMA (₹${f(e20[n])}) failed and price turned back down through the 5 EMA`);
+    reasons.push(`RSI ${f(R[n])}, Stochastic ${f(S.k[n])}/${f(S.d[n])}: momentum agrees without being stretched`);
+    if (rs != null) reasons.push(`${side === 'BUY' ? 'Stronger' : 'Weaker'} than the index by ${f(Math.abs(rs))}${intraday ? ' points today' : ' points over 20 days'}`);
+    if (volRatio != null) reasons.push(`Volume ${f(volRatio)}x ${intraday ? 'the usual for this time of day' : 'the 20-day average'}`);
+    reasons.push(`Market backdrop: ${bias === 'MIXED' ? 'mixed (no clear index trend)' : bias === 'BULL' ? 'index in an uptrend' : 'index in a downtrend'}`);
+  }
+  return {
+    side, mode, entry, sl, targets, riskLabel, score: best.score, checks: best.chk, setup, engine: 'v3', rs: rs == null ? null : f(rs),
+    riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: reasons.join('. ') + '.', barTime: bars[n].t,
+  };
 }
 
-module.exports = { marketBias, backtest, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+// ---- backtests (async so a long run yields to the server; yieldFn = () => new Promise(r => setImmediate(r))) ----
+function mkAgg(a) {
+  const win = x => x.pnlPct > 0.05 && x.status !== 'BREAKEVEN', loss = x => x.pnlPct < -0.05 && x.status !== 'BREAKEVEN';
+  const w = a.filter(win), l = a.filter(loss), sum = a.reduce((s, x) => s + x.pnlPct, 0), avg = z => z.length ? z.reduce((s, x) => s + x.pnlPct, 0) / z.length : 0;
+  return { n: a.length, wins: w.length, losses: l.length, flat: a.length - w.length - l.length,
+    winRate: w.length + l.length ? r2(w.length / (w.length + l.length) * 100) : null, avgPct: a.length ? r2(sum / a.length) : null, totalPct: r2(sum), avgWin: r2(avg(w)), avgLoss: r2(avg(l)) };
+}
+function tradeOf(sym, call, ev, st, bias) {
+  return { sym, t: call.t, side: ev.side, setup: ev.setup || 'trend', risk: ev.riskLabel, status: st.status, pnlPct: st.pnlPct, grossPct: st.grossPct, closed: st.closed, bias, entry: ev.entry, exit: st.exit, exitT: st.exitT, targetsHit: st.targetsHit };
+}
+async function walkSwing(sym, bars, opts, yieldFn) {
+  const out = [], far = 4e9; let freeFrom = 0, cnt = 0;
+  if (!bars || bars.length < 120) return out;
+  for (let i = 80; i < bars.length - 1; i++) {
+    if (bars[i].t < freeFrom) continue;
+    if (yieldFn && ++cnt % 50 === 0) await yieldFn();
+    let bias = 'MIXED';
+    if (opts.idxBars && opts.useGate !== false) { const k = upto(opts.idxBars, bars[i].t); if (k >= 0) bias = marketBias(opts.idxBars.slice(Math.max(0, k - 120), k + 1)); }
+    const ev = evaluate(bars.slice(Math.max(0, i - 260), i + 1), 'swing', { engine: opts.engine, legacy: opts.legacy, minScore: 5, exit: opts.exit, bias, idxBars: opts.idxBars });
+    if (!ev) continue;
+    const call = { t: bars[i].t, side: ev.side, mode: 'swing', entry: ev.entry, sl: ev.sl, targets: ev.targets };
+    const st = track(call, bars, far);
+    out.push(tradeOf(sym, call, ev, st, bias));
+    freeFrom = st.closed ? (st.exitT || bars[i].t) + 5 * 86400 : bars[bars.length - 1].t + 1;
+  }
+  return out;
+}
+async function walkIntraday(sym, bars, opts, yieldFn) {
+  const out = [], far = 4e9; let freeFrom = 0, cnt = 0;
+  if (!bars || bars.length < 120) return out;
+  for (let i = 60; i < bars.length - 1; i++) {
+    const t = bars[i].t, mins = Math.floor(((t + 19800) % 86400) / 60);
+    if (mins < 600 || mins > 825 || t < freeFrom) continue; // bars that close between 10:15 and 14:00 IST
+    if (yieldFn && ++cnt % 50 === 0) await yieldFn();
+    let todayPct = null, bias = 'MIXED';
+    if (opts.idxBars15 && opts.useGate !== false) {
+      const k = upto(opts.idxBars15, t);
+      if (k >= 0) { let j = k; while (j > 0 && istDayNo(opts.idxBars15[j].t) === istDayNo(t)) j--; const pc = opts.idxBars15[j].c; if (istDayNo(opts.idxBars15[j].t) !== istDayNo(t) && pc > 0) { todayPct = (opts.idxBars15[k].c / pc - 1) * 100; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; } }
+    }
+    const ev = evaluate(bars.slice(Math.max(0, i - 300), i + 1), 'intraday', { engine: opts.engine, minScore: 5, bias, idxTodayPct: todayPct });
+    if (!ev) continue;
+    const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
+    const st = track(call, bars, far);
+    out.push(tradeOf(sym, call, ev, st, bias));
+    freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
+  }
+  return out;
+}
+/** Universe backtest: barsBySym = { SYM: bars }. Returns { trades, summary }. */
+async function backtest(barsBySym, opts = {}, yieldFn) {
+  let trades = [];
+  for (const sym of Object.keys(barsBySym)) trades = trades.concat(await walkSwing(sym, barsBySym[sym], opts, yieldFn));
+  return summarizeTrades(trades);
+}
+function summarizeTrades(trades) {
+  const done = trades.filter(x => x.closed);
+  return { trades, all: mkAgg(done), buy: mkAgg(done.filter(x => x.side === 'BUY')), sell: mkAgg(done.filter(x => x.side === 'SELL')), bounce: mkAgg(done.filter(x => x.setup === 'bounce')), open: trades.length - done.length,
+    byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
+}
+
+module.exports = { marketBias, backtest, walkSwing, walkIntraday, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

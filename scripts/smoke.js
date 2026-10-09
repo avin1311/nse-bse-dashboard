@@ -35,6 +35,17 @@ ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length
   let p = 500; const bars = []; for (let i = 0; i < 400; i++) { const o = p; p *= 1 + 0.002 + 0.012 * (rn() - 0.5); bars.push({ t: 1.7e9 + i * 86400, h: Math.max(o, p) * 1.003, l: Math.min(o, p) * 0.997, c: p, v: 1e6 * (0.8 + rn()) }); }
   let n = 0, bad = 0; for (let i = 80; i < 400; i++) { const r = C.evaluate(bars.slice(0, i + 1), 'swing'); if (!r) continue; n++; const s = r.side === 'BUY' ? 1 : -1; if (!(s * (r.entry - r.sl) > 0 && s * (r.targets[0] - r.entry) > 0 && s * (r.targets[1] - r.targets[0]) > 0 && s * (r.targets[2] - r.targets[1]) > 0)) bad++; }
   ok(bad === 0, 'trade calls: levels ordered on ' + n + ' generated calls');
+  { // index engine: levels ordered, option tracker closes on spot invalidation
+    let s2 = 5; const r2n = () => ((s2 = (s2 * 16807) % 2147483647) / 2147483647); let q = 20000; const D = [];
+    for (let i = 0; i < 400; i++) { const o = q; q *= 1 + 0.001 + (r2n() - 0.5) * 0.01; D.push({ t: 1.7e9 + i * 86400, o, h: Math.max(o, q) * 1.003, l: Math.min(o, q) * 0.997, c: q, v: 0 }); }
+    let n2 = 0, bad2 = 0; for (let i = 210; i < 400; i++) { const r = C.evaluateIndex(D.slice(0, i + 1), 'swing', { bias: 'MIXED' }); if (!r) continue; n2++; const sg = r.side === 'BUY' ? 1 : -1; if (!(sg * (r.entry - r.sl) > 0 && sg * (r.targets[0] - r.entry) > 0 && sg * (r.targets[2] - r.targets[1]) > 0)) bad2++; }
+    ok(bad2 === 0, 'index engine: levels ordered on ' + n2 + ' generated signals');
+    const oc = { side: 'BUY', mode: 'intraday', dir: 'BUY', entry: 100, sl: 80, targets: [120, 140, 160], t: 1.7e9, spotSl: 24000, costPct: 2 };
+    const ob = [{ t: 1.7e9 + 900, h: 105, l: 99, c: 103 }, { t: 1.7e9 + 1800, h: 110, l: 100, c: 108 }];
+    const sb = [{ t: 1.7e9 + 900, c: 24100 }, { t: 1.7e9 + 1800, c: 23950 }];
+    const tr = C.trackOption(oc, ob, sb, 1.7e9 + 5000);
+    ok(tr.closed && tr.status === 'SL_HIT' && tr.exit === 108, 'index options: closes at the premium when the index breaks the stop level');
+  }
   const call = { side: 'BUY', mode: 'swing', entry: 100, sl: 95, targets: [105, 110, 120], t: 0 };
   ok(C.track(call, [{ t: 1, h: 106, l: 94, c: 100 }], 1e9).status === 'SL_HIT', 'trade calls: SL assumed first when both hit in one bar');
   ok(C.track(call, [{ t: 1, h: 106, l: 99, c: 105 }, { t: 2, h: 106, l: 100, c: 101 }], 1e9).status === 'BREAKEVEN', 'trade calls: stop trails to entry after T1');
@@ -50,6 +61,7 @@ async function waitUp(base) { for (let i = 0; i < 40; i++) { try { const r = awa
   ok((await (await fetch(b1 + '/healthz')).text()) === 'ok', '/healthz answers ok');
   { const r = await (await fetch(b1 + '/api/calls/backtest')).json(); ok(r && typeof r.state === 'string', '/api/calls/backtest responds'); }
   { const r = await (await fetch(b1 + '/api/calls/backtest-call?symbol=WIPRO&side=SELL&mode=swing')).json(); ok(r && (r.error || r.symbol), '/api/calls/backtest-call responds'); }
+  { const r = await (await fetch(b1 + '/api/calls/backtest-call?kind=index&symbol=NIFTY&side=BUY&mode=intraday')).json(); ok(r && (r.error || r.kind === 'index'), '/api/calls/backtest-call (index) responds'); }
   { const r = await (await fetch(b1 + '/api/calls/monitor')).json(); ok(Array.isArray(r.active) && Array.isArray(r.events) && r.today && r.today.date, '/api/calls/monitor responds'); }
   { const r = await (await fetch(b1 + '/api/calls')).json(); ok(Array.isArray(r.calls) && r.stats && r.scan, '/api/calls responds (' + r.calls.length + ' calls)'); }
   const pg = await fetch(b1 + '/'); ok(pg.ok && (await pg.text()).includes('viewTabs'), 'home page served');

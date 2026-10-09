@@ -1636,11 +1636,25 @@ async function loadCalls() {
   return callsLoading;
 }
 async function saveCalls() { try { await storeSet('store:trade-calls', callsDb.slice(-CALLS_MAX)); } catch (e) { /* memory-only mode */ } }
-const toBars = rows => rows.map(r => ({ t: r.t, h: r.h, l: r.l, c: r.c, v: r.v }));
+const toBars = rows => rows.map(r => ({ t: r.t, o: r.o, h: r.h, l: r.l, c: r.c, v: r.v }));
 function istMinsNow() { const p = istParts(); return p.mins; }
 
+const keyCandleCache = {};
+async function getCandlesByKey(key, tf) { // option contracts: 20 s cache
+  const ck = key + '|' + tf, c = keyCandleCache[ck]; if (c && Date.now() - c.time < 20000) return c.data;
+  const data = await fetchCandlesForKey(key, tf); keyCandleCache[ck] = { data, time: Date.now() };
+  return data;
+}
 async function trackCall(call) {
   try {
+    if (call.kind === 'option') {
+      const opt = toBars(await getCandlesByKey(call.instrumentKey, '15m'));
+      let spot = null; try { spot = toBars(await getUpstoxCandles(call.underlying, '15m')); } catch (e) {}
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (spot && spot.length && spot[spot.length - 1].t + 900 > nowSec) spot = spot.slice(0, -1); // closed bars only
+      Object.assign(call, Calls.trackOption(call, opt, spot, nowSec));
+      return;
+    }
     const rows = await getUpstoxCandles(call.symbol, call.mode === 'intraday' ? '15m' : '1h');
     const st = Calls.track(call, toBars(rows), Math.floor(Date.now() / 1000));
     Object.assign(call, st);
@@ -1691,7 +1705,7 @@ async function liveMonitor() {
   let changed = false;
   for (const c of act) {
     try {
-      const q = await getUpstoxLTPC(await dataKeyFor(c.symbol));
+      const q = await getUpstoxLTPC(c.instrumentKey || await dataKeyFor(c.symbol));
       if (q.price == null) continue;
       const sgn = c.side === 'BUY' ? 1 : -1;
       c.ltp = q.price; c.pnlPct = Math.round((sgn * (q.price - c.entry) / c.entry * 100 - (c.costPct != null ? c.costPct : Calls.costPct(c.mode))) * 100) / 100; changed = true;
@@ -1786,6 +1800,129 @@ async function getIndexContext() {
   idxCtx = { t: Date.now(), v };
   return v;
 }
+
+// ---- Index option BUY calls (Nifty / Bank Nifty / Sensex) -------------------------------------------
+// The index engine (calls.js evaluateIndex) gives a SPOT signal. Here it becomes a concrete contract: buy a CE for an
+// up signal, a PE for a down signal, on a stated expiry and strike taken from the live Upstox contract list / chain.
+const INDEX_UNDERLYINGS = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
+const COST_OPTION = Number(process.env.COST_OPTION_PCT) || 2; // round-trip % of premium (brokerage, charges, spread)
+const optContractCache = {};
+async function getOptionContracts(u) {
+  const c = optContractCache[u]; if (c && Date.now() - c.t < 30 * 60000) return c.v;
+  let key = UPSTOX_INDEX_KEYS[u], list;
+  try { list = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(key)}`); }
+  catch (e) { key = await resolveInstrumentKey(u); list = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(key)}`); }
+  if (!Array.isArray(list) || !list.length) throw new Error('no option contracts for ' + u);
+  const v = { key, list }; optContractCache[u] = { t: Date.now(), v }; return v;
+}
+const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
+const fmtDate = d => { const x = new Date(d + 'T00:00:00Z'); return x.getUTCDate() + ' ' + x.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' }) + ' ' + x.getUTCFullYear(); };
+/** Which expiry to buy, and why. Intraday: avoid expiry day (decay and gamma). Multi-day: need time for the move. */
+function pickExpiry(contracts, mode) {
+  const today = istDate(0);
+  const exps = [...new Set(contracts.map(c => c.expiry))].filter(e => e >= today).sort();
+  if (!exps.length) return null;
+  const info = e => ({ expiry: e, dte: dayDiff(e, today) });
+  if (mode === 'intraday') {
+    const e = exps.find(x => dayDiff(x, today) >= 1) || exps[0], i = info(e);
+    return { ...i, why: i.dte >= 1 ? `Nearest expiry with at least a day left (${i.dte} day${i.dte === 1 ? '' : 's'}): fast premium response without expiry-day decay` : `Only the expiry-day contract is available; premium decays quickly, keep it short` };
+  }
+  let e = exps.find(x => dayDiff(x, today) >= 12);
+  if (!e) { const ok = exps.filter(x => dayDiff(x, today) >= 7); e = ok[ok.length - 1]; }
+  if (!e) return null;
+  const i = info(e), hold = Math.max(1, Math.min(Calls.IDX_HOLD_DAYS, i.dte - 2));
+  return { ...i, hold, why: `First expiry with 12+ days left (${i.dte} days): enough time for the move, and decay is slow. Plan to exit within ${hold} days (before ${fmtDate(new Date(Date.now() + 19800000 + hold * 86400000).toISOString().slice(0, 10))}) and never carry into the last 2 days` };
+}
+async function buildOptionCall(u, ev, spotLtp, nowSec) {
+  const { key, list } = await getOptionContracts(u);
+  const pe = pickExpiry(list, ev.mode); if (!pe) throw new Error('no suitable expiry');
+  const optType = ev.side === 'BUY' ? 'CE' : 'PE';
+  const chain = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(key)}&expiry_date=${pe.expiry}`);
+  const rows = (chain || []).filter(r => r && r.strike_price != null).sort((a, b) => a.strike_price - b.strike_price);
+  if (rows.length < 5) throw new Error('empty option chain');
+  let atm = 0; rows.forEach((r, i) => { if (Math.abs(r.strike_price - spotLtp) < Math.abs(rows[atm].strike_price - spotLtp)) atm = i; });
+  const itm = ev.mode === 'swing' ? 1 : 0; // multi-day: one strike in the money (more delta, less decay drag)
+  const idx = Math.max(0, Math.min(rows.length - 1, optType === 'CE' ? atm - itm : atm + itm));
+  const row = rows[idx], opt = optType === 'CE' ? row.call_options : row.put_options;
+  if (!opt || !opt.instrument_key) throw new Error('strike has no ' + optType);
+  const md = opt.market_data || {};
+  let ltp = md.ltp; if (!(ltp > 0)) { const q = await getUpstoxLTPC(opt.instrument_key); ltp = q.price; }
+  if (!(ltp > 0)) throw new Error('no premium');
+  if (ltp < 20) throw new Error('premium too low (' + ltp + ')');
+  const bid = md.bid_price, ask = md.ask_price;
+  if (bid > 0 && ask > 0 && (ask - bid) / ltp > 0.03) throw new Error('wide bid-ask (' + bid + '/' + ask + ')');
+  if (md.oi != null && md.oi < 1000) throw new Error('thin open interest (' + md.oi + ')');
+  let delta = Math.abs(opt.option_greeks && opt.option_greeks.delta); if (!(delta > 0)) delta = itm ? 0.6 : 0.5;
+  delta = Math.max(0.35, Math.min(0.8, delta));
+  const spec = list.find(c => c.instrument_key === opt.instrument_key) || list.find(c => c.expiry === pe.expiry && c.strike_price === row.strike_price && c.instrument_type === optType) || {};
+  const shift = spotLtp - ev.entry, sgn = ev.side === 'BUY' ? 1 : -1;
+  const spotSl = tickN(ev.sl + shift), spotT = ev.targets.map(x => tickN(x + shift));
+  const stop = Math.abs(spotLtp - spotSl);
+  const tk = x => Math.round(x * 20) / 20;
+  const entry = tk(ltp);
+  let sl = Math.max(entry - delta * stop, entry * 0.65); sl = tk(Math.min(sl, entry * 0.94));
+  const targets = [1, 2, 3].map(m => tk(entry + delta * stop * m));
+  const hold = pe.hold ? pe.hold : null, limitT = hold ? nowSec + hold * 86400 : undefined;
+  const label = `${fmtDate(pe.expiry)}${spec.weekly ? ' (weekly)' : ' (monthly)'}`;
+  const symbol = `${u} ${row.strike_price} ${optType}`;
+  const risk = (entry - sl) / entry * 100;
+  return {
+    id: u + '-' + ev.mode + '-' + nowSec, symbol, kind: 'option', underlying: u, dir: ev.side, side: 'BUY', optType, strike: row.strike_price, expiry: pe.expiry, expiryLabel: label, dte: pe.dte,
+    expiryWhy: pe.why, weekly: !!spec.weekly, lotSize: spec.lot_size || spec.minimum_lot || null, instrumentKey: opt.instrument_key, mode: ev.mode, delta: Math.round(delta * 100) / 100,
+    entry, sl, targets, riskLabel: risk < 20 ? 'MEDIUM' : 'HIGH', riskPct: Math.round(risk * 10) / 10, score: ev.score, setup: ev.setup, engine: ev.engine, rs: null,
+    costPct: COST_OPTION, checks: ev.checks, analysis: ev.analysis, limitT, holdDays: hold,
+    spot: { entry: spotLtp, sl: spotSl, targets: spotT }, spotSl, t: nowSec,
+  };
+}
+const tickN = x => Math.round(x * 20) / 20;
+async function runIndexScan(db, notes) {
+  if (process.env.CALLS_INDEX === 'off') return;
+  const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
+  const nowSec = Math.floor(Date.now() / 1000), dayNo = t => Math.floor((t + 19800) / 86400), today = dayNo(nowSec);
+  const st = callsState.index = { at: nowSec, open, found: [], skipped: [], err: null };
+  if (!open) return;
+  const optCalls = db.filter(c => c.kind === 'option');
+  const found = [];
+  for (const u of INDEX_UNDERLYINGS) {
+    try {
+      let daily = toBars(await getUpstoxCandles(u, '1D'));
+      if (mins < 915) daily = daily.slice(0, -1); // today's still-forming daily bar
+      const dailyBias = Calls.marketBias(daily.slice(-150));
+      if (mins >= 600 && mins <= 925) {
+        const ev = Calls.evaluateIndex(daily.slice(-300), 'swing', { bias: dailyBias });
+        if (ev) found.push({ u, ...ev });
+      }
+      if (mins >= 600 && mins <= 810 && process.env.CALLS_INTRADAY !== 'off') {
+        let rows = toBars(await getUpstoxCandles(u, '15m'));
+        if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
+        const ev = Calls.evaluateIndex(rows.slice(-300), 'intraday', { bias: dailyBias });
+        if (ev && dayNo(ev.barTime) === today) found.push({ u, ...ev });
+      }
+    } catch (e) { st.skipped.push(u + ': ' + e.message); }
+  }
+  st.found = found.map(f => `${f.u} ${f.mode} ${f.side} ${f.setup} ${f.score}/6`);
+  found.sort((a, b) => b.score - a.score);
+  const made = { intraday: 0, swing: 0 };
+  const DAY_CAP = { intraday: 3, swing: 2 };
+  for (const f of found) {
+    if (made[f.mode] >= 1) continue; // one new call per mode per scan
+    const openOpt = optCalls.filter(c => !c.closed);
+    if (openOpt.some(c => c.underlying === f.u && (c.mode === f.mode || c.dir !== f.side))) continue; // one open call per index per mode, never both directions on one index
+    if (openOpt.filter(c => c.dir === f.side).length >= 2) continue; // indices move together: no more than 2 on the same side
+    if (optCalls.filter(c => c.mode === f.mode && dayNo(c.t) === today).length >= DAY_CAP[f.mode]) continue;
+    if (optCalls.some(c => c.underlying === f.u && c.closed && nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 3600 : 2 * 86400))) continue;
+    try {
+      const q = await getUpstoxLTPC(await dataKeyFor(f.u)); const ltp = q.price;
+      if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) { st.skipped.push(f.u + ': price already ran away from the signal'); continue; }
+      if (f.mode === 'swing' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) { st.skipped.push(f.u + ': moving against the idea today'); continue; }
+      const call = await buildOptionCall(f.u, f, ltp, nowSec);
+      Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false });
+      db.push(call); optCalls.push(call); made[f.mode]++;
+      await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 BUY ${call.symbol} (${call.mode}) premium ₹${call.entry}, expiry ${call.expiryLabel}` }, false);
+      notes.push(`🆕 BUY <b>${call.symbol}</b> (${call.mode === 'swing' ? 'multi-day' : 'intraday'}) expiry ${call.expiryLabel}\nPremium ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}. Exit if ${f.u} ${f.side === 'BUY' ? 'closes below' : 'closes above'} ${call.spotSl}${call.holdDays ? ', or in ' + call.holdDays + ' days' : ', and by 15:15'}.`);
+    } catch (e) { st.skipped.push(f.u + ' ' + f.mode + ': ' + e.message); }
+  }
+}
 async function runCallsCycle(force) {
   if (callsState.running) return;
   if (!force && Date.now() - callsState.lastScan < SCAN_EVERY) return;
@@ -1800,6 +1937,7 @@ async function runCallsCycle(force) {
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK.slice(0, 90);
     const ictx = await getIndexContext(); callsState.market = ictx;
+    try { await runIndexScan(db, notes); } catch (e) { callsState.index = { ...(callsState.index || {}), err: e.message }; }
     // swing: block trades against the index's daily trend, and against a >0.5% move today
     const swingBias = ictx.todayPct != null && ictx.todayPct > 0.5 ? 'BULL' : ictx.todayPct != null && ictx.todayPct < -0.5 ? 'BEAR' : ictx.dailyBias;
     const found = []; callsState.scanned = 0; let i = 0; const breadth = { n: 0, above50: 0, stUp: 0 };
@@ -1834,10 +1972,10 @@ async function runCallsCycle(force) {
     // 3) log the best new ones (de-duplicated, capped per cycle)
     // best first: higher score, then the stronger relative-strength gap. Fewer, better calls.
     found.sort((a, b) => b.score - a.score || Math.abs(b.rs || 0) - Math.abs(a.rs || 0));
-    const open_ = db.filter(c => !c.closed); const CAP = { swing: 5, intraday: 3 }, SIDE_CAP = { swing: 3, intraday: 2 }, DAY_CAP = { swing: 3, intraday: 2 };
+    const open_ = db.filter(c => !c.closed && c.kind !== 'option'); const CAP = { swing: 5, intraday: 3 }, SIDE_CAP = { swing: 3, intraday: 2 }, DAY_CAP = { swing: 3, intraday: 2 };
     const cnt = (m, side) => open_.filter(c => c.mode === m && (!side || c.side === side)).length;
     const dayNo = t => Math.floor((t + 19800) / 86400), today = dayNo(nowSec);
-    const madeToday = m => db.filter(c => c.mode === m && dayNo(c.t) === today).length;
+    const madeToday = m => db.filter(c => c.kind !== 'option' && c.mode === m && dayNo(c.t) === today).length;
     // one new call per mode per scan (no clusters), within open / per-side / per-day caps
     const quota = { swing: Math.min(1, CAP.swing - cnt('swing'), DAY_CAP.swing - madeToday('swing')), intraday: Math.min(1, CAP.intraday - cnt('intraday'), DAY_CAP.intraday - madeToday('intraday')) };
     for (const f of found) {
@@ -1932,7 +2070,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-09-r8 (engine v3: evidence families, pullback entries, trailing exits, costs, per-call backtest)';
+const BUILD = '2026-10-09-r9 (index option-buy calls: Nifty, Bank Nifty, Sensex; intraday + multi-day with expiry)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -1995,7 +2133,65 @@ async function ensureUniverseTrades() {
     } catch (e) { btUni.running = false; btUni.err = e.message; }
   })();
 }
+
+// ---- Index backtests: the SPOT signal (same engine as the option calls) replayed on real index candles from Upstox ----
+// 15-minute history is fetched month by month (Upstox serves it in windows); coverage is reported honestly.
+const idxHist = {};
+async function getIndex15mHistory(u, maxWindows = 12) {
+  const c = idxHist[u]; if (c && Date.now() - c.t < 12 * 3600000) return c.v;
+  const key = await dataKeyFor(u); let all = [];
+  try { all = await fetchCandlesForKey(key, '15m'); } catch (e) { if (!all.length) throw e; }
+  let pages = 1;
+  for (let k = 1; k < maxWindows; k++) {
+    try {
+      const hist = await upstoxFetchJson(`https://api.upstox.com/v3/historical-candle/${encodeURIComponent(key)}/minutes/15/${istDate(k * 28)}/${istDate((k + 1) * 28)}`);
+      const rows = parseCandles(hist && hist.candles, 'minutes'); if (!rows.length) break;
+      all = all.concat(rows); pages++;
+    } catch (e) { break; }
+  }
+  const seen = new Set(); const out = [];
+  all.sort((a, b) => a.t - b.t).forEach(r => { if (!seen.has(r.t)) { seen.add(r.t); out.push(r); } });
+  const v = { bars: toBars(out), windows: pages };
+  if (v.bars.length > 200) idxHist[u] = { t: Date.now(), v };
+  return v;
+}
+const idxTrades = {};
+async function getIdxTrades(u, mode, supplied) {
+  const ck = u + '|' + mode; const c = idxTrades[ck];
+  if (!supplied && c && Date.now() - c.t < 12 * 3600000) return c.v;
+  const daily = toBars(await getUpstoxCandles(u, '1D')).slice(-1300);
+  let bars, windows = null, source;
+  if (supplied && supplied.length >= 120) { bars = supplied; source = 'TradingView export you uploaded'; }
+  else if (mode === 'intraday') { const h = await getIndex15mHistory(u); bars = h.bars; windows = h.windows; source = 'Upstox 15-minute index candles'; }
+  else { bars = daily; source = 'Upstox daily index candles'; }
+  if (!bars || bars.length < 120) throw new Error('Only ' + (bars ? bars.length : 0) + ' candles available for ' + u + ' (need at least 120)');
+  const trades = await Calls.walkIndex(u, bars, { mode, dailyBars: daily }, yieldLoop);
+  const v = { trades, bars: bars.length, from: bars[0].t, to: bars[bars.length - 1].t, windows, source };
+  if (!supplied) idxTrades[ck] = { t: Date.now(), v };
+  return v;
+}
+async function backtestIndexCall(spec, supplied) {
+  const u = spec.symbol, mode = spec.mode;
+  const main = await getIdxTrades(u, mode, supplied);
+  const done = main.trades.filter(x => x.closed);
+  const same = done.filter(x => x.side === spec.side && (!spec.setup || x.setup === spec.setup));
+  const out = { kind: 'index', symbol: u, mode, side: spec.side, setup: spec.setup || null, source: main.source, candles: main.bars, days: Math.round((main.to - main.from) / 86400), from: main.from, to: main.to,
+    costPct: Calls.IDX_COST, note: 'Tested on the index itself (spot). The option adds its own cost (about ' + COST_OPTION + '% round trip) and its premium moves roughly delta x spot, so treat this as the quality of the signal, not option P&L.',
+    sameKind: Calls.mkAgg(same), sameSide: Calls.mkAgg(done.filter(x => x.side === spec.side)), allSignals: Calls.mkAgg(done),
+    recent: same.slice(-12).reverse().map(x => ({ t: x.t, status: x.status, pnlPct: x.pnlPct, targetsHit: x.targetsHit, bias: x.bias })) };
+  if (main.windows != null) out.coverage = `${main.windows} month-window(s) of 15-minute history, about ${out.days} days`;
+  // all three indices together (same side and mode): a bigger sample than one index alone
+  const others = INDEX_UNDERLYINGS.filter(x => x !== u), agg = [...same]; let missing = 0;
+  for (const o of others) {
+    const c = idxTrades[o + '|' + mode];
+    if (c) agg.push(...c.v.trades.filter(x => x.closed && x.side === spec.side && (!spec.setup || x.setup === spec.setup)));
+    else { missing++; lowPriority.run(true, () => getIdxTrades(o, mode).catch(() => {})); }
+  }
+  out.universe = missing ? { state: 'running', label: 'All indices', note: 'Loading the other two indices; open Backtest again in a minute.' } : { state: 'done', label: 'All indices', stocks: 3, ...Calls.mkAgg(agg) };
+  return out;
+}
 async function backtestOneCall(spec, supplied) {
+  if (spec.kind === 'index') return backtestIndexCall(spec, supplied);
   const sym = spec.symbol, intraday = spec.mode === 'intraday';
   let bars, source;
   if (supplied && supplied.length >= 120) { bars = supplied; source = 'TradingView export you uploaded'; }
@@ -2020,7 +2216,9 @@ async function backtestOneCall(spec, supplied) {
 }
 async function specFromReq(q) {
   const db = await loadCalls(); const c = q.id ? db.find(x => x.id === q.id) : null;
+  if (c && c.kind === 'option') return { kind: 'index', symbol: c.underlying, mode: c.mode, side: c.dir, setup: c.setup };
   if (c) return { symbol: c.symbol, mode: c.mode, side: c.side, setup: c.setup || 'trend' };
+  if (q.kind === 'index' && INDEX_UNDERLYINGS.includes(String(q.symbol).toUpperCase()) && /^(BUY|SELL)$/.test(q.side) && /^(swing|intraday)$/.test(q.mode)) return { kind: 'index', symbol: String(q.symbol).toUpperCase(), mode: q.mode, side: q.side, setup: /^(orb|pullback|breakout)$/.test(q.setup) ? q.setup : null };
   if (!q.symbol || !/^(BUY|SELL)$/.test(q.side) || !/^(swing|intraday)$/.test(q.mode)) throw new Error('call not found');
   return { symbol: String(q.symbol).toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), mode: q.mode, side: q.side, setup: q.setup === 'bounce' ? 'bounce' : 'trend' };
 }
@@ -2064,6 +2262,7 @@ app.get('/api/calls', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
+if (process.env.CALLS_TEST_HOOKS) global.__hooks = { buildOptionCall, pickExpiry, trackCall, runIndexScan, backtestIndexCall, loadCalls, getOptionContracts, callsState };
 app.listen(PORT, () => {
   console.log(`\nDashboard running at http://localhost:${PORT}`);
   console.log(`Live data proxied from Yahoo Finance (cache TTL ${CACHE_TTL_MS / 1000}s)\n`);

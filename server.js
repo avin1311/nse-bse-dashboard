@@ -2232,7 +2232,7 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on'; // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && !gate.t) gate = { ...g, building: false }; }).catch(() => {});
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 2 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce' };
 function gateLabel(key) {
   const [grp, mode, side, setup] = key.split('|');
@@ -2324,7 +2324,7 @@ async function buildGate() {
       pickKinds(kinds, fam, combos, perCombo, x => `stk|intraday|${x.side}`, cutoff);
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
+    gate = { t: Date.now(), labVersion: 2, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }

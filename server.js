@@ -1888,11 +1888,11 @@ async function runIndexScan(db, notes) {
       let daily = toBars(await getUpstoxCandles(u, '1D'));
       if (mins < 915) daily = daily.slice(0, -1); // today's still-forming daily bar
       const dailyBias = Calls.marketBias(daily.slice(-150));
-      if (mins >= 600 && mins <= 925) {
+      if (mins >= 570 && mins <= 925) {
         const ev = Calls.evaluateIndex(daily.slice(-300), 'swing', { bias: dailyBias });
         if (ev) found.push({ u, ...ev });
       }
-      if (mins >= 600 && mins <= 810 && process.env.CALLS_INTRADAY !== 'off') {
+      if (mins >= 570 && mins <= 810 && process.env.CALLS_INTRADAY !== 'off') {
         let rows = toBars(await getUpstoxCandles(u, '15m'));
         if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
         const ev = Calls.evaluateIndex(rows.slice(-300), 'intraday', { bias: dailyBias });
@@ -1950,12 +1950,12 @@ async function runCallsCycle(force) {
           let bars = await getHistUpstox(sym, 300);
           if (open && mins < 915) bars = bars.slice(0, -1);
           const rg = Calls.regime(bars); if (rg) { breadth.n++; if (rg.above50) breadth.above50++; if (rg.stUp) breadth.stUp++; }
-          // swing entries only 10:00–15:25 IST on trading days (never at the 9:15 open, never after the close on a stale price)
-          const swingWindow = open && mins >= 600 && mins <= 925;
+          // swing entries only 9:30–15:25 IST on trading days (never in the first 15 minutes, never after the close on a stale price)
+          const swingWindow = open && mins >= 570 && mins <= 925;
           const sw = swingWindow ? Calls.evaluate(bars, 'swing', { minScore: 5, bias: swingBias, idxBars: ictx.idxBars, exit: process.env.CALLS_EXIT || 'B' }) : null;
           if (sw) found.push({ symbol: sym, ...sw });
-          // intraday: 15m completed bars, new entries only 10:15–14:00 IST (off if CALLS_INTRADAY=off)
-          if (open && mins >= 615 && mins <= 840 && process.env.CALLS_INTRADAY !== 'off') {
+          // intraday: 15m completed bars, new entries only 9:30–14:00 IST (off if CALLS_INTRADAY=off)
+          if (open && mins >= 570 && mins <= 840 && process.env.CALLS_INTRADAY !== 'off') {
             let rows = toBars(await getUpstoxCandles(sym, '15m'));
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
@@ -2070,7 +2070,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-09-r9 (index option-buy calls: Nifty, Bank Nifty, Sensex; intraday + multi-day with expiry)';
+const BUILD = '2026-10-12-r10 (calls from 9:30 IST; index ORB on the first 15 minutes)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

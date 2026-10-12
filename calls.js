@@ -369,10 +369,10 @@ function evaluateIndex(bars, mode, opts = {}) {
   if (intraday) {
     const day = istDayNo(bars[n].t); let k = n; while (k >= 0 && istDayNo(bars[k].t) === day) k--;
     const first = k + 1, today = bars.slice(first, n + 1);
-    if (k < 0 || today.length < 3) return null; // need the opening range plus at least one more bar
+    if (k < 0 || today.length < 2) return null; // need the opening range (first 15-minute bar) plus at least one more bar
     prevClose = c[k]; dayOpen = o[first];
-    orHi = Math.max(h[first], h[first + 1]); orLo = Math.min(l[first], l[first + 1]);
-    const after = bars.slice(first + 2, n); // bars between the opening range and the signal bar
+    orHi = h[first]; orLo = l[first]; // 15-minute opening range
+    const after = bars.slice(first + 1, n); // bars between the opening range and the signal bar
     if (px > orHi && after.filter(b => b.c > orHi).length <= 1) trig.BUY = 'orb';
     if (px < orLo && after.filter(b => b.c < orLo).length <= 1) trig.SELL = 'orb';
     if (!trig.BUY && !extended && lo3 <= e20[n] * 1.001 && px > e5[n] && px > c[n - 1]) trig.BUY = 'pullback';
@@ -420,7 +420,7 @@ function evaluateIndex(bars, mode, opts = {}) {
   const f = x => r2(x), up = side === 'BUY';
   const why = [];
   why.push(up ? `Uptrend: ${intraday ? '15-minute' : 'daily'} price ${f(px)} above the 50 EMA (${f(e50[n])}), 20 EMA above 50 EMA, Supertrend up` : `Downtrend: ${intraday ? '15-minute' : 'daily'} price ${f(px)} below the 50 EMA (${f(e50[n])}), 20 EMA below 50 EMA, Supertrend down`);
-  if (setup === 'orb') why.push(`Opening-range ${up ? 'breakout above' : 'breakdown below'} ${f(up ? orHi : orLo)} (first 30 minutes)`);
+  if (setup === 'orb') why.push(`Opening-range ${up ? 'breakout above' : 'breakdown below'} ${f(up ? orHi : orLo)} (first 15 minutes)`);
   else if (setup === 'breakout') why.push(`Closed ${up ? 'above the 20-day high' : 'below the 20-day low'}, a fresh break`);
   else why.push(up ? `Pullback to the 20 EMA (${f(e20[n])}) held and price turned up through the 5 EMA` : `Rally to the 20 EMA (${f(e20[n])}) failed and price turned down through the 5 EMA`);
   why.push(`RSI ${f(R[n])}, Stochastic ${f(S.k[n])}/${f(S.d[n])} agree`);
@@ -436,7 +436,7 @@ async function walkIndex(sym, bars, opts, yieldFn) {
   for (let i = intraday ? 60 : 210; i < bars.length - 1; i++) {
     const t = bars[i].t;
     if (t < freeFrom) continue;
-    if (intraday) { const m = Math.floor(((t + 19800) % 86400) / 60); if (m < 585 || m > 795) continue; } // bars starting 9:45–13:15
+    if (intraday) { const m = Math.floor(((t + 19800) % 86400) / 60); if (m < 570 || m > 795) continue; } // bars starting 9:30–13:15 (signals from 9:45)
     if (yieldFn && ++cnt % 50 === 0) await yieldFn();
     let bias = 'MIXED';
     if (intraday) { const dayStart = t - ((t + 19800) % 86400); const k = upto(daily, dayStart - 1); if (k >= 60) bias = marketBias(daily.slice(Math.max(0, k - 150), k + 1)); } // daily bars strictly before today
@@ -503,7 +503,7 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
   if (!bars || bars.length < 120) return out;
   for (let i = 60; i < bars.length - 1; i++) {
     const t = bars[i].t, mins = Math.floor(((t + 19800) % 86400) / 60);
-    if (mins < 600 || mins > 825 || t < freeFrom) continue; // bars that close between 10:15 and 14:00 IST
+    if (mins < 555 || mins > 825 || t < freeFrom) continue; // bars that close between 9:30 and 14:00 IST
     if (yieldFn && ++cnt % 50 === 0) await yieldFn();
     let todayPct = null, bias = 'MIXED';
     if (opts.idxBars15 && opts.useGate !== false) {

@@ -2247,7 +2247,8 @@ app.get('/api/calls/monitor', async (req, res) => {
   const ev = await loadEvents(); const eod = await loadEod();
   const active = db.filter(c => !c.closed).sort((a, b) => b.t - a.t);
   const day = istDateKey(Math.floor(Date.now() / 1000));
-  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, events: ev.slice(-80).reverse(),
+  const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day).sort((a, b) => (b.closedAt || b.exitT || 0) - (a.closedAt || a.exitT || 0));
+  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, closed, events: ev.slice(-80).reverse(),
     today: buildEodAll(db, ev, day), sources: SOURCES, eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
 });
 // Manually added items (from Chart patterns / Screener & scans): tracked, alerted and summarised like calls,

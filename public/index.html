@@ -5370,7 +5370,7 @@ const PatternUI = (function(){
     $('patStatus').innerHTML=esc(S.sym)+' &middot; '+S.candles.length+' '+({'1D':'daily','1W':'weekly','1h':'hourly'}[S.tf]||S.tf)+' bars &middot; data: '+(S.stale!=null?"<span class=\"sim-tag\">STALE \u2013 last good Upstox data, "+Math.round(S.stale/60)+" min old</span> ":"")+(S.src==='upstox'?'Upstox':S.src==='yahoo'?'Yahoo (fallback)':esc(S.src))+
       ' &middot; '+(n?n+' pattern'+(n>1?'s':'')+' active':'no pattern currently qualifies');
     render();
-    if(n) select(0);
+    if(n) select(0); else drawChart(); // always redraw, so the chart never keeps the previous symbol
   }
 
   function visible(){
@@ -5496,7 +5496,7 @@ const PatternUI = (function(){
     const found=[]; let done=0;
     syms.forEach(s=>{
       const h=window.REAL_HIST[s]; if(!h||!h.c||h.c.length<60) return; done++;
-      const C=h.c.map((c,i)=>({t:h.t?h.t[i]:i,o:c,h:h.h?h.h[i]:c,l:h.l?h.l[i]:c,c,v:h.v?h.v[i]:0}));
+      const C=h.c.map((c,i)=>({t:h.t?h.t[i]:i,o:h.o&&h.o[i]!=null?h.o[i]:c,h:h.h?h.h[i]:c,l:h.l?h.l[i]:c,c,v:h.v?h.v[i]:0}));
       let r; try{ r=PatternEngine.detect(C); }catch(e){ return; }
       if(r.patterns.length) found.push({s,name:(rows.find(x=>x[0]===s)||[])[1]||s,pats:r.patterns});
     });
@@ -5564,7 +5564,7 @@ const PatternUI = (function(){
       if(t){ S.open[t.dataset.toggle]=!S.open[t.dataset.toggle]; render(); return; }
       const r=e.target.closest('.pat-row'); if(r) select(+r.dataset.i);
     });
-    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; load(a.dataset.sym); gotoSection('sec-patterns'); } });
+    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; $('patTf').value='1D'; load(a.dataset.sym); gotoSection('sec-patterns'); } });
     // lazy: analyse the open stock the first time the section scrolls into view, and again when the stock changes
     let lastSym=null;
     const check=()=>{

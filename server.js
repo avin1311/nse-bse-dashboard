@@ -475,14 +475,14 @@ async function getScanHistory(sym) {
   const c = scanHistCache[sym];
   if (c && Date.now() - c.time < SCAN_HIST_TTL) return c.data;
   let ser = null, source = 'upstox';
-  try { const rows = await getUpstoxCandles(appSym(sym), '1D'); if (rows.length >= 30) ser = rows.slice(-250).map(r => ({ t: r.t, c: r.c, h: r.h, l: r.l, v: r.v })); } catch (e) { /* fall back to Yahoo */ }
+  try { const rows = await getUpstoxCandles(appSym(sym), '1D'); if (rows.length >= 30) ser = rows.slice(-320).map(r => ({ t: r.t, o: r.o, c: r.c, h: r.h, l: r.l, v: r.v })); } catch (e) { /* fall back to Yahoo */ }
   if (!ser) {
     source = 'yahoo';
     const parsed = await getChartData(sym, '1y', '1d');
     if (!parsed || !parsed.series || parsed.series.length < 30) throw new Error('insufficient history');
-    ser = parsed.series.slice(-250);
+    ser = parsed.series.slice(-320);
   }
-  const data = { c: ser.map(p => p.c), h: ser.map(p => p.h), l: ser.map(p => p.l), v: ser.map(p => p.v), t: ser.map(p => p.t), source };
+  const data = { o: ser.map(p => p.o != null ? p.o : p.c), c: ser.map(p => p.c), h: ser.map(p => p.h), l: ser.map(p => p.l), v: ser.map(p => p.v), t: ser.map(p => p.t), source };
   scanHistCache[sym] = { data, time: Date.now() };
   return data;
 }

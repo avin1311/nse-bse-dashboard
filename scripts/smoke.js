@@ -64,6 +64,7 @@ async function waitUp(base) { for (let i = 0; i < 40; i++) { try { const r = awa
   { const r = await (await fetch(b1 + '/api/calls/backtest')).json(); ok(r && typeof r.state === 'string', '/api/calls/backtest responds'); }
   { const r = await (await fetch(b1 + '/api/calls/backtest-call?symbol=WIPRO&side=SELL&mode=swing')).json(); ok(r && (r.error || r.symbol), '/api/calls/backtest-call responds'); }
   { const r = await fetch(b1 + '/api/calls/monitor/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'pattern', symbol: 'TCS', side: 'BUY', mode: 'swing' }) }); ok(r.status === 503 || r.status === 200 || r.status === 502, '/api/calls/monitor/add responds (' + r.status + ')'); }
+  { const r = await (await fetch(b1 + '/api/calls/gate')).json(); ok(r && Array.isArray(r.kinds) && r.enabled === true, '/api/calls/gate responds (gate on by default)'); }
   { const r = await fetch(b1 + '/api/calls/monitor/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'nope' }) }); ok(r.status === 404, '/api/calls/monitor/remove rejects unknown ids'); }
   { const r = await (await fetch(b1 + '/api/calls/backtest-call?kind=index&symbol=NIFTY&side=BUY&mode=intraday')).json(); ok(r && (r.error || r.kind === 'index'), '/api/calls/backtest-call (index) responds'); }
   { const r = await (await fetch(b1 + '/api/calls/monitor')).json(); ok(Array.isArray(r.active) && Array.isArray(r.events) && r.today && r.today.date, '/api/calls/monitor responds'); }

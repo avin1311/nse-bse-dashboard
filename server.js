@@ -1907,7 +1907,7 @@ async function runIndexScan(db, notes) {
         if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
         rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
         const barMin = n >= 0 ? Math.floor(((rows[n].t + 19800) % 86400) / 60) : 0;
-        for (const k of liveKinds('index_intraday', ['idx|intraday|BUY|orb', 'idx|intraday|BUY|pullback', 'idx|intraday|SELL|orb', 'idx|intraday|SELL|pullback'])) {
+        for (const k of liveKinds('index_intraday', ['idx|intraday|BUY|orb', 'idx|intraday|BUY|pullback', 'idx|intraday|BUY|pdhl', 'idx|intraday|SELL|orb', 'idx|intraday|SELL|pullback', 'idx|intraday|SELL|pdhl'])) {
           if (barMin > (k.params.endMin || 795)) continue;
           const ev = Calls.evalIndexAt(P, n, 'intraday', { bias: dailyBias, ...k.params, ...sideSetup(k.key) });
           if (ev && dayNo(ev.barTime) === today) found.push({ u, gateKey: k.key, ...ev });
@@ -1972,9 +1972,9 @@ async function runCallsCycle(force) {
           const swingWindow = open && mins >= 570 && mins <= 925;
           if (swingWindow) {
             const P = Calls.prep(bars), n = bars.length - 1, got = {};
-            for (const k of liveKinds('stock_swing', ['stk|swing|BUY|trend', 'stk|swing|SELL|trend', 'stk|swing|BUY|bounce'])) {
+            for (const k of liveKinds('stock_swing', ['stk|swing|BUY|trend', 'stk|swing|BUY|bounce', 'stk|swing|BUY|squeeze'])) {
               const [, , side, setup] = k.key.split('|');
-              const ev = Calls.evalAt(P, n, 'swing', { bias: swingBias, idxBars: ictx.idxBars, ...k.params, side });
+              const ev = Calls.evalAt(P, n, 'swing', { bias: swingBias, idxBars: ictx.idxBars, ...k.params, side, setup: setup === 'bounce' ? 'trend' : setup });
               if (ev && (ev.setup || 'trend') === setup && (!got[side] || ev.score > got[side].score)) got[side] = { symbol: sym, gateKey: k.key, ...ev };
             }
             Object.values(got).forEach(x => found.push(x));
@@ -1985,10 +1985,10 @@ async function runCallsCycle(force) {
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
             rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
-            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY', 'stk|intraday|SELL'])) {
-              const side = k.key.split('|')[2];
-              const id = Calls.evalAt(P, n, 'intraday', { bias: ictx.intradayBias, idxTodayPct: ictx.todayPct, ...k.params, side });
-              if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
+            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl'])) {
+              const [, , side, setup = 'trend'] = k.key.split('|');
+              const id = Calls.evalAt(P, n, 'intraday', { bias: ictx.intradayBias, idxTodayPct: ictx.todayPct, ...k.params, side, setup });
+              if (id && (id.setup || 'trend') === setup && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
             }
           }
           callsState.scanned++;
@@ -2009,7 +2009,7 @@ async function runCallsCycle(force) {
     const quota = { swing: Math.min(1, CAP.swing - cnt('swing'), DAY_CAP.swing - madeToday('swing')), intraday: Math.min(1, CAP.intraday - cnt('intraday'), DAY_CAP.intraday - madeToday('intraday')) };
     for (const f of found) {
       if (CAPS_ON && (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode])) continue;
-      const gk = f.gateKey || (f.mode === 'intraday' ? `stk|intraday|${f.side}` : `stk|swing|${f.side}|${f.setup || 'trend'}`), g = gateCheck(gk);
+      const gk = f.gateKey || `stk|${f.mode}|${f.side}|${f.setup || 'trend'}`, g = gateCheck(gk);
       if (!g.ok) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, g.reason); continue; }
       // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
       if (db.some(c => !c.manual && c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
@@ -2101,7 +2101,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-12-r13 (strategy lab picks rules on older data, checks on newer; unproven calls labelled; no count caps)';
+const BUILD = '2026-10-12-r14 (new setups in the lab: stock ORB+VWAP, previous-day high/low, tight-range breakout; index previous-day high/low; stock swing sells off)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2232,8 +2232,8 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on'; // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 2 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
-const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce' };
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 3 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout' };
 function gateLabel(key) {
   const [grp, mode, side, setup] = key.split('|');
   if (grp === 'idx') return `Index option · ${mode === 'intraday' ? 'intraday' : 'multi-day'} · ${side === 'BUY' ? 'up (buy CE)' : 'down (buy PE)'} · ${SETUP_NAME[setup] || setup}`;
@@ -2245,7 +2245,7 @@ function gateLabel(key) {
 const GATE_MODE = (process.env.CALLS_GATE || 'paper').toLowerCase(); // paper (default): unproven kinds still issue calls, labelled; strict: only proven; off: no gate
 const LAB_MIN_OLDER = 12;
 const DEF_PARAMS = { index_intraday: { minScore: 5, needHtf: false, stopK: 1, exit: 'A', endMin: 795 }, index_swing: { minScore: 5, needHtf: false, stopK: 1, exit: 'A' },
-  stock_swing: { minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { minScore: 5, stopK: 1, exitI: 'A' } };
+  stock_swing: { setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
 const famOf = key => { const [g, m] = key.split('|'); return (g === 'idx' ? 'index_' : 'stock_') + m; };
 function paramsLabel(p) {
   if (!p) return '';
@@ -2305,7 +2305,7 @@ async function buildGate() {
         for (let ci = 0; ci < combos.length; ci++) perCombo[ci].push(...await Calls.walkSwing(sym, bars, { idxBars: U.idx, _P: P, ...combos[ci] }, yieldLoop));
       }
       pickKinds(kinds, fam, combos, perCombo, x => `stk|swing|${x.side}|${x.setup || 'trend'}`, cutoff);
-      const defIdx = combos.findIndex(c => c.minScore === 5 && c.stopK === 1 && c.exit === 'B');
+      const defIdx = combos.findIndex(c => c.setup === 'trend' && c.minScore === 5 && c.stopK === 1 && c.exit === 'B');
       if (defIdx >= 0) btUni = { ...btUni, t: Date.now(), trades: perCombo[defIdx], loaded: Object.keys(U.bars).length, total: U.total, running: false, progress: 100 };
     }
     // ---- stock intraday (~4 months of 15-minute candles per stock)
@@ -2321,10 +2321,10 @@ async function buildGate() {
           for (let ci = 0; ci < combos.length; ci++) perCombo[ci].push(...await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, _P: P, ...combos[ci] }, yieldLoop));
         } catch (e) {}
       }
-      pickKinds(kinds, fam, combos, perCombo, x => `stk|intraday|${x.side}`, cutoff);
+      pickKinds(kinds, fam, combos, perCombo, x => `stk|intraday|${x.side}|${x.setup || 'trend'}`, cutoff);
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 2, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
+    gate = { t: Date.now(), labVersion: 3, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }
@@ -2368,15 +2368,18 @@ async function backtestOneCall(spec, supplied) {
   else { source = 'Upstox ' + (intraday ? '15-minute' : 'daily') + ' candles'; bars = intraday ? toBars(await getUpstoxCandles(sym, '15m')) : await getHistUpstox(sym, 750); }
   if (!bars || bars.length < 120) throw new Error('Only ' + (bars ? bars.length : 0) + ' candles available for ' + sym + ' (need at least 120)');
   let trades;
-  if (intraday) { let idx15 = null; try { idx15 = toBars(await getUpstoxCandles('NIFTY', '15m')); } catch (e) {} trades = await Calls.walkIntraday(sym, bars, { idxBars15: idx15 }, yieldLoop); }
-  else { let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-800); } catch (e) {} trades = await Calls.walkSwing(sym, bars, { exit: process.env.CALLS_EXIT || 'B', idxBars: idx }, yieldLoop); }
+  const newSetup = ['orbvwap', 'pdhl', 'squeeze'].includes(spec.setup) ? spec.setup : null;
+  const lab = (gate.kinds || {})[`stk|${spec.mode}|${spec.side}|${spec.setup || 'trend'}`], lp = lab && lab.params ? lab.params : {};
+  if (intraday) { let idx15 = null; try { idx15 = toBars(await getUpstoxCandles('NIFTY', '15m')); } catch (e) {} trades = await Calls.walkIntraday(sym, bars, { idxBars15: idx15, ...lp, setup: newSetup || 'trend' }, yieldLoop); }
+  else { let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-800); } catch (e) {} trades = await Calls.walkSwing(sym, bars, { exit: process.env.CALLS_EXIT || 'B', idxBars: idx, ...lp, setup: newSetup || 'trend' }, yieldLoop); }
   const done = trades.filter(x => x.closed);
-  const same = done.filter(x => x.side === spec.side && (spec.setup === 'bounce') === (x.setup === 'bounce'));
+  const same = done.filter(x => x.side === spec.side && (newSetup ? x.setup === newSetup : (spec.setup === 'bounce') === (x.setup === 'bounce')));
   const days = Math.round((bars[bars.length - 1].t - bars[0].t) / 86400);
   const out = { symbol: sym, mode: spec.mode, side: spec.side, setup: spec.setup || 'trend', source, candles: bars.length, days, from: bars[0].t, to: bars[bars.length - 1].t,
     costPct: Calls.costPct(spec.mode), sameKind: Calls.mkAgg(same), allSignals: Calls.mkAgg(done),
     recent: same.slice(-12).reverse().map(x => ({ t: x.t, status: x.status, pnlPct: x.pnlPct, targetsHit: x.targetsHit, bias: x.bias })) };
-  if (intraday) out.universe = { state: 'na', note: 'Upstox keeps about 4 weeks of 15-minute history, so intraday calls are tested on this stock only.' };
+  if (lab && lab.n != null) out.universe = { state: 'done', label: 'Strategy lab (all stocks)', stocks: 90, n: lab.n, avgPct: lab.avg, winRate: lab.winRate, wins: null, losses: null, flat: null, note: lab.paramsText };
+  else if (intraday || newSetup) out.universe = { state: 'na', note: 'See the Backtest gate in Trade Calls for this kind of call across all stocks.' };
   else {
     await ensureUniverseTrades();
     if (btUni.trades) { const u = btUni.trades.filter(x => x.closed && x.side === spec.side && (spec.setup === 'bounce') === (x.setup === 'bounce')); out.universe = { state: 'done', stocks: btUni.loaded, ...Calls.mkAgg(u) }; }
@@ -2388,9 +2391,9 @@ async function specFromReq(q) {
   const db = await loadCalls(); const c = q.id ? db.find(x => x.id === q.id) : null;
   if (c && c.kind === 'option') return { kind: 'index', symbol: c.underlying, mode: c.mode, side: c.dir, setup: c.setup };
   if (c) return { symbol: c.symbol, mode: c.mode, side: c.side, setup: c.setup || 'trend' };
-  if (q.kind === 'index' && INDEX_UNDERLYINGS.includes(String(q.symbol).toUpperCase()) && /^(BUY|SELL)$/.test(q.side) && /^(swing|intraday)$/.test(q.mode)) return { kind: 'index', symbol: String(q.symbol).toUpperCase(), mode: q.mode, side: q.side, setup: /^(orb|pullback|breakout)$/.test(q.setup) ? q.setup : null };
+  if (q.kind === 'index' && INDEX_UNDERLYINGS.includes(String(q.symbol).toUpperCase()) && /^(BUY|SELL)$/.test(q.side) && /^(swing|intraday)$/.test(q.mode)) return { kind: 'index', symbol: String(q.symbol).toUpperCase(), mode: q.mode, side: q.side, setup: /^(orb|pullback|breakout|pdhl)$/.test(q.setup) ? q.setup : null };
   if (!q.symbol || !/^(BUY|SELL)$/.test(q.side) || !/^(swing|intraday)$/.test(q.mode)) throw new Error('call not found');
-  return { symbol: String(q.symbol).toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), mode: q.mode, side: q.side, setup: q.setup === 'bounce' ? 'bounce' : 'trend' };
+  return { symbol: String(q.symbol).toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), mode: q.mode, side: q.side, setup: /^(bounce|orbvwap|pdhl|squeeze)$/.test(q.setup) ? q.setup : 'trend' };
 }
 app.get('/api/calls/backtest-call', async (req, res) => {
   try { const spec = await specFromReq(req.query); res.json(await new Promise((ok, no) => lowPriority.run(true, () => backtestOneCall(spec).then(ok, no)))); }

@@ -1673,19 +1673,20 @@ async function emitEvent(e, tg = true) {
 }
 function callEvents(c, before) {
   const out = []; const now = Math.floor(Date.now() / 1000);
-  const base = { callId: c.id, symbol: c.symbol, side: c.side, mode: c.mode, t: now };
+  const base = { callId: c.id, source: srcOf(c), symbol: c.symbol, side: c.side, mode: c.mode, t: now };
+  const tag = c.manual ? `[${srcOf(c) === 'pattern' ? 'Pattern' : 'Screener'}] ` : '';
   const pct = x => (x > 0 ? '+' : '') + x + '%';
   for (let i = before.hit + 1; i <= (c.targetsHit || 0); i++) {
     const px = c.targets[i - 1];
     out.push({ ...base, id: c.id + ':T' + i, kind: 'T' + i, level: 'good', price: px, pnlPct: null,
-      text: `🎯 <b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? '. Stop moved to entry.' : '') });
+      text: `🎯 ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? '. Stop moved to entry.' : '') });
   }
   if (c.closed && !before.closed && c.status !== 'TARGET_HIT') {
     const k = c.status === 'SL_HIT' ? 'SL' : c.status === 'EXPIRED' ? 'EXPIRED' : 'BE';
     const icon = k === 'SL' ? '🛑' : k === 'EXPIRED' ? '⏱' : '⚪';
     const word = k === 'SL' ? 'hit its stop loss' : k === 'EXPIRED' ? 'expired' : 'was stopped at entry (after a target)';
     out.push({ ...base, id: c.id + ':' + k, kind: k, level: k === 'SL' ? 'bad' : 'info', price: c.exit, pnlPct: c.pnlPct,
-      text: `${icon} <b>${c.symbol}</b> ${c.side} (${c.mode}) ${word} at ₹${c.exit} (${pct(c.pnlPct)})` });
+      text: `${icon} ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) ${word} at ₹${c.exit} (${pct(c.pnlPct)})` });
   } else if (c.closed && !before.closed) {
     out[out.length - 1] && (out[out.length - 1].text += ` (${pct(c.pnlPct)}). All targets done, call closed.`);
   }
@@ -1718,9 +1719,12 @@ async function liveMonitor() {
 }
 function istDateKey(t) { return new Date((t + 19800) * 1000).toISOString().slice(0, 10); }
 async function loadEod() { const a = await storeGet('store:calls-eod', []); return Array.isArray(a) ? a : []; }
-function buildEod(db, events, day) {
+const SOURCES = { calls: 'Trade Calls', pattern: 'Chart patterns (price action)', screener: 'Screener & scans' };
+const srcOf = c => c.source || 'calls';
+function buildEod(db, events, day, src) {
+  if (src) { db = db.filter(c => srcOf(c) === src); const ids = new Set(db.map(c => c.id)); events = events.filter(e => ids.has(e.callId)); }
   const r2 = x => Math.round(x * 100) / 100;
-  const slim = c => ({ symbol: c.symbol, side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0 });
+  const slim = c => ({ symbol: c.symbol, source: srcOf(c), side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0 });
   const created = db.filter(c => istDateKey(c.t) === day);
   const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day);
   const active = db.filter(c => !c.closed);
@@ -1736,12 +1740,14 @@ function buildEod(db, events, day) {
     active: { total: active.length, openPnlPct: r2(sum(active)), inProfit: active.filter(c => c.pnlPct > 0.05).length, inLoss: active.filter(c => c.pnlPct < -0.05).length, list: active.map(slim) },
     best: sorted[0] ? slim(sorted[0]) : null, worst: sorted.length ? slim(sorted[sorted.length - 1]) : null,
     closedList: sorted.map(slim),
-    allTime: Calls.summarize(db),
+    allTime: Calls.summarize(db), source: src || 'all',
   };
 }
+function buildEodAll(db, ev, day) { const x = buildEod(db, ev, day); x.bySource = {}; for (const k of Object.keys(SOURCES)) x.bySource[k] = buildEod(db, ev, day, k); return x; }
 function eodText(x) {
   const sg = n => (n > 0 ? '+' : '') + n + '%';
-  let t = `📊 <b>Trade Calls: end of day ${x.date}</b>\n`;
+  let t = `📊 <b>Monitor: end of day ${x.date}</b>\n`;
+  if (x.bySource) t += Object.keys(SOURCES).filter(k => x.bySource[k].created.total || x.bySource[k].closed.total || x.bySource[k].active.total).map(k => { const y = x.bySource[k]; return `${SOURCES[k]}: ${y.closed.total} closed (${y.closed.wins}W/${y.closed.losses}L, net ${sg(y.closed.netPct)}), ${y.active.total} open`; }).join('\n') + '\n';
   t += `New today: ${x.created.total} (buy ${x.created.buy}, sell ${x.created.sell}; intraday ${x.created.intraday}, swing ${x.created.swing})\n`;
   t += `Closed today: ${x.closed.total}, wins ${x.closed.wins}, losses ${x.closed.losses}, net ${sg(x.closed.netPct)}` + (x.closed.winRate != null ? `, win rate ${x.closed.winRate}%` : '') + '\n';
   t += `Targets hit: ${x.targetHits}, stops hit: ${x.slHits}\n`;
@@ -1759,7 +1765,7 @@ async function runEod(day, force) {
     if (!force && list.some(x => x.date === day)) return null;
     if (upstoxTokens().length) { callsState.lastScan = 0; await runCallsCycle(true); }
     const db = await loadCalls(); const ev = await loadEvents();
-    const x = buildEod(db, ev, day);
+    const x = buildEodAll(db, ev, day);
     if (!force && !x.created.total && !x.closed.total && !x.active.total) return null;
     const out = list.filter(y => y.date !== day); out.push(x); out.sort((a, b) => a.date < b.date ? -1 : 1);
     try { await storeSet('store:calls-eod', out.slice(-45)); } catch (e) {}
@@ -1972,16 +1978,16 @@ async function runCallsCycle(force) {
     // 3) log the best new ones (de-duplicated, capped per cycle)
     // best first: higher score, then the stronger relative-strength gap. Fewer, better calls.
     found.sort((a, b) => b.score - a.score || Math.abs(b.rs || 0) - Math.abs(a.rs || 0));
-    const open_ = db.filter(c => !c.closed && c.kind !== 'option'); const CAP = { swing: 5, intraday: 3 }, SIDE_CAP = { swing: 3, intraday: 2 }, DAY_CAP = { swing: 3, intraday: 2 };
+    const open_ = db.filter(c => !c.closed && c.kind !== 'option' && !c.manual); const CAP = { swing: 5, intraday: 3 }, SIDE_CAP = { swing: 3, intraday: 2 }, DAY_CAP = { swing: 3, intraday: 2 };
     const cnt = (m, side) => open_.filter(c => c.mode === m && (!side || c.side === side)).length;
     const dayNo = t => Math.floor((t + 19800) / 86400), today = dayNo(nowSec);
-    const madeToday = m => db.filter(c => c.kind !== 'option' && c.mode === m && dayNo(c.t) === today).length;
+    const madeToday = m => db.filter(c => c.kind !== 'option' && !c.manual && c.mode === m && dayNo(c.t) === today).length;
     // one new call per mode per scan (no clusters), within open / per-side / per-day caps
     const quota = { swing: Math.min(1, CAP.swing - cnt('swing'), DAY_CAP.swing - madeToday('swing')), intraday: Math.min(1, CAP.intraday - cnt('intraday'), DAY_CAP.intraday - madeToday('intraday')) };
     for (const f of found) {
       if (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode]) continue;
       // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
-      if (db.some(c => c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
+      if (db.some(c => !c.manual && c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) continue; // stale: price has already run away
       // swing signals come from yesterday's close; skip when today's price is already moving against the idea
@@ -2070,7 +2076,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-12-r10 (calls from 9:30 IST; index ORB on the first 15 minutes)';
+const BUILD = '2026-10-12-r11 (pattern price action; add patterns / screener picks to the monitor; summary by source)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2242,7 +2248,52 @@ app.get('/api/calls/monitor', async (req, res) => {
   const active = db.filter(c => !c.closed).sort((a, b) => b.t - a.t);
   const day = istDateKey(Math.floor(Date.now() / 1000));
   res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, events: ev.slice(-80).reverse(),
-    today: buildEod(db, ev, day), eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
+    today: buildEodAll(db, ev, day), sources: SOURCES, eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
+});
+// Manually added items (from Chart patterns / Screener & scans): tracked, alerted and summarised like calls,
+// but never counted in the Trade Calls stats or caps, and removable by the user.
+app.post('/api/calls/monitor/add', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const source = b.source === 'pattern' || b.source === 'screener' ? b.source : null;
+    const symbol = String(b.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, '');
+    const side = b.side === 'SELL' ? 'SELL' : b.side === 'BUY' ? 'BUY' : null, mode = b.mode === 'intraday' ? 'intraday' : 'swing';
+    if (!source || !symbol || !side) return res.status(400).json({ error: 'source, symbol and side are required' });
+    if (!upstoxTokens().length) return res.status(503).json({ error: 'Upstox is not connected, so the item cannot be priced and tracked' });
+    const db = await loadCalls();
+    const dup = db.find(c => c.manual && !c.closed && c.symbol === symbol && srcOf(c) === source && c.side === side);
+    if (dup) return res.status(409).json({ error: symbol + ' is already in the monitor from this section', id: dup.id });
+    const q = await getUpstoxLTPC(await dataKeyFor(symbol)); const ltp = q.price;
+    if (!(ltp > 0)) throw new Error('no live price for ' + symbol);
+    const sgn = side === 'BUY' ? 1 : -1;
+    let sl = Number(b.sl);
+    const okSl = x => isFinite(x) && x > 0 && sgn * (ltp - x) > 0.001 * ltp && Math.abs(ltp - x) <= (mode === 'intraday' ? 0.04 : 0.15) * ltp;
+    let slNote = 'stop from the ' + (source === 'pattern' ? 'pattern' : 'signal');
+    if (!okSl(sl)) { // volatility stop: 2x daily ATR (swing) or 1.6x 15-minute ATR (intraday)
+      const bars = mode === 'intraday' ? toBars(await getUpstoxCandles(symbol, '15m')).slice(-200) : (await getHistUpstox(symbol, 200));
+      const A = Calls.atr(bars.map(x => x.h), bars.map(x => x.l), bars.map(x => x.c)); const a = A[A.length - 1];
+      if (!(a > 0)) throw new Error('not enough history to set a stop');
+      sl = ltp - sgn * Math.max((mode === 'intraday' ? 1.6 : 2) * a, (mode === 'intraday' ? 0.004 : 0.015) * ltp); slNote = 'volatility stop (' + (mode === 'intraday' ? '1.6x 15-min' : '2x daily') + ' ATR)';
+    }
+    const risk = Math.abs(ltp - sl), tk = x => Math.round(x * 20) / 20;
+    let targets = (mode === 'intraday' ? [1, 2, 3] : [1.5, 3, 4.5]).map(m => tk(ltp + sgn * risk * m));
+    const tg = Number(b.target);
+    if (isFinite(tg) && sgn * (tg - ltp) > 1.2 * risk) targets = [tk(ltp + sgn * risk), tk(tg)]; // pattern target as the final target
+    const now = Math.floor(Date.now() / 1000);
+    const call = { id: source + '-' + symbol + '-' + now, symbol, side, mode, source, manual: true, label: String(b.label || '').slice(0, 80),
+      entry: tk(ltp), sl: tk(sl), targets, riskLabel: (risk / ltp * 100).toFixed(1) + '% risk', riskPct: Math.round(risk / ltp * 1000) / 10, score: null, setup: 'manual', engine: 'manual',
+      costPct: Calls.costPct(mode), analysis: (String(b.note || '').slice(0, 400) + ' Entry at the live price when added; ' + slNote + '.').trim(), t: now,
+      status: 'ACTIVE', targetsHit: 0, activeSl: tk(sl), ltp, exit: null, pnlPct: 0, closed: false };
+    db.push(call); if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX); await saveCalls();
+    await emitEvent({ id: call.id + ':NEW', callId: call.id, source, symbol, side, mode, kind: 'NEW', level: 'info', t: now, price: call.entry, pnlPct: null, text: `➕ [${source === 'pattern' ? 'Pattern' : 'Screener'}] ${side} ${symbol} (${mode}) added to monitor at ₹${call.entry}, SL ₹${call.sl}` }, false);
+    res.json({ ok: true, call });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/calls/monitor/remove', async (req, res) => {
+  const db = await loadCalls(); const id = req.body && req.body.id; const i = db.findIndex(c => c.id === id);
+  if (i < 0) return res.status(404).json({ error: 'not found' });
+  if (!db[i].manual) return res.status(400).json({ error: 'Trade Calls are tracked automatically and cannot be removed' });
+  db.splice(i, 1); await saveCalls(); res.json({ ok: true });
 });
 app.post('/api/calls/eod/run', async (req, res) => {
   try { const day = istDateKey(Math.floor(Date.now() / 1000)); const x = await runEod(day, true); res.json({ ok: true, summary: x }); } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2256,8 +2307,9 @@ app.get('/api/calls', async (req, res) => {
   const db = await loadCalls();
   if (req.query.scan === '1') lowPriority.run(true, () => runCallsCycle(true));
   else lowPriority.run(true, () => runCallsCycle(false));
-  const calls = db.slice().sort((a, b) => b.t - a.t);
-  res.json({ build: BUILD, calls, stats: Calls.summarize(db), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: 90, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
+  const own = db.filter(c => !c.manual);
+  const calls = own.slice().sort((a, b) => b.t - a.t);
+  res.json({ build: BUILD, calls, stats: Calls.summarize(own), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: 90, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

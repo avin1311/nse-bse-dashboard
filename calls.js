@@ -246,6 +246,29 @@ function prep(bars) {
   }
   return { bars, c, h, l, v, o, vwap, dayFirst, pdh, pdl, e5: ema(c, 5), e20: ema(c, 20), e50: ema(c, 50), e100: ema(c, 100), e200: ema(c, 200), R: rsi(c), A: atr(h, l, c), S: stoch(h, l, c), ST: supertrend(h, l, c) };
 }
+// Market breadth: % of universe stocks closing above their 50-day EMA, per IST trading day (dayNo -> pct).
+function breadthSeries(barsBySym) {
+  const cnt = new Map();
+  for (const bars of Object.values(barsBySym || {})) {
+    if (!bars || bars.length < 60) continue;
+    const c = bars.map(b => b.c), e = ema(c, 50);
+    for (let i = 50; i < bars.length; i++) { const d = Math.floor((bars[i].t + 19800) / 86400), x = cnt.get(d) || [0, 0]; x[1]++; if (c[i] > e[i]) x[0]++; cnt.set(d, x); }
+  }
+  const out = new Map(); for (const [d, [a, t]] of cnt) if (t >= 20) out.set(d, Math.round(a / t * 1000) / 10);
+  return out;
+}
+function breadthAt(map, t, prevDayOnly) { // breadth of the day of t (swing, signal at the close) or of the last day before it (intraday)
+  if (!map || !map.size) return null;
+  let d = Math.floor((t + 19800) / 86400) - (prevDayOnly ? 1 : 0);
+  for (let k = 0; k < 7; k++, d--) if (map.has(d)) return map.get(d);
+  return null;
+}
+// regime param: 'any' | 'b50' | 'b60'. Buys need breadth >= threshold, sells need breadth <= 100 - threshold.
+function regimeOk(side, pct, regime) {
+  if (!regime || regime === 'any' || pct == null) return true;
+  const thr = regime === 'b60' ? 60 : 50;
+  return side === 'BUY' ? pct >= thr : pct <= 100 - thr;
+}
 const biasCache = new WeakMap();
 function biasSeries(bars) { // the market-bias rule of marketBias(), for every bar of a daily index series
   if (!bars || !bars.length) return [];
@@ -486,7 +509,7 @@ async function walkIndex(sym, bars, opts, yieldFn) {
     if (intraday) { const dayStart = t - ((t + 19800) % 86400); const k = upto(daily, dayStart - 1); if (k >= 60) bias = dBias[k]; } // daily bars strictly before today
     else bias = dBias[i];
     const ev = evalIndexAt(P, i, intraday ? 'intraday' : 'swing', { ...opts, bias });
-    if (!ev) continue;
+    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, intraday), opts.regime)) continue;
     if (intraday) { const dk = istDayNo(t); if ((perDay[dk] || 0) >= 2) continue; perDay[dk] = (perDay[dk] || 0) + 1; }
     const call = { t: intraday ? t + 899 : t, side: ev.side, mode: ev.mode, entry: ev.entry, sl: ev.sl, targets: ev.targets, costPct: IDX_COST, limitT: intraday ? undefined : t + IDX_HOLD_DAYS * 86400 };
     const st = track(call, bars, far);
@@ -594,7 +617,7 @@ async function walkSwing(sym, bars, opts, yieldFn) {
     let bias = 'MIXED';
     if (iBias) { const k = upto(idx, bars[i].t); if (k >= 0) bias = iBias[k]; }
     const ev = evalAt(P, i, 'swing', { ...opts, bias, idxBars: idx });
-    if (!ev) continue;
+    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, bars[i].t, false), opts.regime)) continue;
     const call = { t: bars[i].t, side: ev.side, mode: 'swing', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
     out.push(tradeOf(sym, call, ev, st, bias));
@@ -632,7 +655,7 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
       if (k >= 0) { let j = k; while (j > 0 && istDayNo(I[j].t) === istDayNo(t)) j--; const pc = I[j].c; if (istDayNo(I[j].t) !== istDayNo(t) && pc > 0) { todayPct = (I[k].c / pc - 1) * 100; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; } }
     }
     const ev = evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
-    if (!ev) continue;
+    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime)) continue;
     const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
     out.push(tradeOf(sym, call, ev, st, bias));
@@ -650,10 +673,10 @@ async function backtest(barsBySym, opts = {}, yieldFn) {
 // then judged on the NEWER half it never saw).
 function product(spec) { return Object.entries(spec).reduce((acc, [k, vals]) => acc.flatMap(a => vals.map(v => ({ ...a, [k]: v }))), [{}]); }
 const LAB_GRID = {
-  index_intraday: product({ minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'], endMin: [720, 795] }),
-  index_swing: product({ minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'] }),
-  stock_swing: product({ setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B', 'C'] }),
-  stock_intraday: product({ setup: ['trend', 'orbvwap', 'pdhl'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exitI: ['S', 'A', 'B'] }),
+  index_intraday: product({ regime: ['any', 'b50'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'], endMin: [720, 795] }),
+  index_swing: product({ regime: ['any', 'b50', 'b60'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'] }),
+  stock_swing: product({ regime: ['any', 'b50', 'b60'], setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B', 'C'] }),
+  stock_intraday: product({ regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exitI: ['S', 'A', 'B'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);
@@ -661,4 +684,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

@@ -2454,10 +2454,50 @@ window.cbtBtn=function(c){
     const sg=x=>x==null?'—':(x>0?'+':'')+x+'%', d=t=>t?new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'}):'';
     const rows=g.kinds.map(k=>`<tr><td>${esc(k.label)}${k.paramsText?'<div class="metric-sub">Best rules: '+esc(k.paramsText)+(k.tested?' (best of '+k.tested+' tried)':'')+'</div>':''}</td><td>${k.n}</td><td>${k.winRate==null?'—':k.winRate+'%'}</td><td class="${k.avg>0?'up':'down'}">${sg(k.avg)}</td><td>${sg(k.older)} / ${sg(k.newer)}${k.olderN!=null?'<div class="metric-sub">'+k.olderN+' / '+k.newerN+' trades</div>':''}</td><td>${k.current?sg(k.current.avg)+'<div class="metric-sub">'+k.current.n+' trades</div>':'—'}</td><td>${k.pass?'<b class="up">PROVEN</b>':(g.mode==='strict'?'<b class="down">PAUSED</b>':'<b style="color:var(--amber)">UNPROVEN</b><div class="metric-sub">calls still issued, marked paper</div>')+'<div class="metric-sub">'+esc(k.reason)+'</div>'}</td></tr>`).join('');
     const bl=(g.blocked||[]).slice(0,6).map(b=>`<div class="metric-sub">${new Date(b.t*1000).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})}: ${esc(b.what)} signal not issued (${esc(b.reason)})</div>`).join('');
-    return `<div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;font-size:12px;"><thead><tr><th>Kind of call</th><th>Past trades</th><th>Win rate</th><th>Avg / trade</th><th>Older / newer half</th><th>Old default rules</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
+    return `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn" data-gcopy="text" style="font-size:12px;padding:5px 10px;">📋 Copy as text</button><button class="btn" data-gcopy="image" style="font-size:12px;padding:5px 10px;">🖼 Copy as image</button><span class="metric-sub" id="gcopyMsg"></span></div>
+      <div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;font-size:12px;"><thead><tr><th>Kind of call</th><th>Past trades</th><th>Win rate</th><th>Avg / trade</th><th>Older / newer half</th><th>Old default rules</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="metric-sub" style="margin-top:6px;"><b>Strategy lab:</b> every combination of minimum checks, stop size, target spacing (and for index calls the bigger-trend filter and entry cut-off) is replayed on real history. The best is picked using only the <b>older</b> half of the data, then checked on the <b>newer</b> half it never saw &mdash; so a rule that only fits the past shows up as failing there. Built ${g.built?new Date(g.built).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}):'—'} from Upstox candles; rebuilt every 12 hours. Rules: at least ${g.minTrades} trades; average after costs above +${g.min.idx_intraday}% (index intraday), +${g.min.idx_swing}% (index multi-day, both on the index itself, since option costs are large), +${g.min.stk_intraday}% (stock intraday), +${g.min.stk_swing}% (stock swing); and profitable in both halves. <a href="#" id="tcGateRe">Rebuild now</a></div>${bl?'<div style="margin-top:6px;"><b class="metric-sub">Recently held back:</b>'+bl+'</div>':''}`; }
   async function loadGate(re){ try{ const r=await fetch('/api/calls/gate'+(re?'?rebuild=1':''),{cache:'no-store'}); gateData=await r.json(); }catch(e){} if(!ov) return; const box=ov.querySelector('#tcGateBox'); if(box){ box.querySelector('summary .metric-sub').innerHTML=gateSummary(); ov.querySelector('#tcGate').innerHTML=gateHtml(); } }
   document.addEventListener('toggle',e=>{ if(e.target&&e.target.id==='tcGateBox') gateOpen=e.target.open; },true);
+  // ---- share the gate results: plain text or a PNG image on the clipboard (download as a fallback) ----
+  const gsg=x=>x==null?'—':(x>0?'+':'')+x+'%';
+  const gStatus=k=>k.pass?'PROVEN':(gateData&&gateData.mode==='strict'?'PAUSED':'UNPROVEN');
+  const gBuilt=()=>gateData&&gateData.built?new Date(gateData.built).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}):'—';
+  function gateText(){ const g=gateData; if(!g||!g.kinds) return '';
+    const L=['Backtest gate — '+g.kinds.filter(k=>k.pass).length+' of '+g.kinds.length+' kinds proven (built '+gBuilt()+')',''];
+    g.kinds.forEach(k=>{ L.push(gStatus(k)+' | '+k.label); L.push('  trades '+k.n+' · win '+(k.winRate==null?'—':k.winRate+'%')+' · avg '+gsg(k.avg)+' · older/newer '+gsg(k.older)+' / '+gsg(k.newer)+(k.olderN!=null?' ('+k.olderN+'/'+k.newerN+')':'')+(k.current?' · old rules '+gsg(k.current.avg)+' ('+k.current.n+')':''));
+      if(k.paramsText) L.push('  best rules: '+k.paramsText); if(!k.pass) L.push('  why: '+k.reason); L.push(''); });
+    return L.join('\n'); }
+  function gateCanvas(){ const g=gateData; const rows=g.kinds, W=1500, rh=54, top=110, H=top+rows.length*rh+50, sc=2;
+    const cv=document.createElement('canvas'); cv.width=W*sc; cv.height=H*sc; const x=cv.getContext('2d'); x.scale(sc,sc);
+    x.fillStyle='#0f1522'; x.fillRect(0,0,W,H);
+    x.fillStyle='#e6ebf5'; x.font='bold 22px system-ui,Segoe UI,Arial'; x.fillText('Backtest gate — '+rows.filter(k=>k.pass).length+' of '+rows.length+' kinds of call proven',24,40);
+    x.fillStyle='#8a94a6'; x.font='13px system-ui,Segoe UI,Arial'; x.fillText('Built '+gBuilt()+' from Upstox candles · best rules picked on the older half, judged on the newer half · averages are per trade after costs',24,64);
+    const cols=[['Kind of call / best rules',24],['Trades',640],['Win',720],['Avg',790],['Older / newer',870],['Old rules',1030],['Status',1140]];
+    x.font='bold 12px system-ui,Segoe UI,Arial'; x.fillStyle='#8a94a6'; cols.forEach(([t,cx])=>x.fillText(t.toUpperCase(),cx,top-14));
+    const col=v=>v==null?'#8a94a6':v>0?'#26c281':'#ef5350', fit=(t,w)=>{ if(x.measureText(t).width<=w) return t; while(t.length&&x.measureText(t+'…').width>w) t=t.slice(0,-1); return t+'…'; };
+    rows.forEach((k,i)=>{ const y=top+i*rh;
+      x.fillStyle=i%2?'#121a29':'#0f1522'; x.fillRect(12,y-4,W-24,rh); x.fillStyle='#1f2733'; x.fillRect(12,y-4,W-24,1);
+      x.font='14px system-ui,Segoe UI,Arial'; x.fillStyle='#e6ebf5'; x.fillText(fit(k.label,600),24,y+18);
+      x.font='12px system-ui,Segoe UI,Arial'; x.fillStyle='#8a94a6'; x.fillText(fit(k.paramsText||'',600),24,y+38);
+      x.font='14px system-ui,Segoe UI,Arial'; x.fillStyle='#e6ebf5'; x.fillText(String(k.n),640,y+18); x.fillText(k.winRate==null?'—':k.winRate+'%',720,y+18);
+      x.fillStyle=col(k.avg); x.fillText(gsg(k.avg),790,y+18);
+      x.fillStyle=col(k.older); x.fillText(gsg(k.older),870,y+18); x.fillStyle='#8a94a6'; x.fillText('/',940,y+18); x.fillStyle=col(k.newer); x.fillText(gsg(k.newer),952,y+18);
+      x.font='12px system-ui,Segoe UI,Arial'; x.fillStyle='#8a94a6'; if(k.olderN!=null) x.fillText(k.olderN+' / '+k.newerN+' trades',870,y+38);
+      x.font='14px system-ui,Segoe UI,Arial'; x.fillStyle=col(k.current&&k.current.avg); x.fillText(k.current?gsg(k.current.avg):'—',1030,y+18); x.font='12px system-ui,Segoe UI,Arial'; x.fillStyle='#8a94a6'; if(k.current) x.fillText(k.current.n+' trades',1030,y+38);
+      const st=gStatus(k); x.font='bold 14px system-ui,Segoe UI,Arial'; x.fillStyle=st==='PROVEN'?'#26c281':st==='PAUSED'?'#ef5350':'#f0a93a'; x.fillText(st,1140,y+18);
+      if(!k.pass){ x.font='11px system-ui,Segoe UI,Arial'; x.fillStyle='#8a94a6'; x.fillText(fit(k.reason,340),1140,y+38); } });
+    x.font='11px system-ui,Segoe UI,Arial'; x.fillStyle='#5d6779'; x.fillText('Rule-based screen, measured on past data; not investment advice.',24,H-18);
+    return cv; }
+  document.addEventListener('click',async e=>{ const b=e.target.closest&&e.target.closest('[data-gcopy]'); if(!b||!gateData) return; e.preventDefault();
+    const msg=ov&&ov.querySelector('#gcopyMsg'), say=t=>{ if(msg) msg.textContent=t; };
+    try{
+      if(b.dataset.gcopy==='text'){ try{ await navigator.clipboard.writeText(gateText()); say('✓ Copied as text — paste it anywhere'); }
+        catch(err){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([gateText()],{type:'text/plain'})); a.download='backtest-gate.txt'; a.click(); say('This browser does not allow copying here, so it was downloaded as a text file'); } }
+      else { const cv=gateCanvas(); const blob=await new Promise(r=>cv.toBlob(r,'image/png'));
+        try{ await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); say('✓ Image copied — paste it into WhatsApp, chat or email'); }
+        catch(err){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='backtest-gate.png'; a.click(); say('This browser does not allow copying images, so it was downloaded instead'); } }
+    }catch(err){ say('Could not copy: '+err.message); } });
   document.addEventListener('click',e=>{ if(e.target&&e.target.id==='tcGateRe'){ e.preventDefault(); e.target.textContent='Rebuilding…'; loadGate(true); } });
   async function load(scan){ try{ const r=await fetch('/api/calls'+(scan?'?scan=1':''),{cache:'no-store'}); data=await r.json(); }catch(e){} draw(); loadGate(false); }
   function open(){

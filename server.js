@@ -1260,7 +1260,7 @@ async function upstoxFetchJson(url) {
   let lastErr = null;
   for (const tk of toks) {
     await upstoxThrottle();
-    const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${tk}` } });
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${tk}` }, signal: AbortSignal.timeout(25000) }); // never hang on a stuck connection
     const json = await resp.json().catch(() => null);
     if (resp.ok && json && json.status === 'success') { HEALTH.upstox.lastOk = Date.now(); return json.data; }
     const msg = (json && (json.errors?.[0]?.message || json.message)) || `Upstox request failed (${resp.status})`;
@@ -2101,7 +2101,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-12-r14 (new setups in the lab: stock ORB+VWAP, previous-day high/low, tight-range breakout; index previous-day high/low; stock swing sells off)';
+const BUILD = '2026-10-12-r15 (new setups in the lab: stock ORB+VWAP, previous-day high/low, tight-range breakout; index previous-day high/low; stock swing sells off)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2275,7 +2275,8 @@ function pickKinds(kinds, fam, combos, perCombo, keyFn, cutoff) {
   }
 }
 async function buildGate() {
-  if (gate.building) return; gate.building = true; gate.err = null;
+  if (gate.building && Date.now() - (gate.startedAt || 0) < 90 * 60000) return; // a run stuck for 90+ minutes is abandoned
+  gate.building = true; gate.err = null; gate.startedAt = Date.now();
   const kinds = {}, G = Calls.LAB_GRID, mid = arr => arr.length ? (arr[0].t + arr[arr.length - 1].t) / 2 : 0;
   try {
     // ---- index option signals, on the index itself, pooled over Nifty / Bank Nifty / Sensex

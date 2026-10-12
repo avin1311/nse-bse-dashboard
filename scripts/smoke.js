@@ -15,6 +15,8 @@ ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length
   let p = 500; const C = []; for (let k = 0; k < 400; k++) { const o = p; p *= 1 + (rnd() - 0.48) * 0.03; C.push({ t: 1.6e9 + k * 86400, o, h: Math.max(o, p) * 1.004, l: Math.min(o, p) * 0.996, c: p, v: 1e6 }); }
   const r = E.detect(C); ok(Array.isArray(r.patterns), 'pattern engine runs (' + r.patterns.length + ' patterns on random data)');
   const w = E.walk(C, { step: 8 }); ok(Array.isArray(w), 'walk-forward backtest runs (' + w.length + ' signals)');
+  ok(r.patterns.every(p => p.pa === undefined || p.pa === null || /^(enter|wait|watch|avoid)$/.test(p.pa.action)), 'price-action layer gives every pattern an action');
+  ok(w.every(o => o.mode === 'breakout' || o.mode === 'retest'), 'walk-forward tags breakout and retest entries');
 }
 
 {

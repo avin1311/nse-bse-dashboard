@@ -2102,7 +2102,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-12-r16 (market-breadth rules in the lab; filters apply to stats and the gate table)';
+const BUILD = '2026-10-13-r17 (lab picks rules by a conservative score: older-half average minus one standard error)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2233,7 +2233,7 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on'; // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 4 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 5 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout' };
 function gateLabel(key) {
   const [grp, mode, side, setup] = key.split('|');
@@ -2258,7 +2258,9 @@ function splitStats(ts, cutoff) {
   const done = ts.filter(x => x.closed), avg = a => a.length ? Math.round(a.reduce((s, x) => s + x.pnlPct, 0) / a.length * 100) / 100 : null;
   const older = done.filter(x => x.t < cutoff), newer = done.filter(x => x.t >= cutoff);
   const w = done.filter(x => x.pnlPct > 0.05 && x.status !== 'BREAKEVEN').length, l = done.filter(x => x.pnlPct < -0.05 && x.status !== 'BREAKEVEN').length;
-  return { n: done.length, avg: avg(done), older: avg(older), newer: avg(newer), olderN: older.length, newerN: newer.length, winRate: w + l ? Math.round(w / (w + l) * 100) : null };
+  // conservative score for choosing rules: older-half average minus one standard error, so a lucky handful of trades cannot win
+  let lcb = null; if (older.length >= 2) { const m = older.reduce((q, x) => q + x.pnlPct, 0) / older.length, sd = Math.sqrt(older.reduce((q, x) => q + (x.pnlPct - m) ** 2, 0) / (older.length - 1)); lcb = m - sd / Math.sqrt(older.length); }
+  return { n: done.length, avg: avg(done), older: avg(older), newer: avg(newer), olderN: older.length, newerN: newer.length, winRate: w + l ? Math.round(w / (w + l) * 100) : null, olderLcb: lcb };
 }
 function pickKinds(kinds, fam, combos, perCombo, keyFn, cutoff) {
   const min = GATE_MIN[fam === 'index_intraday' ? 'idx_intraday' : fam === 'index_swing' ? 'idx_swing' : fam === 'stock_intraday' ? 'stk_intraday' : 'stk_swing'];
@@ -2267,7 +2269,7 @@ function pickKinds(kinds, fam, combos, perCombo, keyFn, cutoff) {
   for (const key of keys) {
     const cand = combos.map((cb, ci) => ({ ci, st: splitStats(perCombo[ci].filter(x => keyFn(x) === key), cutoff) }));
     const elig = cand.filter(c => c.st.olderN >= LAB_MIN_OLDER && c.st.older != null);
-    const win = elig.length ? elig.sort((a, b) => b.st.older - a.st.older || b.st.olderN - a.st.olderN)[0] : cand[defIdx];
+    const win = elig.length ? elig.sort((a, b) => b.st.olderLcb - a.st.olderLcb || b.st.olderN - a.st.olderN)[0] : cand[defIdx];
     const st = win.st, why = [];
     if (st.n < GATE_MIN_TRADES) why.push(`only ${st.n} past trades (need ${GATE_MIN_TRADES})`);
     if (st.avg == null || st.avg <= min) why.push(`average ${st.avg == null ? '—' : (st.avg > 0 ? '+' : '') + st.avg + '%'} is not above +${min}%`);
@@ -2330,7 +2332,7 @@ async function buildGate() {
       pickKinds(kinds, fam, combos, perCombo, x => `stk|intraday|${x.side}|${x.setup || 'trend'}`, cutoff);
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 4, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
+    gate = { t: Date.now(), labVersion: 5, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }

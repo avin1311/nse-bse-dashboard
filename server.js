@@ -1956,6 +1956,7 @@ async function runCallsCycle(force) {
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK.slice(0, 90);
+    if (open) { try { await checkWatches(); } catch (e) {} }
     maybeBuildGate();
     const ictx = await getIndexContext(); callsState.market = ictx;
     try { await runIndexScan(db, notes); } catch (e) { callsState.index = { ...(callsState.index || {}), err: e.message }; }
@@ -2105,7 +2106,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-14-r21 (chart patterns: 4-timeframe grid, recent by default, multi-timeframe agreement, key levels, per-chart track record, Daily+Hourly scan)';
+const BUILD = '2026-10-14-r22 (patterns: V-shaped cups, sloping triple necklines, decision zones + trigger watch, confluence in hit-rate test)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2443,26 +2444,29 @@ app.post('/api/calls/backtest-call', async (req, res) => {
 app.get('/api/calls/monitor', async (req, res) => {
   const db = await loadCalls();
   lowPriority.run(true, async () => { try { await runCallsCycle(false); await liveMonitor(); await maybeEod(); } catch (e) {} });
-  const ev = await loadEvents(); const eod = await loadEod();
+  const ev = await loadEvents(); const eod = await loadEod(); const W = await loadWatch();
   const active = db.filter(c => !c.closed).sort((a, b) => b.t - a.t);
   const day = istDateKey(Math.floor(Date.now() / 1000));
   const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day).sort((a, b) => (b.closedAt || b.exitT || 0) - (a.closedAt || a.exitT || 0));
   res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, closed, events: ev.slice(-80).reverse(),
-    today: buildEodAll(db, ev, day), sources: SOURCES, eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
+    today: buildEodAll(db, ev, day), sources: SOURCES, watch: W.items, watchDone: W.done.slice(0, 8), eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
 });
 // Manually added items (from Chart patterns / Screener & scans): tracked, alerted and summarised like calls,
 // but never counted in the Trade Calls stats or caps, and removable by the user.
 app.post('/api/calls/monitor/add', async (req, res) => {
-  try {
-    const b = req.body || {};
+  try { const r = await addManualItem(req.body || {}); res.status(r.status).json(r.body); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+async function addManualItem(b) {
+  {
     const source = b.source === 'pattern' || b.source === 'screener' ? b.source : null;
     const symbol = String(b.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, '');
     const side = b.side === 'SELL' ? 'SELL' : b.side === 'BUY' ? 'BUY' : null, mode = b.mode === 'intraday' ? 'intraday' : 'swing';
-    if (!source || !symbol || !side) return res.status(400).json({ error: 'source, symbol and side are required' });
-    if (!upstoxTokens().length) return res.status(503).json({ error: 'Upstox is not connected, so the item cannot be priced and tracked' });
+    if (!source || !symbol || !side) return { status: 400, body: { error: 'source, symbol and side are required' } };
+    if (!upstoxTokens().length) return { status: 503, body: { error: 'Upstox is not connected, so the item cannot be priced and tracked' } };
     const db = await loadCalls();
     const dup = db.find(c => c.manual && !c.closed && c.symbol === symbol && srcOf(c) === source && c.side === side);
-    if (dup) return res.status(409).json({ error: symbol + ' is already in the monitor from this section', id: dup.id });
+    if (dup) return { status: 409, body: { error: symbol + ' is already in the monitor from this section', id: dup.id } };
     const q = await getUpstoxLTPC(await dataKeyFor(symbol)); const ltp = q.price;
     if (!(ltp > 0)) throw new Error('no live price for ' + symbol);
     const sgn = side === 'BUY' ? 1 : -1;
@@ -2486,9 +2490,58 @@ app.post('/api/calls/monitor/add', async (req, res) => {
       status: 'ACTIVE', targetsHit: 0, activeSl: tk(sl), ltp, exit: null, pnlPct: 0, closed: false };
     db.push(call); if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX); await saveCalls();
     await emitEvent({ id: call.id + ':NEW', callId: call.id, source, symbol, side, mode, kind: 'NEW', level: 'info', t: now, price: call.entry, pnlPct: null, text: `➕ [${source === 'pattern' ? 'Pattern' : 'Screener'}] ${side} ${symbol} (${mode}) added to monitor at ₹${call.entry}, SL ₹${call.sl}` }, false);
-    res.json({ ok: true, call });
-  } catch (e) { res.status(502).json({ error: e.message }); }
+    return { status: 200, body: { ok: true, call } };
+  }
+}
+// ---- Trigger watch (Chart patterns "decision zone"): wait for a 15-minute close beyond a pattern's trigger level, then add
+// the item to the Calls Monitor at that price. Cancelled if price closes beyond the invalidation level first, or on expiry.
+let watchMem = null;
+async function loadWatch() { if (!watchMem) { try { watchMem = await storeGet('store:calls-watch', null); } catch (e) {} if (!watchMem || !Array.isArray(watchMem.items)) watchMem = { items: [], done: [] }; } return watchMem; }
+async function saveWatch() { try { await storeSet('store:calls-watch', watchMem); } catch (e) {} }
+app.post('/api/calls/watch/add', async (req, res) => {
+  const b = req.body || {}, W = await loadWatch();
+  const symbol = String(b.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), side = b.side === 'SELL' ? 'SELL' : b.side === 'BUY' ? 'BUY' : null;
+  const level = Number(b.level), sl = Number(b.sl), target = Number(b.target), mode = b.mode === 'intraday' ? 'intraday' : 'swing';
+  if (!symbol || !side || !(level > 0)) return res.status(400).json({ error: 'symbol, side and trigger level are required' });
+  if (W.items.some(w => w.symbol === symbol && w.side === side && Math.abs(w.level / level - 1) < 0.002)) return res.status(409).json({ error: 'Already watching this trigger' });
+  const now = Math.floor(Date.now() / 1000), days = mode === 'intraday' ? 3 : 10;
+  const w = { id: 'w-' + symbol + '-' + now, symbol, side, level, sl: sl > 0 ? sl : null, target: target > 0 ? target : null, mode, label: String(b.label || '').slice(0, 120), note: String(b.note || '').slice(0, 400), t: now, expires: now + days * 86400 };
+  W.items.push(w); await saveWatch(); res.json({ ok: true, watch: w });
 });
+app.post('/api/calls/watch/remove', async (req, res) => {
+  const W = await loadWatch(), i = W.items.findIndex(w => w.id === (req.body && req.body.id));
+  if (i < 0) return res.status(404).json({ error: 'not found' });
+  W.items.splice(i, 1); await saveWatch(); res.json({ ok: true });
+});
+async function checkWatches() {
+  const W = await loadWatch(); if (!W.items.length) return;
+  const now = Math.floor(Date.now() / 1000); let changed = false;
+  for (const w of W.items.slice()) {
+    let outcome = null, px = null;
+    if (now > w.expires) outcome = 'expired';
+    else {
+      try {
+        let rows = toBars(await getUpstoxCandles(w.symbol, '15m')); if (rows.length && rows[rows.length - 1].t + 900 > now) rows = rows.slice(0, -1);
+        const b = rows[rows.length - 1]; if (!b || b.t + 900 < w.t) continue; // only closes after the watch was set
+        px = b.c; const sg = w.side === 'BUY' ? 1 : -1;
+        if (w.sl && sg * (w.sl - b.c) >= 0) outcome = 'invalidated';
+        else if (sg * (b.c - w.level) > 0.0005 * w.level) outcome = 'triggered';
+      } catch (e) { continue; }
+    }
+    if (!outcome) continue;
+    W.items.splice(W.items.indexOf(w), 1); changed = true;
+    let note = '';
+    if (outcome === 'triggered') {
+      try { const r = await addManualItem({ source: 'pattern', symbol: w.symbol, side: w.side, mode: w.mode, sl: w.sl, target: w.target, label: ('Triggered: ' + w.label).slice(0, 80), note: w.note + ' Triggered by a 15-minute close at ' + px + ' beyond ' + w.level + '.' });
+        note = r.status === 200 ? 'added to the monitor' : (r.body && r.body.error) || 'could not add'; } catch (e) { note = e.message; }
+    } else if (outcome === 'invalidated') {
+      await emitEvent({ id: w.id + ':INV', callId: w.id, source: 'pattern', symbol: w.symbol, side: w.side, mode: w.mode, kind: 'EXPIRED', level: 'info', t: now, price: px, pnlPct: null, text: `✖ Watch cancelled: ${w.symbol} closed beyond the invalidation level ${w.sl} before triggering (${w.label})` }, true);
+    }
+    W.done.unshift({ ...w, outcome, at: now, px, note }); W.done.length = Math.min(W.done.length, 20);
+  }
+  if (changed) await saveWatch();
+}
+
 app.post('/api/calls/monitor/remove', async (req, res) => {
   const db = await loadCalls(); const id = req.body && req.body.id; const i = db.findIndex(c => c.id === id);
   if (i < 0) return res.status(404).json({ error: 'not found' });

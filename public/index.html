@@ -5723,8 +5723,9 @@ const PatternUI = (function(){
       p.lines.forEach(l=>{ const a=barTime(C,l.i1), b=barTime(C,l.i2); if(a===b) return;
         const ls=X.chart.addLineSeries({color,lineWidth:hover?3:2,lineStyle:l.dash?2:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
         ls.setData([{time:Math.min(a,b),value:l.p1},{time:Math.max(a,b),value:l.p2}]); X.extra.push(ls);
-        if(hover&&l.label) marks.push({time:Math.min(a,b),position:l.p1>=l.p2?'aboveBar':'belowBar',color:'#ffd400',shape:'circle',text:l.label}); });
-      if(hover){ const m={}; marks.forEach(k=>{ if(m[k.time]) m[k.time].text+=' / '+k.text; else m[k.time]=k; }); try{ X.series.setMarkers(Object.values(m).sort((x,y)=>x.time-y.time)); }catch(e){} }
+        // always label the lines (Neckline / Bottoms / Tops...), so a neckline is never mistaken for a pair of tops
+        if(l.label){ const top=(l.p1+l.p2)/2>=C[C.length-1].c; marks.push({time:Math.max(a,b),position:top?'aboveBar':'belowBar',color:hover?'#ffd400':color,shape:top?'arrowDown':'arrowUp',text:l.label}); } });
+      { const m={}; marks.forEach(k=>{ if(m[k.time]) m[k.time].text+=' / '+k.text; else m[k.time]=k; }); try{ X.series.setMarkers(Object.values(m).sort((x,y)=>x.time-y.time)); }catch(e){} }
       pl(p.entry,'#3d8bfd',isMini?'':'Entry'); pl(p.stop,'#ef5350',isMini?'':'Stop'); pl(p.target,'#26c281',isMini?'':'Target');
     }
     // focus on the recent end of the chart (or on the whole pattern if it started earlier)

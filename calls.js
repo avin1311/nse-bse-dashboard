@@ -269,6 +269,8 @@ function regimeOk(side, pct, regime) {
   const thr = regime === 'b60' ? 60 : 50;
   return side === 'BUY' ? pct >= thr : pct <= 100 - thr;
 }
+// "Index must agree" (stock intraday): buys only while Nifty is up on the day, sells only while it is down.
+function idxAgreeOk(side, todayPct, on) { if (!on) return true; if (todayPct == null) return false; return side === 'BUY' ? todayPct > 0 : todayPct < 0; }
 const biasCache = new WeakMap();
 function biasSeries(bars) { // the market-bias rule of marketBias(), for every bar of a daily index series
   if (!bars || !bars.length) return [];
@@ -655,7 +657,7 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
       if (k >= 0) { let j = k; while (j > 0 && istDayNo(I[j].t) === istDayNo(t)) j--; const pc = I[j].c; if (istDayNo(I[j].t) !== istDayNo(t) && pc > 0) { todayPct = (I[k].c / pc - 1) * 100; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; } }
     }
     const ev = evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
-    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime)) continue;
+    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
     out.push(tradeOf(sym, call, ev, st, bias));
@@ -676,7 +678,7 @@ const LAB_GRID = {
   index_intraday: product({ regime: ['any', 'b50'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'], endMin: [720, 795] }),
   index_swing: product({ regime: ['any', 'b50', 'b60'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'] }),
   stock_swing: product({ regime: ['any', 'b50', 'b60'], setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B', 'C'] }),
-  stock_intraday: product({ regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exitI: ['S', 'A', 'B'] }),
+  stock_intraday: product({ idxAgree: [false, true], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exitI: ['S', 'A', 'B'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);
@@ -684,4 +686,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

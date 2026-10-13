@@ -5131,7 +5131,9 @@ const PatternEngine = (function(){
         const tl=(hd.i-ls.i)/Math.max(1,(rs.i-hd.i));
         if(hd.p>ls.p&&hd.p>rs.p&&headUp>=Math.max(0.03*ctx.g,0.7*ctx.dev)&&shDiff<=Math.max(0.025,0.06*ctx.g)&&tilt<=Math.max(0.03,0.08*ctx.g)&&tl>=0.4&&tl<=2.5&&riseBefore(C,ls.i,40)>=minTrend){
           const slope=(t2.p-t1.p)/(t2.i-t1.i);
-          const neckFn=j=>t1.p+slope*(j-t1.i);
+          // sloped neckline through the two troughs; past the right shoulder's trough it may only move AWAY from price
+          // (a neckline extended toward price would confirm the pattern on noise)
+          const neckFn=j=>{ const v=t1.p+slope*(j-t1.i); return j<=t2.i?v:Math.min(v,t2.p); };
           const height=[hd.p,neckFn(hd.i)];
           const fit=clamp(1-shDiff/Math.max(0.025,0.06*ctx.g),0,1)*0.6+clamp(headUp/Math.max(0.025,0.06*ctx.g),0,1)*0.4;
           finish(bull?'ihs':'hs',[ls,hd,rs],neckFn,0,height,t1.i,fit,

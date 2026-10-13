@@ -1632,7 +1632,10 @@ let callsDb = null; let callsLoading = null;
 const callsState = { running: false, lastScan: 0, lastErr: null, scanned: 0, found: 0 };
 async function loadCalls() {
   if (callsDb) return callsDb;
-  if (!callsLoading) callsLoading = storeGet('store:trade-calls', []).then(a => { callsDb = Array.isArray(a) ? a : []; return callsDb; });
+  if (!callsLoading) callsLoading = storeGet('store:trade-calls', []).then(a => { callsDb = Array.isArray(a) ? a : [];
+    // repair: a closed call's result always comes from its exit price (an old race could leave a live-price P/L on it)
+    callsDb.forEach(c => { if (c.closed && c.exit != null && c.entry > 0) { const sg = c.side === 'BUY' ? 1 : -1, g = sg * (c.exit - c.entry) / c.entry * 100, cost = c.costPct != null ? c.costPct : Calls.costPct(c.mode); c.grossPct = Math.round(g * 100) / 100; c.pnlPct = Math.round((g - cost) * 100) / 100; c.ltp = c.exit; } });
+    return callsDb; });
   return callsLoading;
 }
 async function saveCalls() { try { await storeSet('store:trade-calls', callsDb.slice(-CALLS_MAX)); } catch (e) { /* memory-only mode */ } }
@@ -1707,7 +1710,7 @@ async function liveMonitor() {
   for (const c of act) {
     try {
       const q = await getUpstoxLTPC(c.instrumentKey || await dataKeyFor(c.symbol));
-      if (q.price == null) continue;
+      if (q.price == null || c.closed) continue; // closed by the scan while we waited: never overwrite a final result with a live price
       const sgn = c.side === 'BUY' ? 1 : -1;
       c.ltp = q.price; c.pnlPct = Math.round((sgn * (q.price - c.entry) / c.entry * 100 - (c.costPct != null ? c.costPct : Calls.costPct(c.mode))) * 100) / 100; changed = true;
       const nextT = c.targets[c.targetsHit || 0];
@@ -2102,7 +2105,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-13-r17 (lab picks rules by a conservative score: older-half average minus one standard error)';
+const BUILD = '2026-10-13-r17b (closed calls keep their exit-price result)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

@@ -677,8 +677,9 @@ function product(spec) { return Object.entries(spec).reduce((acc, [k, vals]) => 
 const LAB_GRID = {
   index_intraday: product({ regime: ['any', 'b50'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'], endMin: [720, 795] }),
   index_swing: product({ regime: ['any', 'b50', 'b60'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'] }),
-  stock_swing: product({ regime: ['any', 'b50', 'b60'], setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B', 'C'] }),
-  stock_intraday: product({ idxAgree: [false, true], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exitI: ['S', 'A', 'B'] }),
+  stock_swing: product({ regime: ['any', 'b50', 'b60'], setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B'] }),
+  // trimmed to what earlier runs actually chose (5-6 checks, tighter stops, nearer targets) so the lab fits the server's small CPU
+  stock_intraday: product({ idxAgree: [false, true], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);

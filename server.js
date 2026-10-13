@@ -2105,7 +2105,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-13-r18 (lab tests "index must agree" for stock intraday calls)';
+const BUILD = '2026-10-13-r19 (lab keeps running totals instead of every trade: small memory; shows server health)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2258,22 +2258,33 @@ function paramsLabel(p) {
   const ia = p.idxAgree ? ' · only when Nifty agrees on the day (buys while it is up, sells while it is down)' : '';
   return `${p.minScore}/6 checks${p.needHtf ? ' + bigger trend' : ''}${rg}${ia} · stop ×${p.stopK} · targets ${ex}${p.endMin ? ' · entries until ' + (p.endMin === 720 ? '12:15' : '13:30') : ''}`;
 }
-function splitStats(ts, cutoff) {
-  const done = ts.filter(x => x.closed), avg = a => a.length ? Math.round(a.reduce((s, x) => s + x.pnlPct, 0) / a.length * 100) / 100 : null;
-  const older = done.filter(x => x.t < cutoff), newer = done.filter(x => x.t >= cutoff);
-  const w = done.filter(x => x.pnlPct > 0.05 && x.status !== 'BREAKEVEN').length, l = done.filter(x => x.pnlPct < -0.05 && x.status !== 'BREAKEVEN').length;
-  // conservative score for choosing rules: older-half average minus one standard error, so a lucky handful of trades cannot win
-  let lcb = null; if (older.length >= 2) { const m = older.reduce((q, x) => q + x.pnlPct, 0) / older.length, sd = Math.sqrt(older.reduce((q, x) => q + (x.pnlPct - m) ** 2, 0) / (older.length - 1)); lcb = m - sd / Math.sqrt(older.length); }
-  return { n: done.length, avg: avg(done), older: avg(older), newer: avg(newer), olderN: older.length, newerN: newer.length, winRate: w + l ? Math.round(w / (w + l) * 100) : null, olderLcb: lcb };
+// Results are accumulated per (rule combination, kind of call) as running sums, so the lab's memory stays small no
+// matter how many trades it replays (keeping every trade of every combination could exhaust the server's memory).
+function accum(map, trades, keyFn, cutoff) {
+  for (const x of trades) {
+    if (!x.closed) continue;
+    const k = keyFn(x); let a = map.get(k);
+    if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, w: 0, l: 0 }; map.set(k, a); }
+    a.n++; a.sum += x.pnlPct;
+    if (x.t < cutoff) { a.oN++; a.oSum += x.pnlPct; a.oSq += x.pnlPct * x.pnlPct; } else { a.nN++; a.nSum += x.pnlPct; }
+    if (x.status !== 'BREAKEVEN') { if (x.pnlPct > 0.05) a.w++; else if (x.pnlPct < -0.05) a.l++; }
+  }
 }
-function pickKinds(kinds, fam, combos, perCombo, keyFn, cutoff) {
+function statsOf(a) {
+  const r = x => Math.round(x * 100) / 100;
+  if (!a || !a.n) return { n: 0, avg: null, older: null, newer: null, olderN: 0, newerN: 0, winRate: null, olderLcb: null };
+  let lcb = null; // conservative score for choosing rules: older-half average minus one standard error, so a lucky handful of trades cannot win
+  if (a.oN >= 2) { const m = a.oSum / a.oN, v = Math.max(0, (a.oSq - a.oN * m * m) / (a.oN - 1)); lcb = m - Math.sqrt(v) / Math.sqrt(a.oN); }
+  return { n: a.n, avg: r(a.sum / a.n), older: a.oN ? r(a.oSum / a.oN) : null, newer: a.nN ? r(a.nSum / a.nN) : null, olderN: a.oN, newerN: a.nN, winRate: a.w + a.l ? Math.round(a.w / (a.w + a.l) * 100) : null, olderLcb: lcb };
+}
+function pickKinds(kinds, fam, combos, perCombo, cutoff) {
   const min = GATE_MIN[fam === 'index_intraday' ? 'idx_intraday' : fam === 'index_swing' ? 'idx_swing' : fam === 'stock_intraday' ? 'stk_intraday' : 'stk_swing'];
   const def = DEF_PARAMS[fam], defIdx = Math.max(0, combos.findIndex(c => Object.keys(def).every(k => c[k] === def[k])));
-  const keys = new Set(); perCombo.forEach(ts => ts.forEach(x => keys.add(keyFn(x))));
+  const keys = new Set(); perCombo.forEach(m => m.forEach((_, k) => keys.add(k)));
   for (const key of keys) {
-    const cand = combos.map((cb, ci) => ({ ci, st: splitStats(perCombo[ci].filter(x => keyFn(x) === key), cutoff) }));
+    const cand = combos.map((cb, ci) => ({ ci, st: statsOf(perCombo[ci].get(key)) }));
     const elig = cand.filter(c => c.st.olderN >= LAB_MIN_OLDER && c.st.older != null);
-    const win = elig.length ? elig.sort((a, b) => b.st.olderLcb - a.st.olderLcb || b.st.olderN - a.st.olderN)[0] : cand[defIdx];
+    const win = elig.length ? elig.sort((a, b) => b.st.olderLcb - a.st.olderLcb || b.st.olderN - a.st.olderN)[0] : (cand[defIdx].st.n ? cand[defIdx] : cand.slice().sort((a, b) => b.st.n - a.st.n)[0]);
     const st = win.st, why = [];
     if (st.n < GATE_MIN_TRADES) why.push(`only ${st.n} past trades (need ${GATE_MIN_TRADES})`);
     if (st.avg == null || st.avg <= min) why.push(`average ${st.avg == null ? '—' : (st.avg > 0 ? '+' : '') + st.avg + '%'} is not above +${min}%`);
@@ -2284,9 +2295,8 @@ function pickKinds(kinds, fam, combos, perCombo, keyFn, cutoff) {
 }
 async function buildGate() {
   if (gate.building && Date.now() - (gate.startedAt || 0) < 90 * 60000) return; // a run stuck for 90+ minutes is abandoned
-  gate.building = true; gate.err = null; gate.startedAt = Date.now();
+  gate.building = true; gate.err = null; gate.startedAt = Date.now(); gate.partial = {};
   const kinds = {}, G = Calls.LAB_GRID, mid = arr => arr.length ? (arr[0].t + arr[arr.length - 1].t) / 2 : 0;
-  const slim = ts => ts.map(x => ({ t: x.t, side: x.side, setup: x.setup, pnlPct: x.pnlPct, closed: x.closed, status: x.status }));
   try {
     gate.progress = 'lab: loading the stock universe (for market breadth)';
     const U = await loadUniverseBars();
@@ -2294,7 +2304,8 @@ async function buildGate() {
     if (callsState.breadthPct == null && breadth.size) { const last = [...breadth.entries()].sort((x, y) => y[0] - x[0])[0]; callsState.breadthPct = last[1]; }
     // ---- index option signals, on the index itself, pooled over Nifty / Bank Nifty / Sensex
     for (const mode of ['intraday', 'swing']) {
-      const fam = 'index_' + mode, combos = G[fam], perCombo = combos.map(() => []); let cutoff = 0;
+      const fam = 'index_' + mode, combos = G[fam], perCombo = combos.map(() => new Map()); let cutoff = 0;
+      const keyFn = x => `idx|${mode}|${x.side}|${x.setup}`;
       for (const u of INDEX_UNDERLYINGS) {
         gate.progress = `lab: ${u} ${mode === 'intraday' ? 'intraday' : 'multi-day'}`;
         try {
@@ -2302,41 +2313,47 @@ async function buildGate() {
           const bars = mode === 'intraday' ? (await getIndex15mHistory(u)).bars : daily;
           if (!cutoff) cutoff = mid(bars);
           const P = Calls.prep(bars);
-          for (let ci = 0; ci < combos.length; ci++) perCombo[ci].push(...slim(await Calls.walkIndex(u, bars, { mode, dailyBars: daily, _P: P, breadth, ...combos[ci] }, yieldLoop)));
+          for (let ci = 0; ci < combos.length; ci++) accum(perCombo[ci], await Calls.walkIndex(u, bars, { mode, dailyBars: daily, _P: P, breadth, ...combos[ci] }, yieldLoop), keyFn, cutoff);
         } catch (e) {}
       }
-      pickKinds(kinds, fam, combos, perCombo, x => `idx|${mode}|${x.side}|${x.setup}`, cutoff);
+      pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
     }
     // ---- stock swing (daily candles, ~3 years, 90 stocks)
     if (Object.keys(U.bars).length) {
-      const fam = 'stock_swing', combos = G[fam], perCombo = combos.map(() => []); let cutoff = 0, k = 0;
+      const fam = 'stock_swing', combos = G[fam], perCombo = combos.map(() => new Map()); let cutoff = 0, k = 0;
+      const keyFn = x => `stk|swing|${x.side}|${x.setup || 'trend'}`;
+      const defIdx = combos.findIndex(c => c.regime === 'any' && c.setup === 'trend' && c.minScore === 5 && c.stopK === 1 && c.exit === 'B'), defTrades = [];
       for (const [sym, bars] of Object.entries(U.bars)) {
         gate.progress = `lab: stocks swing ${++k}/${Object.keys(U.bars).length}`;
         if (!cutoff) cutoff = mid(bars);
         const P = Calls.prep(bars);
-        for (let ci = 0; ci < combos.length; ci++) perCombo[ci].push(...slim(await Calls.walkSwing(sym, bars, { idxBars: U.idx, _P: P, breadth, ...combos[ci] }, yieldLoop)));
+        for (let ci = 0; ci < combos.length; ci++) {
+          const ts = await Calls.walkSwing(sym, bars, { idxBars: U.idx, _P: P, breadth, ...combos[ci] }, yieldLoop);
+          accum(perCombo[ci], ts, keyFn, cutoff);
+          if (ci === defIdx) ts.forEach(x => defTrades.push({ t: x.t, side: x.side, setup: x.setup, pnlPct: x.pnlPct, closed: x.closed, status: x.status }));
+        }
       }
-      pickKinds(kinds, fam, combos, perCombo, x => `stk|swing|${x.side}|${x.setup || 'trend'}`, cutoff);
-      const defIdx = combos.findIndex(c => c.regime === 'any' && c.setup === 'trend' && c.minScore === 5 && c.stopK === 1 && c.exit === 'B');
-      if (defIdx >= 0) btUni = { ...btUni, t: Date.now(), trades: perCombo[defIdx], loaded: Object.keys(U.bars).length, total: U.total, running: false, progress: 100 };
+      pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
+      if (defIdx >= 0) btUni = { ...btUni, t: Date.now(), trades: defTrades, loaded: Object.keys(U.bars).length, total: U.total, running: false, progress: 100 };
     }
     // ---- stock intraday (~4 months of 15-minute candles per stock)
     if (process.env.CALLS_INTRADAY !== 'off') {
       let idx15 = null; try { idx15 = (await getIndex15mHistory('NIFTY')).bars; } catch (e) {}
-      const fam = 'stock_intraday', combos = G[fam], perCombo = combos.map(() => []); let cutoff = 0, k = 0;
+      const fam = 'stock_intraday', combos = G[fam], perCombo = combos.map(() => new Map()); let cutoff = 0, k = 0;
+      const keyFn = x => `stk|intraday|${x.side}|${x.setup || 'trend'}`;
       const syms = FNO_FALLBACK.slice(0, 90);
       for (const sym of syms) {
         gate.progress = `lab: stocks intraday ${++k}/${syms.length}`;
         try {
           const h = await getIndex15mHistory(sym, 4, true); if (!cutoff) cutoff = mid(h.bars);
           const P = Calls.prep(h.bars);
-          for (let ci = 0; ci < combos.length; ci++) perCombo[ci].push(...slim(await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, _P: P, breadth, ...combos[ci] }, yieldLoop)));
+          for (let ci = 0; ci < combos.length; ci++) accum(perCombo[ci], await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, _P: P, breadth, ...combos[ci] }, yieldLoop), keyFn, cutoff);
         } catch (e) {}
       }
-      pickKinds(kinds, fam, combos, perCombo, x => `stk|intraday|${x.side}|${x.setup || 'trend'}`, cutoff);
+      pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 6, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN };
+    gate = { t: Date.now(), labVersion: 6, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }
@@ -2369,8 +2386,10 @@ function gateBlocked(what, key, reason) {
 app.get('/api/calls/gate', (req, res) => {
   if (req.query.rebuild === '1' && !gate.building) { gate.t = 0; gate.lastTry = 0; maybeBuildGate(); }
   else maybeBuildGate();
-  const kinds = Object.entries(gate.kinds || {}).map(([key, v]) => ({ key, ...v })).sort((a, b) => a.key < b.key ? -1 : 1);
-  res.json({ enabled: GATE_MODE !== 'off', mode: GATE_MODE, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
+  const src = Object.keys(gate.kinds || {}).length ? gate.kinds : (gate.partial || {}); // while the first run is in progress, show finished families
+  const kinds = Object.entries(src).map(([key, v]) => ({ key, ...v })).sort((a, b) => a.key < b.key ? -1 : 1);
+  const mem = process.memoryUsage();
+  res.json({ server: { upMin: Math.round(process.uptime() / 60), rssMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576) }, labStartedAt: gate.building ? gate.startedAt : null, tookMin: gate.tookMin || null, enabled: GATE_MODE !== 'off', mode: GATE_MODE, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
 });
 async function backtestOneCall(spec, supplied) {
   if (spec.kind === 'index') return backtestIndexCall(spec, supplied);

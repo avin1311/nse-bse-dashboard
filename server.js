@@ -1910,7 +1910,7 @@ async function runIndexScan(db, notes) {
         if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
         rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
         const barMin = n >= 0 ? Math.floor(((rows[n].t + 19800) % 86400) / 60) : 0;
-        for (const k of liveKinds('index_intraday', ['idx|intraday|BUY|orb', 'idx|intraday|BUY|pullback', 'idx|intraday|BUY|pdhl', 'idx|intraday|SELL|orb', 'idx|intraday|SELL|pullback', 'idx|intraday|SELL|pdhl'])) {
+        for (const k of liveKinds('index_intraday', ['idx|intraday|BUY|orb', 'idx|intraday|BUY|pullback', 'idx|intraday|BUY|pdhl', 'idx|intraday|BUY|trendday', 'idx|intraday|SELL|orb', 'idx|intraday|SELL|pullback', 'idx|intraday|SELL|pdhl', 'idx|intraday|SELL|trendday'])) {
           if (barMin > (k.params.endMin || 795)) continue;
           const ev = Calls.evalIndexAt(P, n, 'intraday', { bias: dailyBias, ...k.params, ...sideSetup(k.key) });
           if (ev && dayNo(ev.barTime) === today && Calls.regimeOk(ev.side, callsState.breadthPct, k.params.regime)) found.push({ u, gateKey: k.key, ...ev });
@@ -1988,7 +1988,7 @@ async function runCallsCycle(force) {
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
             rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
-            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl'])) {
+            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl', 'stk|intraday|BUY|vwap', 'stk|intraday|SELL|vwap'])) {
               const [, , side, setup = 'trend'] = k.key.split('|');
               const id = Calls.evalAt(P, n, 'intraday', { bias: ictx.intradayBias, idxTodayPct: ictx.todayPct, ...k.params, side, setup });
               if (id && (id.setup || 'trend') === setup && istDayEnd0(id.barTime) === istDayEnd0(nowSec) && Calls.regimeOk(side, callsState.breadthPct, k.params.regime) && Calls.idxAgreeOk(side, ictx.todayPct, k.params.idxAgree)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
@@ -2105,7 +2105,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-13-r19 (lab keeps running totals instead of every trade: small memory; shows server health)';
+const BUILD = '2026-10-13-r20 (both-way setups: index trend day, stock VWAP rejection/hold, tested daily-trend override; monitor copy)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2236,8 +2236,8 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on'; // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 6 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
-const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout' };
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 7 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold' };
 function gateLabel(key) {
   const [grp, mode, side, setup] = key.split('|');
   if (grp === 'idx') return `Index option · ${mode === 'intraday' ? 'intraday' : 'multi-day'} · ${side === 'BUY' ? 'up (buy CE)' : 'down (buy PE)'} · ${SETUP_NAME[setup] || setup}`;
@@ -2248,7 +2248,7 @@ function gateLabel(key) {
 // period and on the NEWER half it never saw. Those numbers decide LIVE (proven) vs unproven.
 const GATE_MODE = (process.env.CALLS_GATE || 'paper').toLowerCase(); // paper (default): unproven kinds still issue calls, labelled; strict: only proven; off: no gate
 const LAB_MIN_OLDER = 12;
-const DEF_PARAMS = { index_intraday: { regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A', endMin: 795 }, index_swing: { regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A' },
+const DEF_PARAMS = { index_intraday: { veto: true, regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A', endMin: 795 }, index_swing: { regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A' },
   stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { idxAgree: false, regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
 const famOf = key => { const [g, m] = key.split('|'); return (g === 'idx' ? 'index_' : 'stock_') + m; };
 function paramsLabel(p) {
@@ -2256,7 +2256,8 @@ function paramsLabel(p) {
   const ex = { S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R', C: '2/4/6R' }[p.exit || p.exitI] || '';
   const rg = p.regime === 'b50' ? ' · only when market breadth agrees (buys ≥50% of stocks above their 50-day average, sells ≤50%)' : p.regime === 'b60' ? ' · only in a strong market (buys ≥60% above their 50-day average, sells ≤40%)' : '';
   const ia = p.idxAgree ? ' · only when Nifty agrees on the day (buys while it is up, sells while it is down)' : '';
-  return `${p.minScore}/6 checks${p.needHtf ? ' + bigger trend' : ''}${rg}${ia} · stop ×${p.stopK} · targets ${ex}${p.endMin ? ' · entries until ' + (p.endMin === 720 ? '12:15' : '13:30') : ''}`;
+  const vt = p.veto === false ? ' · may trade against the daily trend' : '';
+  return `${p.minScore}/6 checks${p.needHtf ? ' + bigger trend' : ''}${vt}${rg}${ia} · stop ×${p.stopK} · targets ${ex}${p.endMin ? ' · entries until ' + (p.endMin === 720 ? '12:15' : '13:30') : ''}`;
 }
 // Results are accumulated per (rule combination, kind of call) as running sums, so the lab's memory stays small no
 // matter how many trades it replays (keeping every trade of every combination could exhaust the server's memory).
@@ -2353,7 +2354,7 @@ async function buildGate() {
       pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 6, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
+    gate = { t: Date.now(), labVersion: 7, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }
@@ -2399,7 +2400,7 @@ async function backtestOneCall(spec, supplied) {
   else { source = 'Upstox ' + (intraday ? '15-minute' : 'daily') + ' candles'; bars = intraday ? toBars(await getUpstoxCandles(sym, '15m')) : await getHistUpstox(sym, 750); }
   if (!bars || bars.length < 120) throw new Error('Only ' + (bars ? bars.length : 0) + ' candles available for ' + sym + ' (need at least 120)');
   let trades;
-  const newSetup = ['orbvwap', 'pdhl', 'squeeze'].includes(spec.setup) ? spec.setup : null;
+  const newSetup = ['orbvwap', 'pdhl', 'squeeze', 'vwap'].includes(spec.setup) ? spec.setup : null;
   const lab = (gate.kinds || {})[`stk|${spec.mode}|${spec.side}|${spec.setup || 'trend'}`], lp = lab && lab.params ? lab.params : {};
   if (intraday) { let idx15 = null; try { idx15 = toBars(await getUpstoxCandles('NIFTY', '15m')); } catch (e) {} trades = await Calls.walkIntraday(sym, bars, { idxBars15: idx15, ...lp, setup: newSetup || 'trend' }, yieldLoop); }
   else { let idx = null; try { idx = toBars(await getUpstoxCandles('NIFTY', '1D')).slice(-800); } catch (e) {} trades = await Calls.walkSwing(sym, bars, { exit: process.env.CALLS_EXIT || 'B', idxBars: idx, ...lp, setup: newSetup || 'trend' }, yieldLoop); }
@@ -2424,7 +2425,7 @@ async function specFromReq(q) {
   if (c) return { symbol: c.symbol, mode: c.mode, side: c.side, setup: c.setup || 'trend' };
   if (q.kind === 'index' && INDEX_UNDERLYINGS.includes(String(q.symbol).toUpperCase()) && /^(BUY|SELL)$/.test(q.side) && /^(swing|intraday)$/.test(q.mode)) return { kind: 'index', symbol: String(q.symbol).toUpperCase(), mode: q.mode, side: q.side, setup: /^(orb|pullback|breakout|pdhl)$/.test(q.setup) ? q.setup : null };
   if (!q.symbol || !/^(BUY|SELL)$/.test(q.side) || !/^(swing|intraday)$/.test(q.mode)) throw new Error('call not found');
-  return { symbol: String(q.symbol).toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), mode: q.mode, side: q.side, setup: /^(bounce|orbvwap|pdhl|squeeze)$/.test(q.setup) ? q.setup : 'trend' };
+  return { symbol: String(q.symbol).toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), mode: q.mode, side: q.side, setup: /^(bounce|orbvwap|pdhl|squeeze|vwap)$/.test(q.setup) ? q.setup : 'trend' };
 }
 app.get('/api/calls/backtest-call', async (req, res) => {
   try { const spec = await specFromReq(req.query); res.json(await new Promise((ok, no) => lowPriority.run(true, () => backtestOneCall(spec).then(ok, no)))); }

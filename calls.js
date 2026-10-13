@@ -309,6 +309,7 @@ const SWING_SELL = process.env.CALLS_SWING_SELL === 'on'; // stock swing shorts:
 function evalAt(P, n, mode, opts = {}) {
   if (n < 60) return null;
   if (opts.setup === 'orbvwap' || opts.setup === 'pdhl') return mode === 'intraday' ? evalBreakIntra(P, n, opts) : null;
+  if (opts.setup === 'vwap') return mode === 'intraday' ? evalVwapIntra(P, n, opts) : null;
   if (opts.setup === 'squeeze') return mode === 'swing' ? evalSqueeze(P, n, opts) : null;
   if (mode === 'swing' && opts.side === 'SELL' && !SWING_SELL) return null;
   const intraday = mode === 'intraday', bars = P.bars;
@@ -428,7 +429,7 @@ function evalIndexAt(P, n, mode, opts = {}) {
   const rng = h[n] - l[n], body = c[n] - o[n];
   const lo3 = Math.min(...l.slice(n - 3, n + 1)), hi3 = Math.max(...h.slice(n - 3, n + 1));
   const extended = Math.abs(px - e20[n]) / a > (intraday ? 2.2 : 2.0);
-  let orHi = null, orLo = null, dayOpen = null, prevClose = null, trig = { BUY: null, SELL: null };
+  let orHi = null, orLo = null, dayOpen = null, prevClose = null; const tl = { BUY: [], SELL: [] }; // every trigger that fired on this bar, in priority order
   if (intraday) {
     const day = istDayNo(bars[n].t); let k = n; while (k >= 0 && istDayNo(bars[k].t) === day) k--;
     const first = k + 1;
@@ -436,47 +437,62 @@ function evalIndexAt(P, n, mode, opts = {}) {
     prevClose = c[k]; dayOpen = o[first];
     orHi = h[first]; orLo = l[first]; // 15-minute opening range
     let above = 0, below = 0; for (let j = first + 1; j < n; j++) { if (c[j] > orHi) above++; if (c[j] < orLo) below++; } // closes between the opening range and the signal bar
-    if (px > orHi && above <= 1) trig.BUY = 'orb';
-    if (px < orLo && below <= 1) trig.SELL = 'orb';
-    if (!trig.BUY && P.pdh[n] != null && px > P.pdh[n] && c[n - 1] <= P.pdh[n]) trig.BUY = 'pdhl';
-    if (!trig.SELL && P.pdl[n] != null && px < P.pdl[n] && c[n - 1] >= P.pdl[n]) trig.SELL = 'pdhl';
-    if (!trig.BUY && !extended && lo3 <= e20[n] * 1.001 && px > e5[n] && px > c[n - 1]) trig.BUY = 'pullback';
-    if (!trig.SELL && !extended && hi3 >= e20[n] * 0.999 && px < e5[n] && px < c[n - 1]) trig.SELL = 'pullback';
+    if (px > orHi && above <= 1) tl.BUY.push('orb');
+    if (px < orLo && below <= 1) tl.SELL.push('orb');
+    if (P.pdh[n] != null && px > P.pdh[n] && c[n - 1] <= P.pdh[n]) tl.BUY.push('pdhl');
+    if (P.pdl[n] != null && px < P.pdl[n] && c[n - 1] >= P.pdl[n]) tl.SELL.push('pdhl');
+    if (!extended && lo3 <= e20[n] * 1.001 && px > e5[n] && px > c[n - 1]) tl.BUY.push('pullback');
+    if (!extended && hi3 >= e20[n] * 0.999 && px < e5[n] && px < c[n - 1]) tl.SELL.push('pullback');
+    // trend day: the index is already 0.5%+ away from yesterday's close, has never gone back through the far side of the
+    // opening range, and this bar closes at a new closing extreme of the day. Rides strong one-way days in either direction,
+    // including relief rallies inside a falling market (which the trend-following setups above cannot take).
+    if (n - first >= 2) {
+      const move = (px / prevClose - 1) * 100; let lowAfter = Infinity, highAfter = -Infinity, cMax = -Infinity, cMin = Infinity;
+      for (let j = first + 1; j <= n; j++) { lowAfter = Math.min(lowAfter, l[j]); highAfter = Math.max(highAfter, h[j]); }
+      for (let j = first; j < n; j++) { cMax = Math.max(cMax, c[j]); cMin = Math.min(cMin, c[j]); }
+      if (move >= 0.5 && px > orHi && lowAfter >= orLo && px > cMax) tl.BUY.push('trendday');
+      if (move <= -0.5 && px < orLo && highAfter <= orHi && px < cMin) tl.SELL.push('trendday');
+    }
   } else {
     prevClose = c[n - 1]; dayOpen = o[n];
     const hh = Math.max(...h.slice(n - 20, n)), ll = Math.min(...l.slice(n - 20, n));
-    if (px > hh && c[n - 1] <= hh) trig.BUY = 'breakout';
-    if (px < ll && c[n - 1] >= ll) trig.SELL = 'breakout';
-    if (!trig.BUY && !extended && lo3 <= e20[n] * 1.003 && px > e5[n] && px > c[n - 1]) trig.BUY = 'pullback';
-    if (!trig.SELL && !extended && hi3 >= e20[n] * 0.997 && px < e5[n] && px < c[n - 1]) trig.SELL = 'pullback';
+    if (px > hh && c[n - 1] <= hh) tl.BUY.push('breakout');
+    if (px < ll && c[n - 1] >= ll) tl.SELL.push('breakout');
+    if (!extended && lo3 <= e20[n] * 1.003 && px > e5[n] && px > c[n - 1]) tl.BUY.push('pullback');
+    if (!extended && hi3 >= e20[n] * 0.997 && px < e5[n] && px < c[n - 1]) tl.SELL.push('pullback');
   }
+  const trig = {}; for (const sd of ['BUY', 'SELL']) trig[sd] = tl[sd].find(x => !opts.setups || opts.setups.includes(x)) || null;
+  const td = { BUY: trig.BUY === 'trendday', SELL: trig.SELL === 'trendday' };
   const big = n >= 200 ? { BUY: px > e200[n] && e50[n] > e200[n], SELL: px < e200[n] && e50[n] < e200[n] } : { BUY: px > e100[n], SELL: px < e100[n] };
   const strongBar = rng >= 0.7 * a;
   const sides = {
     BUY: {
-      trend: px > e50[n] && e20[n] > e50[n] && e20[n] >= e20[n - 3] && ST.dir[n] === 1,
+      // a trend day is judged on today's own structure (above the fast averages, Supertrend up), not on the slower 50 EMA
+      trend: td.BUY ? px > e20[n] && e5[n] > e20[n] && ST.dir[n] === 1 : px > e50[n] && e20[n] > e50[n] && e20[n] >= e20[n - 3] && ST.dir[n] === 1,
       trigger: !!trig.BUY,
-      mom: R[n] >= 50 && R[n] <= 74 && S.k[n] > S.d[n] && S.k[n] < 92,
+      mom: td.BUY ? R[n] >= 55 && R[n] <= 85 : R[n] >= 50 && R[n] <= 74 && S.k[n] > S.d[n] && S.k[n] < 92,
       day: px > prevClose && px > dayOpen,
       htf: intraday ? bias === 'BULL' : big.BUY,
       range: strongBar && body > 0 && (c[n] - l[n]) >= 0.6 * rng,
     },
     SELL: {
-      trend: px < e50[n] && e20[n] < e50[n] && e20[n] <= e20[n - 3] && ST.dir[n] === -1,
+      trend: td.SELL ? px < e20[n] && e5[n] < e20[n] && ST.dir[n] === -1 : px < e50[n] && e20[n] < e50[n] && e20[n] <= e20[n - 3] && ST.dir[n] === -1,
       trigger: !!trig.SELL,
-      mom: R[n] >= 26 && R[n] <= 50 && S.k[n] < S.d[n] && S.k[n] > 8,
+      mom: td.SELL ? R[n] >= 15 && R[n] <= 45 : R[n] >= 26 && R[n] <= 50 && S.k[n] < S.d[n] && S.k[n] > 8,
       day: px < prevClose && px < dayOpen,
       htf: intraday ? bias === 'BEAR' : big.SELL,
       range: strongBar && body < 0 && (h[n] - c[n]) >= 0.6 * rng,
     },
   };
-  if (opts.setups) for (const sd of ['BUY', 'SELL']) if (trig[sd] && !opts.setups.includes(trig[sd])) { trig[sd] = null; sides[sd].trigger = false; }
   let best = null;
   for (const side of ['BUY', 'SELL']) { if (opts.side && side !== opts.side) continue; const chk = sides[side]; const score = Object.values(chk).filter(Boolean).length; if (!best || score > best.score) best = { side, chk, score }; }
   if (!best || !(best.score >= (opts.minScore || 5) && best.chk.trend && best.chk.trigger)) return null;
   if (opts.needHtf && !best.chk.htf) return null;
-  if ((bias === 'BULL' && best.side === 'SELL') || (bias === 'BEAR' && best.side === 'BUY')) return null; // never fight the bigger trend
-  const side = best.side, sgn = side === 'BUY' ? 1 : -1, setup = trig[side];
+  const setup = trig[best.side];
+  // against the daily trend: blocked unless the lab chose veto:false, and a trend day (the market's own move today) is never blocked
+  const against = (bias === 'BULL' && best.side === 'SELL') || (bias === 'BEAR' && best.side === 'BUY');
+  if (against && opts.veto !== false && setup !== 'trendday') return null;
+  const side = best.side, sgn = side === 'BUY' ? 1 : -1;
   const extreme = side === 'BUY' ? lo3 : hi3;
   let stopDist;
   const sk = opts.stopK || 1;
@@ -489,12 +505,14 @@ function evalIndexAt(P, n, mode, opts = {}) {
   const why = [];
   why.push(up ? `Uptrend: ${intraday ? '15-minute' : 'daily'} price ${f(px)} above the 50 EMA (${f(e50[n])}), 20 EMA above 50 EMA, Supertrend up` : `Downtrend: ${intraday ? '15-minute' : 'daily'} price ${f(px)} below the 50 EMA (${f(e50[n])}), 20 EMA below 50 EMA, Supertrend down`);
   if (setup === 'orb') why.push(`Opening-range ${up ? 'breakout above' : 'breakdown below'} ${f(up ? orHi : orLo)} (first 15 minutes)`);
+  else if (setup === 'trendday') why.push(`Trend day: ${f(Math.abs(px / prevClose - 1) * 100)}% ${up ? 'up' : 'down'} from yesterday's close, never back through the opening range (${f(orLo)}–${f(orHi)}), new closing ${up ? 'high' : 'low'} of the day`);
   else if (setup === 'pdhl') why.push(`Broke the previous day's ${up ? 'high' : 'low'} (${f(up ? P.pdh[n] : P.pdl[n])})`);
   else if (setup === 'breakout') why.push(`Closed ${up ? 'above the 20-day high' : 'below the 20-day low'}, a fresh break`);
   else why.push(up ? `Pullback to the 20 EMA (${f(e20[n])}) held and price turned up through the 5 EMA` : `Rally to the 20 EMA (${f(e20[n])}) failed and price turned down through the 5 EMA`);
   why.push(`RSI ${f(R[n])}, Stochastic ${f(S.k[n])}/${f(S.d[n])} agree`);
   why.push(intraday ? `Day structure: ${up ? 'above' : 'below'} both the previous close (${f(prevClose)}) and today's open (${f(dayOpen)})` : `Bigger trend: ${up ? 'above' : 'below'} the long-term average`);
   why.push(`Signal bar range ${f(rng / a)}x ATR`);
+  if (against) why.push(`Note: this is against the index's falling/rising daily trend (${bias === 'BEAR' ? 'down' : 'up'}), so treat it as a shorter, faster trade`);
   return { side, mode, entry, sl, targets, riskLabel: stopDist / px * 100 < (intraday ? 0.35 : 1.6) ? 'LOW' : stopDist / px * 100 < (intraday ? 0.5 : 2.5) ? 'MEDIUM' : 'HIGH',
     score: best.score, checks: best.chk, setup, engine: 'idx1', kind: 'index', rr: 1, riskPct: r2(stopDist / px * 100), atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
 }
@@ -570,6 +588,39 @@ function evalBreakIntra(P, n, opts = {}) {
     `${up ? 'Above' : 'Below'} session VWAP (${f(vw)})`, volR != null ? `Volume ${f(volR)}x the usual for this time of day` : 'Volume vs usual not available', `RSI ${f(R[n])}`,
     `Market backdrop: ${bias === 'MIXED' ? 'mixed' : bias === 'BULL' ? 'index up today' : 'index down today'}`];
   return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: best.score, checks: best.chk, setup, engine: 'v4', rs: null,
+    riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+}
+// ---- Stock intraday VWAP rejection / VWAP hold. Built to work in both directions and in any market:
+// SELL: a stock already weak on the day (below its open and yesterday's close, mostly below VWAP) bounces up to VWAP and
+// is rejected (closes back below it with a red bar). Shorts the failed bounce, not the breakdown: breakdowns in Indian
+// stocks often snap back as shorts cover. BUY is the mirror: a stock strong on the day dips to VWAP and holds.
+// Six checks: reject (mandatory), day (mandatory), vs Nifty today, Nifty's direction, momentum, volume.
+function evalVwapIntra(P, n, opts = {}) {
+  const { bars, c, h, l, o, A, R, vwap, dayFirst } = P;
+  const a = A[n], vw = vwap[n], first = dayFirst[n];
+  if (a == null || R[n] == null || vw == null || first < 1 || n - first < 2) return null;
+  const px = c[n], prevClose = c[first - 1], dayOpen = o[first], rng = Math.max(1e-9, h[n] - l[n]);
+  const dayPct = (px / prevClose - 1) * 100, idx = opts.idxTodayPct, rs = idx != null ? dayPct - idx : null;
+  let below = 0, above = 0; for (let j = first; j < n; j++) { if (vwap[j] == null) continue; if (c[j] < vwap[j]) below++; else if (c[j] > vwap[j]) above++; }
+  const tot = Math.max(1, n - first), hi2 = Math.max(h[n], h[n - 1]), lo2 = Math.min(l[n], l[n - 1]), volR = slotVolRatio(bars, n);
+  const sides = {
+    BUY: { reject: lo2 <= vw * 1.001 && px > vw && c[n] > o[n] && (c[n] - l[n]) / rng >= 0.6 && above / tot >= 0.6,
+      day: dayPct >= 0.3 && px > dayOpen, rs: rs != null && rs >= 0.5, mkt: idx != null && idx > 0, mom: R[n] >= 48 && R[n] <= 70, vol: volR != null && volR >= 1.0 },
+    SELL: { reject: hi2 >= vw * 0.999 && px < vw && c[n] < o[n] && (h[n] - c[n]) / rng >= 0.6 && below / tot >= 0.6,
+      day: dayPct <= -0.3 && px < dayOpen, rs: rs != null && rs <= -0.5, mkt: idx != null && idx < 0, mom: R[n] >= 30 && R[n] <= 52, vol: volR != null && volR >= 1.0 },
+  };
+  let best = null;
+  for (const side of ['BUY', 'SELL']) { if (opts.side && side !== opts.side) continue; const chk = sides[side], score = Object.values(chk).filter(Boolean).length; if (!best || score > best.score) best = { side, chk, score }; }
+  if (!best || !best.chk.reject || !best.chk.day || best.score < (opts.minScore || 5)) return null;
+  const side = best.side, sgn = side === 'BUY' ? 1 : -1, sk = opts.stopK || 1, up = side === 'BUY';
+  let stopDist = Math.max(1.0 * sk * a, (up ? px - lo2 : hi2 - px) + 0.2 * a); stopDist = Math.min(stopDist, 0.025 * px); stopDist = Math.max(stopDist, 0.004 * px);
+  const entry = tick(px), sl = tick(entry - sgn * stopDist), rr = EXITS[opts.exitI] || EXITS.A, targets = rr.map(m => tick(entry + sgn * stopDist * m));
+  const risk = stopDist / px * 100, f = x => r2(x);
+  const why = [up ? `Strong day: ${f(dayPct)}% up and above today's open, mostly above VWAP` : `Weak day: ${f(dayPct)}% down and below today's open, mostly below VWAP`,
+    up ? `Dipped to VWAP (${f(vw)}) and held: closed back above it near the bar's high` : `Bounced up to VWAP (${f(vw)}) and was rejected: closed back below it near the bar's low`,
+    rs != null ? `${rs >= 0 ? 'Stronger' : 'Weaker'} than Nifty today by ${f(Math.abs(rs))} points` : 'Nifty move today not available',
+    idx != null ? `Nifty ${idx >= 0 ? 'up' : 'down'} ${f(Math.abs(idx))}% today` : '', `RSI ${f(R[n])}`, volR != null ? `Volume ${f(volR)}x the usual for this time of day` : ''].filter(Boolean);
+  return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: best.score, checks: best.chk, setup: 'vwap', engine: 'v4', rs: rs == null ? null : f(rs),
     riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
 }
 // ---- Stock swing "squeeze" breakout: after an inside day or the narrowest range of 7 days, a close at a fresh 20-day high
@@ -675,11 +726,13 @@ async function backtest(barsBySym, opts = {}, yieldFn) {
 // then judged on the NEWER half it never saw).
 function product(spec) { return Object.entries(spec).reduce((acc, [k, vals]) => acc.flatMap(a => vals.map(v => ({ ...a, [k]: v }))), [{}]); }
 const LAB_GRID = {
-  index_intraday: product({ regime: ['any', 'b50'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'], endMin: [720, 795] }),
+  // veto: true = never trade against the index's daily trend (old behaviour); false = allowed (tested, not assumed)
+  index_intraday: product({ veto: [true, false], regime: ['any', 'b50'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'], endMin: [720, 795] }),
   index_swing: product({ regime: ['any', 'b50', 'b60'], minScore: [4, 5, 6], needHtf: [false, true], stopK: [0.75, 1, 1.4], exit: ['S', 'A', 'B'] }),
   stock_swing: product({ regime: ['any', 'b50', 'b60'], setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B'] }),
   // trimmed to what earlier runs actually chose (5-6 checks, tighter stops, nearer targets) so the lab fits the server's small CPU
-  stock_intraday: product({ idxAgree: [false, true], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
+  // 'index must agree' was never chosen in earlier runs, so it is dropped to make room for the VWAP setup (built-in index check)
+  stock_intraday: product({ idxAgree: [false], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);
@@ -687,4 +740,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

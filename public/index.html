@@ -1122,6 +1122,13 @@ const MACRO_BY_SECTOR = {
 function hashCode(str){let h=0;for(let i=0;i<str.length;i++){h=(h*31+str.charCodeAt(i))|0;}return h;}
 function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 function fmt(n,d=2){return Number(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});}
+// change in points from a price and its % change vs the previous close (exact: pct = price/prevClose - 1)
+function chgPts(price,pct){ price=Number(price); pct=Number(pct); if(price==null||pct==null||!isFinite(price)||!isFinite(pct)||pct<=-100) return null; return price-price/(1+pct/100); }
+// a call's move in points: rupees per share for stocks, premium points for options (before costs)
+function callPts(c){ const last=c&&(c.closed||c.status==='SL_HIT'||c.status==='TARGET_HIT')&&c.exit!=null?c.exit:c&&c.ltp; if(!c||last==null||c.entry==null) return null; return (last-c.entry)*(c.side==='SELL'?-1:1); }
+function ptsTxt(p){ return p==null?'':(p>=0?'+':'')+fmt(p,2)+' pts'; }
+// "+123.45 (+0.52%)": points and percent together
+function chgTxt(price,pct){ const pc=(pct>=0?'+':'')+fmt(pct,2)+'%', p=chgPts(price,pct); return p==null?pc:(p>=0?'+':'')+fmt(p,2)+' ('+pc+')'; }
 function sig(rnd,lo,hi){return lo+rnd()*(hi-lo);}
 
 /* ============================================================
@@ -1449,8 +1456,8 @@ function renderTicker(liveRows){
   if(liveRows) window.TICKER_ROWS=liveRows;
   const base = window.TICKER_ROWS || INDEX_LIST.map(r=>[r[1].toUpperCase().replace('BSE ',''),null,null,r[0]]);
   const idx = applyTickerPref(base);
-  document.getElementById('tickerBar').innerHTML = '<button class="btn" id="tickerEdit" title="Change the order of the indices or hide some" style="position:sticky;left:0;z-index:2;padding:4px 10px;font-size:12px;">Edit order</button>' + idx.map(([n,v,c,sym])=>`
-    <div ${sym?`style="cursor:pointer" onclick="selectStock('${sym}')" title="Open ${n}"`:''}><span class="idx-name">${n}</span><span class="idx-val ${c==null?'':c>=0?'up':'down'}">${v==null?'&mdash;':v} <small>${c==null?'':(c>=0?'+':'')+c.toFixed(2)+'%'}</small></span></div>`).join('');
+  document.getElementById('tickerBar').innerHTML = '<button class="btn" id="tickerEdit" title="Change the order of the indices or hide some" style="position:sticky;left:0;z-index:2;padding:4px 10px;font-size:12px;">Edit order</button>' + idx.map(([n,v,c,sym,raw])=>`
+    <div ${sym?`style="cursor:pointer" onclick="selectStock('${sym}')" title="Open ${n}"`:''}><span class="idx-name">${n}</span><span class="idx-val ${c==null?'':c>=0?'up':'down'}">${v==null?'&mdash;':v} <small>${c==null?'':raw!=null?chgTxt(raw,c):(c>=0?'+':'')+c.toFixed(2)+'%'}</small></span></div>`).join('');
   document.getElementById('tickerEdit').onclick=openTickerEditor;
 }
 function openTickerEditor(){
@@ -1552,7 +1559,7 @@ function renderStockHead(d){
       <div class="stock-name">${d.name} &middot; ${d.sector} &middot; NSE / BSE: ${d.symbol}</div>
       <div class="stock-price">
         <button class="star-btn ${watched?'active':''}" id="starBtn" title="Add to watchlist">${watched?'&#9733;':'&#9734;'}</button>
-        &#8377;<span id="livePrice">${fmt(d.price)}</span><span class="chg ${d.changePct>=0?'up':'down'}" id="liveChg">${d.changePct>=0?'&#9650;':'&#9660;'} ${Math.abs(d.changePct).toFixed(2)}%</span>
+        &#8377;<span id="livePrice">${fmt(d.price)}</span><span class="chg ${d.changePct>=0?'up':'down'}" id="liveChg">${d.changePct>=0?'&#9650;':'&#9660;'} ${chgTxt(d.price,d.changePct).replace(/[+-]/g,'')}</span>
         <span class="live-dot" id="liveStatus" style="margin-left:8px;color:var(--amber);background:rgba(240,169,58,.12);"><span class="pulse" style="background:var(--amber);"></span>Connecting&hellip;</span>
       </div>
     </div>
@@ -1581,7 +1588,7 @@ function renderWatchlist(){
     return `<div style="overflow-x:auto;"><table><thead><tr><th>Stock</th><th>Sector</th><th>Price</th><th>Change</th><th>Signal</th><th></th></tr></thead><tbody>
     ${rows.map(d=>`<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong></td><td class="lbl">${d.sector}</td>
       <td>&#8377;<span id="wl-price-${d.symbol}">${fmt(d.price,2)}</span></td>
-      <td class="${d.changePct>=0?'up':'down'}" id="wl-chg-${d.symbol}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
+      <td class="${d.changePct>=0?'up':'down'}" id="wl-chg-${d.symbol}">${chgTxt(d.price,d.changePct)}</td>
       <td><span class="signal-chip sig-${d.signal}">${d.signalLabel}</span></td>
       <td><button class="star-btn active" data-remove="${d.symbol}">&#9733;</button></td></tr>`).join('')}
     </tbody></table></div>`;
@@ -1600,7 +1607,7 @@ function renderWatchlist(){
       if(priceEl) priceEl.textContent=fmt(q.price,2);
       if(chgEl){
         chgEl.className=(q.changePct>=0?'up':'down');
-        chgEl.textContent=(q.changePct>=0?'+':'')+fmt(q.changePct,2)+'%';
+        chgEl.textContent=chgTxt(q.price,q.changePct);
       }
     }catch(e){}
   });
@@ -1621,7 +1628,7 @@ function overviewCards(d){
   if(isIndexSym(d.symbol)){
     const hi=d.wk52High, lo=d.wk52Low;
     return [
-      ["Last price",R?`&#8377;${fmt(d.price,2)}`:W, R?`${d.changePct>=0?'+':''}${fmt(d.changePct,2)}% today`:'',R],
+      ["Last price",R?`&#8377;${fmt(d.price,2)}`:W, R?`${chgTxt(d.price,d.changePct)} today`:'',R],
       ["52W high",R?fmt(hi,0):W, R?`${fmt((hi-d.price)/hi*100,1)}% below`:'',R],
       ["52W low",R?fmt(lo,0):W, R?`${fmt((d.price-lo)/lo*100,1)}% above`:'',R],
       ["RSI (14)",R?fmt(d.rsi,1):W, R?(d.rsi>=70?'Overbought zone':d.rsi<=30?'Oversold zone':'Neutral zone'):'',R],
@@ -1873,7 +1880,7 @@ function renderPeers(d){
     fetch('/api/quote/'+encodeURIComponent(sym),{cache:'no-store'}).then(r=>r.json()).then(q=>{
       if(q.error||q.price==null) throw 0;
       set('pp-'+sym,'&#8377;'+fmt(q.price,2));
-      const c=q.changePct; set('pc-'+sym, c==null?'&mdash;':`<span class="${c>=0?'up':'down'}">${c>=0?'+':''}${fmt(c,2)}%</span>`);
+      const c=q.changePct; set('pc-'+sym, c==null?'&mdash;':`<span class="${c>=0?'up':'down'}">${chgTxt(q.price,c)}</span>`);
     }).catch(()=>{ set('pp-'+sym,'&mdash;'); set('pc-'+sym,'&mdash;'); });
     loadFund(sym).then(f=>{ const ok=f&&!f.error; set('pe-'+sym,ok?fvl(f.pe,1):'&mdash;'); set('pb-'+sym,ok?fvl(f.pb,2):'&mdash;'); set('pr-'+sym,ok?fvl(f.roe,1,'%'):'&mdash;'); set('po-'+sym,ok?fvl(f.roce,1,'%'):'&mdash;'); });
   });
@@ -2122,7 +2129,7 @@ function renderScreener(){
   body.innerHTML = rows.map(d=>{
     const h = d.horizons[displayHorizon];
     return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong>${window.FNO_SET&&window.FNO_SET.has(d.symbol)?'<span class="fno-badge" data-fno="'+d.symbol+'" title="Options &amp; futures available — click to open the options scan">F&amp;O</span>':''}</td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
-      <td class="${d.changePct>=0?'up':'down'}">${d.changePct>=0?'+':''}${fmt(d.changePct,2)}%</td>
+      <td class="${d.changePct>=0?'up':'down'}">${chgTxt(d.price,d.changePct)}</td>
       <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
       <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmtVol(d.volShares!=null?d.volShares:d.volumeCr*1e7)}</td>
       <td>${/buy|sell/.test(h.signal)?window.monBtn({source:'screener',symbol:d.symbol,side:/sell/.test(h.signal)?'SELL':'BUY',mode:displayHorizon==='intraday'?'intraday':'swing',label:'Screener '+h.signalLabel+' ('+displayHorizon+')',note:'Screener '+h.signalLabel+' on the '+displayHorizon+' view, score '+h.score+'.'},'+ Add'):''}</td></tr>`;
@@ -2420,12 +2427,12 @@ window.cbtBtn=function(c){
     const pnlCls=c.pnlPct>0?'up':c.pnlPct<0?'down':'';
     const opt=c.kind==='option';
     const optBox=opt?`<div class="tc-an" style="margin:6px 0"><b>Contract:</b> ${esc(c.underlying)} ${c.strike} ${c.optType==='CE'?'Call':'Put'} · <b>Expiry ${esc(c.expiryLabel)}</b> (${c.dte} day${c.dte===1?'':'s'} left when called)${c.lotSize?' · lot '+c.lotSize:''}${c.delta?' · delta ~'+c.delta:''}<br><b>Why this expiry:</b> ${esc(c.expiryWhy)}<br><b>Index levels:</b> ${esc(c.underlying)} ${c.dir==='BUY'?'up':'down'} signal at ${Number(c.spot.entry).toLocaleString('en-IN')}; targets ${c.spot.targets.map(x=>Number(x).toLocaleString('en-IN')).join(' / ')}; <b>exit if it closes ${c.dir==='BUY'?'below':'above'} ${Number(c.spotSl).toLocaleString('en-IN')}</b>${c.mode==='intraday'?' · square off by 15:15':''}<br><span class="metric-sub">Prices above are the option premium (per unit${c.lotSize?', one lot = '+c.lotSize+' units':''}). Options can lose most of their value quickly; size so a full loss of the premium is acceptable.</span></div>`:'';
-    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span>${opt?`<span title="You buy the option; you never sell or write it">Option buy · ${c.optType==='CE'?'Call':'Put'}</span>`:''}<span>${c.mode==='intraday'?'Intraday':opt?`Multi-day · exit within ${c.holdDays||14} days`:'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span>${c.setup==='bounce'?'<span title="Oversold stock turning up while still below its 50 EMA. Short-lived; respect the stop.">Counter-trend bounce</span>':''}${({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout'})[c.setup]?'<span>'+({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout'})[c.setup]+'</span>':''}<span title="Checks passed out of 6">${c.score}/6 checks</span>${c.unproven?`<span style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">🧪 Unproven · paper only</span>`:''}</div>${c.params?`<div class="metric-sub">Rules: ${esc(c.params)}</div>`:''}</div>
+    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span>${opt?`<span title="You buy the option; you never sell or write it">Option buy · ${c.optType==='CE'?'Call':'Put'}</span>`:''}<span>${c.mode==='intraday'?'Intraday':opt?`Multi-day · exit within ${c.holdDays||14} days`:'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span>${c.setup==='bounce'?'<span title="Oversold stock turning up while still below its 50 EMA. Short-lived; respect the stop.">Counter-trend bounce</span>':''}${({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout',vwap:'VWAP rejection / hold',trendday:'Trend day'})[c.setup]?'<span>'+({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout',vwap:'VWAP rejection / hold',trendday:'Trend day'})[c.setup]+'</span>':''}<span title="Checks passed out of 6">${c.score}/6 checks</span>${c.unproven?`<span style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">🧪 Unproven · paper only</span>`:''}</div>${c.params?`<div class="metric-sub">Rules: ${esc(c.params)}</div>`:''}</div>
       <div style="text-align:right"><span class="tc-tags"><span>${LABEL[c.status]||c.status}</span></span><div class="metric-sub">${when(c.t)}</div><div style="margin-top:4px">${window.cbtBtn(c)}</div></div></div>
-      <div class="tc-grid"><div>ENTRY<b>${inr(c.entry)}</b></div><div>${c.closed?'EXIT':'LTP'}<b>${inr(c.closed?c.exit:c.ltp)}</b></div><div>ACTIVE SL${c.targetsHit?' (trailed)':''}<b>${inr(c.activeSl)}</b></div><div>${c.closed?'RESULT':'RUNNING P/L'}<b class="${pnlCls}">${c.pnlPct>0?'+':''}${c.pnlPct}%</b></div></div>
+      <div class="tc-grid"><div>ENTRY<b>${inr(c.entry)}</b></div><div>${c.closed?'EXIT':'LTP'}<b>${inr(c.closed?c.exit:c.ltp)}</b></div><div>ACTIVE SL${c.targetsHit?' (trailed)':''}<b>${inr(c.activeSl)}</b></div><div>${c.closed?'RESULT':'RUNNING P/L'}<b class="${pnlCls}">${c.pnlPct>0?'+':''}${c.pnlPct}%</b><span class="${pnlCls}" style="font-size:11px;">${ptsTxt(callPts(c))}${c.kind==='option'?' premium':''}</span></div></div>
       <div class="tc-ms">${ms}</div>
       ${optBox}
-      ${c.checks?`<div class="tc-tags" style="margin:4px 0;">${(('vwap' in c.checks)?[['trigger',c.setup==='pdhl'?'Prev-day break':'Opening-range break'],['vwap','VWAP side'],['vol','Volume'],['mom','Momentum'],['day','Day structure'],['mkt','Market']]:('trigger' in c.checks&&'rs' in c.checks)?[['trigger','Tight-range breakout'],['trend','Trend'],['vol','Volume'],['mom','Momentum'],['rs','Vs index'],['mkt','Market']]:('trigger' in c.checks)?[['trend','Trend'],['trigger','Trigger'],['mom','Momentum'],['day','Day structure'],['htf','Bigger trend'],['range','Bar range']]:('entry' in c.checks)?[['trend','Trend'],['entry','Pullback entry'],['mom','Momentum'],['rs','Vs index'],['vol','Volume'],['mkt','Market']]:[['ema','5/20 EMA'],['trend','50 EMA trend'],['st','Supertrend'],['stoch','Stochastic'],['rsi','RSI'],['vol','Volume breakout']]).map(k=>`<span style="color:var(--${c.checks[k[0]]?'green':'text2'})">${c.checks[k[0]]?'✓':'✗'} ${k[1]}</span>`).join('')}</div>`:''}
+      ${c.checks?`<div class="tc-tags" style="margin:4px 0;">${(('reject' in c.checks)?[['reject',c.side==='BUY'?'Held VWAP':'Rejected at VWAP'],['day','Day structure'],['rs','Vs Nifty today'],['mkt','Nifty direction'],['mom','Momentum'],['vol','Volume']]:('vwap' in c.checks)?[['trigger',c.setup==='pdhl'?'Prev-day break':'Opening-range break'],['vwap','VWAP side'],['vol','Volume'],['mom','Momentum'],['day','Day structure'],['mkt','Market']]:('trigger' in c.checks&&'rs' in c.checks)?[['trigger','Tight-range breakout'],['trend','Trend'],['vol','Volume'],['mom','Momentum'],['rs','Vs index'],['mkt','Market']]:('trigger' in c.checks)?[['trend','Trend'],['trigger','Trigger'],['mom','Momentum'],['day','Day structure'],['htf','Bigger trend'],['range','Bar range']]:('entry' in c.checks)?[['trend','Trend'],['entry','Pullback entry'],['mom','Momentum'],['rs','Vs index'],['vol','Volume'],['mkt','Market']]:[['ema','5/20 EMA'],['trend','50 EMA trend'],['st','Supertrend'],['stoch','Stochastic'],['rsi','RSI'],['vol','Volume breakout']]).map(k=>`<span style="color:var(--${c.checks[k[0]]?'green':'text2'})">${c.checks[k[0]]?'✓':'✗'} ${k[1]}</span>`).join('')}</div>`:''}
       <div class="tc-an"><b>Analysis:</b> ${esc(c.analysis)}</div></div>`;
   }
   function draw(){
@@ -2584,17 +2591,65 @@ window.cbtBtn=function(c){
       <div><div class="cm-bar"><i style="left:${pos(c.sl)}%;width:${Math.abs(pos(c.entry)-pos(c.sl))}%;background:rgba(255,90,106,.45)"></i><i style="left:${Math.min(pos(c.entry),pos(tl))}%;width:${Math.abs(pos(tl)-pos(c.entry))}%;background:rgba(31,191,117,.45)"></i><span class="cm-mark" style="left:calc(${pos(px)}% - 1px)"></span></div>
         <div class="cm-sub">SL ${num(c.activeSl)}${c.targetsHit?' (trailed)':''} · Entry ${num(c.entry)} · T${(c.targetsHit||0)+1} ${nxt!=null?num(nxt):'—'}</div></div>
       ${done?`<div><b>${num(c.exit)}</b><div class="cm-sub">Exit price${c.exitT?' · '+tm(c.exitT):''}</div></div>
-      <div><b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b><div class="cm-sub">Final result${c.targetsHit?' · T'+c.targetsHit+' hit':''} (after costs)</div></div></div>`
+      <div><b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b> <span class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}" style="font-size:12px;">${ptsTxt(callPts(c))}</span><div class="cm-sub">Final result${c.targetsHit?' · T'+c.targetsHit+' hit':''} (after costs)</div></div></div>`
       :`<div><b>${num(c.ltp)}</b><div class="cm-sub">LTP</div></div>
-      <div><b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b><div class="cm-sub">${c.targetsHit?('T'+c.targetsHit+' done · '):''}SL ${toSl.toFixed(1)}% away${toT!=null?' · T'+((c.targetsHit||0)+1)+' '+toT.toFixed(1)+'% away':''}</div></div></div>`}`;
+      <div><b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b> <span class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}" style="font-size:12px;">${ptsTxt(callPts(c))}</span><div class="cm-sub">${c.targetsHit?('T'+c.targetsHit+' done · '):''}SL ${toSl.toFixed(1)}% (${fmt(Math.abs(c.ltp-c.activeSl),2)} pts) away${toT!=null?' · T'+((c.targetsHit||0)+1)+' '+toT.toFixed(1)+'% away':''}</div></div></div>`}`;
   }
   function eodBox(x,title){
     if(!x) return '';
     return `<div class="cm-box"><h4>${title||'End of day '+esc(x.date)}</h4><div class="cm-kpis"><div>New<b>${x.created.total}</b></div><div>Closed<b>${x.closed.total}</b></div><div>Wins / losses<b>${x.closed.wins} / ${x.closed.losses}</b></div><div>Net closed<b class="${x.closed.netPct>0?'cm-b':x.closed.netPct<0?'cm-s':''}">${sg(x.closed.netPct)}</b></div>
       <div>Targets hit<b>${x.targetHits}</b></div><div>Stops hit<b>${x.slHits}</b></div><div>Open now<b>${x.active.total}</b></div><div>Open running<b class="${x.active.openPnlPct>0?'cm-b':x.active.openPnlPct<0?'cm-s':''}">${sg(x.active.openPnlPct)}</b></div></div>
       <div class="cm-sub" style="margin-top:8px;">New: buy ${x.created.buy}, sell ${x.created.sell}; intraday ${x.created.intraday}, swing ${x.created.swing}.${x.best?` Best ${esc(x.best.symbol)} ${sg(x.best.pnlPct)}.`:''}${x.worst&&x.best&&x.worst.symbol!==x.best.symbol?` Worst ${esc(x.worst.symbol)} ${sg(x.worst.pnlPct)}.`:''} ${x.allTime&&x.allTime.winRate!=null?`All-time win rate ${x.allTime.winRate}% over ${x.allTime.closed} closed, expectancy ${sg(x.allTime.expectancy)} per call.`:''}</div>
-      ${x.closedList&&x.closedList.length?`<div style="margin-top:8px;font-size:12px;">${x.closedList.map(c=>`<div class="cm-ev"><b>${esc(c.symbol)}</b> <span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> ${c.mode} · ${esc(String(c.status).replace('_',' '))} · <b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b></div>`).join('')}</div>`:''}</div>`;
+      ${x.closedList&&x.closedList.length?`<div style="margin-top:8px;font-size:12px;">${x.closedList.map(c=>`<div class="cm-ev"><b>${esc(c.symbol)}</b> <span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> ${c.mode} · ${esc(String(c.status).replace('_',' '))} · <b class="${c.pnlPct>0?'cm-b':c.pnlPct<0?'cm-s':''}">${sg(c.pnlPct)}</b> <span class="cm-sub">${num(c.entry)} → ${num(c.exit!=null?c.exit:c.ltp)} · ${ptsTxt(callPts({...c,closed:true}))}</span></div>`).join('')}</div>`:''}</div>`;
   }
+  // ---- share the monitor: plain text or a PNG image on the clipboard (download as a fallback); uses the current filter ----
+  const cmStat=c=>c.closed?({SL_HIT:'STOP HIT',TARGET_HIT:'ALL TARGETS',PROFIT:'PROFIT (trailed)',BREAKEVEN:'AT ENTRY',EXPIRED:'TIME EXIT'}[c.status]||c.status):(c.targetsHit?'T'+c.targetsHit+' done':'OPEN');
+  const cmName=c=>c.symbol+(c.kind==='option'&&c.expiryLabel?' ('+c.expiryLabel+')':'');
+  function monSnap(){ const inF=c=>srcF==='all'||srcOf(c)===srcF;
+    const act=(data.active||[]).filter(inF), shut=(data.closed||[]).filter(inF), today=pickSum(data.today), r=x=>Math.round(x*100)/100;
+    const now=new Date().toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
+    return {act,shut,today,now,title:'Calls Monitor'+(srcF==='all'?'':' · '+SRC[srcF]),
+      w:shut.filter(c=>c.pnlPct>0.05).length, l:shut.filter(c=>c.pnlPct<-0.05).length, net:r(shut.reduce((s2,c)=>s2+(c.pnlPct||0),0)), run:r(act.reduce((s2,c)=>s2+(c.pnlPct||0),0))}; }
+  function monText(){ const S=monSnap(), L=[S.title+' — '+S.now,''];
+    L.push('Watching '+S.act.length+' · running '+sg(S.run)+' (sum of %)');
+    L.push('Closed today '+S.shut.length+' ('+S.w+'W / '+S.l+'L) · net '+sg(S.net)+' (sum of %, after costs)');
+    if(S.today) L.push('New today '+S.today.created.total+' (buy '+S.today.created.buy+', sell '+S.today.created.sell+'; intraday '+S.today.created.intraday+', swing '+S.today.created.swing+') · targets hit '+S.today.targetHits+' · stops hit '+S.today.slHits);
+    const line=c=>'  '+cmName(c)+' | '+c.side+' '+c.mode+' | entry '+num(c.entry)+' → '+(c.closed?'exit ':'LTP ')+num(c.closed?c.exit:c.ltp)+' | '+sg(c.pnlPct)+' ('+ptsTxt(callPts(c))+') | '+cmStat(c)+(c.closed?'':' | SL '+num(c.activeSl));
+    if(S.act.length){ L.push('','OPEN ('+S.act.length+')'); S.act.forEach(c=>L.push(line(c))); }
+    if(S.shut.length){ L.push('','CLOSED TODAY ('+S.shut.length+')'); S.shut.forEach(c=>L.push(line(c))); }
+    L.push('','% is after costs; points are the price move (₹ per share, or option premium) before costs. Rule-based screen, paper testing, not investment advice.');
+    return L.join('\n'); }
+  function monCanvas(){ const S=monSnap(), rows=[...S.act.map(c=>({c,g:'OPEN'})),...S.shut.map(c=>({c,g:'CLOSED'}))];
+    const W=1400, rh=34, top=150, H=top+Math.max(1,rows.length)*rh+(S.act.length&&S.shut.length?30:0)+60, sc=2;
+    const cv=document.createElement('canvas'); cv.width=W*sc; cv.height=H*sc; const x=cv.getContext('2d'); x.scale(sc,sc);
+    x.fillStyle='#0f1522'; x.fillRect(0,0,W,H);
+    const col=v=>v==null?'#8a94a6':v>0.05?'#26c281':v<-0.05?'#ef5350':'#e6ebf5', F=(w,z)=>x.font=(w?'bold ':'')+z+'px system-ui,Segoe UI,Arial';
+    const fit=(t,w)=>{ t=String(t); if(x.measureText(t).width<=w) return t; while(t.length&&x.measureText(t+'…').width>w) t=t.slice(0,-1); return t+'…'; };
+    F(1,22); x.fillStyle='#e6ebf5'; x.fillText(S.title,24,40); F(0,13); x.fillStyle='#8a94a6'; x.fillText(S.now+' IST',24,62);
+    const kp=[['Watching',String(S.act.length),null],['Running',sg(S.run),S.run],['Closed today',S.shut.length+' ('+S.w+'W / '+S.l+'L)',null],['Net closed',sg(S.net),S.net]];
+    if(S.today) kp.push(['New today',String(S.today.created.total),null],['Targets / stops',S.today.targetHits+' / '+S.today.slHits,null]);
+    kp.forEach(([k,v,n],i)=>{ const cx=24+i*225; F(0,11); x.fillStyle='#8a94a6'; x.fillText(k.toUpperCase(),cx,90); F(1,18); x.fillStyle=n==null?'#e6ebf5':col(n); x.fillText(v,cx,114); });
+    const cols=[['Symbol',24],['Side',330],['Entry',450],['LTP / exit',560],['P/L %',680],['Points',780],['Status',900],['Stop',1060],['Source',1170]];
+    F(1,11); x.fillStyle='#8a94a6'; cols.forEach(([t,cx])=>x.fillText(t.toUpperCase(),cx,top-12));
+    let y=top, prev=null;
+    rows.forEach(({c,g},i)=>{ if(prev&&prev!==g){ F(1,11); x.fillStyle='#8a94a6'; x.fillText('CLOSED TODAY · frozen at the exit price',24,y+18); y+=30; } prev=g;
+      x.fillStyle=i%2?'#121a29':'#0f1522'; x.fillRect(12,y,W-24,rh); x.fillStyle='#1f2733'; x.fillRect(12,y,W-24,1);
+      const p=callPts(c), ty=y+22; F(1,14); x.fillStyle=g==='CLOSED'?'#aab3c3':'#e6ebf5'; x.fillText(fit(cmName(c),295),24,ty);
+      F(0,13); x.fillStyle=c.side==='BUY'?'#26c281':'#ef5350'; x.fillText(c.side+' · '+c.mode,330,ty); x.fillStyle='#e6ebf5'; x.fillText(num(c.entry),450,ty); x.fillText(num(c.closed?c.exit:c.ltp),560,ty);
+      F(1,14); x.fillStyle=col(c.pnlPct); x.fillText(sg(c.pnlPct),680,ty); F(0,13); x.fillText(ptsTxt(p),780,ty);
+      x.fillStyle=g==='CLOSED'?col(c.pnlPct):'#e6ebf5'; x.fillText(fit(cmStat(c),150),900,ty); x.fillStyle='#8a94a6'; x.fillText(c.closed?'—':num(c.activeSl),1060,ty);
+      x.fillText(fit(srcOf(c)==='calls'?(c.kind==='option'?'Index option':'Trade call')+(c.unproven?' · unproven':''):srcOf(c)==='pattern'?'Pattern':'Screener',210),1170,ty); y+=rh; });
+    if(!rows.length){ F(0,13); x.fillStyle='#8a94a6'; x.fillText('Nothing to show for this filter.',24,top+20); }
+    F(0,11); x.fillStyle='#5d6779'; x.fillText('% after costs; points = price move (₹ per share, or option premium) before costs. Rule-based screen, paper testing, not investment advice.',24,H-18);
+    return cv; }
+  async function monCopy(kind,btn){ const msg=view&&view.querySelector('#cmCopyMsg'), say=t=>{ if(msg) msg.textContent=t; };
+    try{
+      if(kind==='text'){ const t=monText(); try{ await navigator.clipboard.writeText(t); say('✓ Copied as text — paste it anywhere'); }
+        catch(err){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([t],{type:'text/plain'})); a.download='calls-monitor.txt'; a.click(); say('This browser does not allow copying here, so it was downloaded as a text file'); } }
+      else { const blob=await new Promise(r=>monCanvas().toBlob(r,'image/png'));
+        try{ await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]); say('✓ Image copied — paste it into WhatsApp, chat or email'); }
+        catch(err){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='calls-monitor.png'; a.click(); say('This browser does not allow copying images, so it was downloaded instead'); } }
+    }catch(err){ say('Could not copy: '+err.message); } }
   function draw(){
     if(!view) return; const b=view.querySelector('#cmBody'); if(!data){ b.innerHTML='<div class="metric-sub">Loading…</div>'; return; }
     const inF=c=>srcF==='all'||srcOf(c)===srcF;
@@ -2605,6 +2660,7 @@ window.cbtBtn=function(c){
     const sec=(a,f)=>a.filter(f);
     b.innerHTML=`
       <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Screener &amp; scans')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><button class="btn" data-cmcopy="text" style="font-size:12px;padding:5px 10px;">📋 Copy summary as text</button><button class="btn" data-cmcopy="image" style="font-size:12px;padding:5px 10px;">🖼 Copy summary as image</button><span class="metric-sub" id="cmCopyMsg">${srcF==='all'?'Copies everything shown below':'Copies the '+SRC[srcF]+' view'}</span></div>
       <div class="cm-kpis cm-k5" style="margin-bottom:12px;"><div>Watching<b>${act.length}</b></div><div>Closed today<b>${shut.length} <span style="font-size:11px;font-weight:400">(${shut.filter(c=>c.pnlPct>0.05).length}W / ${shut.filter(c=>c.pnlPct<-0.05).length}L, ${sg(Math.round(shut.reduce((s,c)=>s+(c.pnlPct||0),0)*100)/100)})</span></b></div><div>In profit<b class="cm-b">${sec(act,c=>c.pnlPct>0.05).length}</b></div><div>In loss<b class="cm-s">${sec(act,c=>c.pnlPct<-0.05).length}</b></div><div>Combined running<b class="${pn>0?'cm-b':pn<0?'cm-s':''}">${sg(Math.round(pn*100)/100)}</b></div></div>
       <div class="cm-cols"><div>
         <div class="cm-box"><h4>Live watchlist <span class="cm-sub">(Trade Calls are added automatically; add chart patterns and screener picks with their "+ Monitor" buttons, and remove them here)</span></h4>
@@ -2619,6 +2675,7 @@ window.cbtBtn=function(c){
       </div></div>
       <div class="tc-disc">${data.upstox?'':'<b style="color:var(--red)">Upstox is not connected, so live prices cannot update.</b> '}${data.persisted?'History is saved.':'<b>Storage (Upstash) is not set up, so calls and summaries are lost when the server restarts.</b>'} Prices refresh every ${data.market==='open'?'15':'60'} seconds while this page is open; the server also checks every 5 minutes through the scheduled check even when the page is closed, and sends Telegram alerts. Sound only plays while this page is open in a browser tab. Rule-based screen, not investment advice.</div>`;
     b.querySelector('#cmBt').onclick=runBt;
+    b.querySelectorAll('[data-cmcopy]').forEach(x=>x.onclick=()=>monCopy(x.dataset.cmcopy,x));
     b.querySelectorAll('[data-cmsrc]').forEach(x=>x.onclick=()=>{ srcF=x.dataset.cmsrc; LS.set('cmSrc',srcF); draw(); });
     b.querySelectorAll('[data-cmrm]').forEach(x=>x.onclick=async()=>{ if(!confirm('Stop monitoring this item?')) return; x.textContent='Removing…'; try{ await fetch('/api/calls/monitor/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:x.dataset.cmrm})}); }catch(e){} await poll(); });
     b.querySelector('#cmEodNow').onclick=async e=>{ e.target.textContent='Working…'; try{ await fetch('/api/calls/eod/run',{method:'POST'}); }catch(x){} await poll(); };
@@ -2698,13 +2755,13 @@ function renderHome(){
       <div class="panel">
         <h3 style="color:var(--green);">Top gainers <span class="metric-sub" id="gainers-status" style="font-size:11px;">updating…</span></h3>
         <div id="gainers-list">
-          ${[...all].sort((a,b)=>b.changePct-a.changePct).slice(0,5).map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">+${d.changePct.toFixed(2)}%</span></div>`).join('')}
+          ${[...all].sort((a,b)=>b.changePct-a.changePct).slice(0,5).map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">${chgTxt(d.price,d.changePct)}</span></div>`).join('')}
         </div>
       </div>
       <div class="panel">
         <h3 style="color:var(--red);">Top losers <span class="metric-sub" id="losers-status" style="font-size:11px;">updating…</span></h3>
         <div id="losers-list">
-          ${[...all].sort((a,b)=>a.changePct-b.changePct).slice(0,5).map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="down">${d.changePct.toFixed(2)}%</span></div>`).join('')}
+          ${[...all].sort((a,b)=>a.changePct-b.changePct).slice(0,5).map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="down">${chgTxt(d.price,d.changePct)}</span></div>`).join('')}
         </div>
       </div>
     </div>
@@ -2732,7 +2789,7 @@ function renderHome(){
       if(valEl) valEl.textContent = fmt(data.price, 2);
       if(chgEl){
         chgEl.className = 'metric-sub ' + (data.changePct>=0?'up':'down');
-        chgEl.textContent = (data.changePct>=0?'+':'') + data.changePct.toFixed(2) + '%';
+        chgEl.textContent = chgTxt(data.price, data.changePct);
       }
     }catch(e){
       const chgEl = document.getElementById('idx-chg-'+id);
@@ -2768,8 +2825,8 @@ function renderHome(){
         const bpEl=document.getElementById('home-breadth-pct');
         const gsEl=document.getElementById('gainers-status');
         const lsEl=document.getElementById('losers-status');
-        if(gEl) gEl.innerHTML=topGainers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">+${d.changePct.toFixed(2)}%</span></div>`).join('');
-        if(lEl) lEl.innerHTML=topLosers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="down">${d.changePct.toFixed(2)}%</span></div>`).join('');
+        if(gEl) gEl.innerHTML=topGainers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">${chgTxt(d.price,d.changePct)}</span></div>`).join('');
+        if(lEl) lEl.innerHTML=topLosers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="down">${chgTxt(d.price,d.changePct)}</span></div>`).join('');
         if(bEl) bEl.innerHTML=`<span class="up">▲ ${adv}</span> &nbsp; <span class="down">▼ ${dec}</span>`;
         if(bpEl) bpEl.textContent=`${((adv/liveData.length)*100).toFixed(0)}% advancing (${liveData.length}/${STOCKS.length} loaded)`;
         if(gsEl) gsEl.textContent=`${liveData.length}/${STOCKS.length} loaded`;
@@ -3396,6 +3453,7 @@ function renderHeatmap(){
       tile.style.border = `1px solid ${border}`;
       tile.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:4px;">${idx.label}</div>
         <div style="font-size:18px;font-weight:700;" class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
+        <div class="${chg>=0?'up':'down'}" style="font-size:12px;">${(p=>p==null?'':(p>=0?'+':'')+fmt(p,2)+' pts')(chgPts(data.price,chg))}</div>
         <div class="metric-sub">₹${fmt(data.price,2)} &middot; 📅 seasonality</div>`;
     }catch(e){
       const tile = indexPlaceholders[idx.yahoo];
@@ -3554,7 +3612,7 @@ document.getElementById('cmpRunBtn')?.addEventListener('click', async ()=>{
   const pf=v=>v==null?D:`<span class="${v>=0?'up':'down'}">${v>=0?'+':''}${fmt(v,2)}%</span>`;
   const metrics = [
     ['Price (daily close)', d=>R(d)?'₹'+fmt(d.price,2):D],
-    ['Last-day change', d=>R(d)?pf(d.changePct):D],
+    ['Last-day change', d=>R(d)?`<span class="${d.changePct>=0?'up':'down'}">${chgTxt(d.price,d.changePct)}</span>`:D],
     ['Sector', d=>d.sector],
     ['P/E', d=>F(d,'pe',1)], ['P/B', d=>F(d,'pb',2)], ['ROE', d=>F(d,'roe',1,'%')], ['ROCE', d=>F(d,'roce',1,'%')], ['EV/EBITDA', d=>F(d,'evEbitda',1)],
     ['1M return', d=>R(d)?pf(d.perf.m1):D], ['3M return', d=>R(d)?pf(d.perf.m3):D], ['1Y return', d=>R(d)?pf(d.perf.y1):D],
@@ -3989,7 +4047,7 @@ function refreshLiveDom(d){
   window.LAST_TICK=Date.now();
   const lp=document.getElementById('livePrice'); if(lp) lp.textContent=fmt(d.price);
   const chg=document.getElementById('liveChg');
-  if(chg){ chg.className='chg '+(d.changePct>=0?'up':'down'); chg.innerHTML=`${d.changePct>=0?'&#9650;':'&#9660;'} ${Math.abs(d.changePct).toFixed(2)}%`; }
+  if(chg){ chg.className='chg '+(d.changePct>=0?'up':'down'); chg.innerHTML=`${d.changePct>=0?'&#9650;':'&#9660;'} ${chgTxt(d.price,d.changePct).replace(/[+-]/g,'')}`; }
   if(window.ACTIVE_VTAB==='overview'){ renderOverview(d); renderSignal(d); }
   if(window.ProChart) ProChart.liveTick(d.price);
 }
@@ -4067,7 +4125,7 @@ function renderGlobalBar(items){
   el.innerHTML='<span class="idx-name" style="align-self:center;font-weight:600;padding-right:4px;" title="Overseas markets that influence the Indian open">GLOBAL</span>'+items.map(i=>{
     if(i.error||i.price==null) return `<div title="Live price not available: ${(i.error||'').replace(/"/g,'')}"><span class="idx-name">${i.name}</span><span class="idx-val" style="color:var(--text3)">&mdash;</span></div>`;
     const c=i.changePct||0, closed=i.marketState&&i.marketState!=='REGULAR'&&i.key!=='GIFTNIFTY';
-    return `<div title="${closed?'Market closed, showing last close':'Live'}"><span class="idx-name">${i.name}${closed?' (closed)':''}</span><span class="idx-val ${c>=0?'up':'down'}">${i.price.toLocaleString('en-IN',{maximumFractionDigits:2})} <small>${c>=0?'+':''}${c.toFixed(2)}%</small></span></div>`;}).join('');
+    return `<div title="${closed?'Market closed, showing last close':'Live'}"><span class="idx-name">${i.name}${closed?' (closed)':''}</span><span class="idx-val ${c>=0?'up':'down'}">${i.price.toLocaleString('en-IN',{maximumFractionDigits:2})} <small>${chgTxt(i.price,c)}</small></span></div>`;}).join('');
 }
 async function refreshGlobalLive(){
   try{ const r=await fetch('/api/global-quotes',{cache:'no-store'}); const j=await r.json(); if(j.items) renderGlobalBar(j.items); }catch(e){ /* keep last values */ }
@@ -4079,7 +4137,7 @@ async function refreshTickerLive(){
     try{ const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(syms.join(',')),{cache:'no-store'}); if(r.ok){ const m=await r.json(); Object.keys(m).forEach(k=>{ got[k]={price:m[k].price,changePct:m[k].changePct}; }); } }catch(e){}
     const missing=syms.filter(s=>!got[s]);
     await Promise.all(missing.map(s=>fetch('/api/quote/'+s,{cache:'no-store'}).then(r=>r.json()).then(q=>{ if(q&&!q.error&&q.price!=null) got[s]={price:q.price,changePct:q.changePct}; }).catch(()=>{})));
-    const rows=INDEX_LIST.filter(r=>got[r[0]]).map(r=>[r[1].replace('BSE ','').toUpperCase(), got[r[0]].price.toLocaleString('en-IN',{maximumFractionDigits:2}), got[r[0]].changePct||0, r[0]]);
+    const rows=INDEX_LIST.filter(r=>got[r[0]]).map(r=>[r[1].replace('BSE ','').toUpperCase(), got[r[0]].price.toLocaleString('en-IN',{maximumFractionDigits:2}), got[r[0]].changePct||0, r[0], got[r[0]].price]);
     if(rows.length) renderTicker(rows);
   }catch(e){ /* keep showing the last known values */ }
 }

@@ -2105,7 +2105,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-13-r20 (both-way setups: index trend day, stock VWAP rejection/hold, tested daily-trend override; monitor copy)';
+const BUILD = '2026-10-14-r21 (chart patterns: 4-timeframe grid, recent by default, multi-timeframe agreement, key levels, per-chart track record, Daily+Hourly scan)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

@@ -111,6 +111,22 @@
   /* chart-pattern section */
   .sb-tbl{width:100%;border-collapse:collapse;font-size:12px;}
   .sb-tbl td{padding:5px 6px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  .pg-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;}
+  .pg-sym{display:flex;gap:6px;flex:1 1 260px;min-width:220px;} .pg-sym input{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;}
+  .pg-controls select{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:7px 8px;border-radius:8px;font-size:12px;}
+  .pg-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex:none;} .pg-seg button{background:var(--panel2);color:var(--text2);border:0;border-right:1px solid var(--border);padding:7px 11px;font-size:12px;cursor:pointer;} .pg-seg button:last-child{border-right:0;} .pg-seg button.on{background:var(--blue);color:#fff;}
+  .pg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
+  .pg-card{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel);min-width:0;} .pg-card.mtf-bull{border-color:rgba(38,194,129,.75);box-shadow:0 0 0 1px rgba(38,194,129,.25) inset;} .pg-card.mtf-bear{border-color:rgba(239,83,80,.75);box-shadow:0 0 0 1px rgba(239,83,80,.25) inset;}
+  .pg-card-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;} .pg-card-h b{font-size:14px;} .pg-card-h .pg-open{margin-left:auto;font-size:11px;padding:3px 8px;}
+  .pg-mini{height:200px;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:6px;}
+  .pg-row{padding:7px 6px;border-top:1px solid var(--border);cursor:pointer;border-radius:6px;font-size:12.5px;line-height:1.5;} .pg-row:hover,.pg-row.sel{background:rgba(61,139,253,.09);}
+  .pg-pill{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--text2);margin-left:4px;vertical-align:1px;white-space:nowrap;} .pg-pill.up{color:var(--green);border-color:rgba(38,194,129,.5);} .pg-pill.down{color:var(--red);border-color:rgba(239,83,80,.5);} .pg-pill.amb{color:var(--amber);border-color:rgba(240,169,58,.5);} .pg-pill.mtf{color:#fff;background:var(--blue);border-color:var(--blue);}
+  .pg-sub{color:var(--text2);font-size:11.5px;}
+  .pg-mtf{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--panel2);} .pg-mtf.bull{border-color:rgba(38,194,129,.6);} .pg-mtf.bear{border-color:rgba(239,83,80,.6);} .pg-mtf.mixed{border-color:rgba(240,169,58,.6);}
+  .pg-tfchips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;} .pg-tfchip{border:1px solid var(--border);border-radius:8px;padding:4px 9px;font-size:12px;background:var(--panel);}
+  .pg-levels{border:1px dashed rgba(167,139,250,.6);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:12.5px;} .pg-levels b.lv{color:#a78bfa;}
+  .pg-detail{border-top:1px solid var(--border);padding-top:12px;} .pg-detail-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  @media(max-width:900px){.pg-grid{grid-template-columns:1fr;}}
   .pat-controls{display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:8px;align-items:end;margin-bottom:10px;}
   .pat-controls label{display:block;font-size:11px;color:var(--text2);margin-bottom:3px;}
   .pat-controls input,.pat-controls select{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:8px;font-size:12px;}
@@ -396,20 +412,26 @@
       <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
     </section></div>
   <section id="sec-patterns" class="panel">
-    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">17 classic patterns &middot; detected on real Upstox candles &middot; several can be active at once</span></div>
-    <p class="desc">Swing-point analysis finds every pattern that is <strong>forming</strong> or <strong>confirmed</strong> on the chart right now &mdash; overlapping patterns (e.g. a flag inside a triangle) are all listed. Click a row to draw it on the chart; click <strong>full logic</strong> for the complete strategy (how it forms, entry, stop, target, failure, volume). <strong>Price action</strong> then decides the trade: is the swing structure right, did the breakout candle close strong, has the break held, did a retest of the level hold with a rejection candle (pin bar / engulfing), and is there room to the next swing level. It gives one action: <b>BUY/SELL</b> (entry now), <b>WAIT</b>, <b>WATCH</b> or <b>AVOID</b> (false breakout).</p>
-    <div class="pat-controls">
-      <div><label>Symbol</label><input id="patSym" placeholder="e.g. RELIANCE, NIFTY" autocomplete="off"></div>
-      <div><label>Timeframe</label><select id="patTf"><option value="1D" selected>Daily (~1 year)</option><option value="1W">Weekly</option><option value="1h">Hourly</option></select></div>
-      <div><label>Show</label><select id="patFilter"><option value="all">All patterns</option><option value="recent">Latest only (forming + last 10 bars)</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select></div>
-      <button class="btn" id="patGo" style="padding:9px;">Analyse</button>
-      <button class="btn" id="patScanBtn" style="padding:9px;" title="Scan every stock and index in the screener list on daily data">Scan all</button>
+    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">4 timeframes at once &middot; 17 classic patterns &middot; real Upstox candles</span></div>
+    <p class="desc">The same stock on <b>Intraday (15-min)</b>, <b>Hourly</b>, <b>Daily</b> and <b>Weekly</b> charts. By default only <b>recent</b> formations are shown (forming now, or broken out in the last few bars), each with how old it is, how far price is from the trigger, and how this pattern has played out before on this chart. Patterns that agree across timeframes are highlighted and explained at the top. Click a pattern to see it drawn on the big chart with the full logic and price-action checks.</p>
+    <div class="pg-controls">
+      <div class="pg-sym"><input id="patSym" placeholder="Symbol, e.g. RELIANCE, NIFTY" autocomplete="off"><button class="btn" id="patGo">Analyse</button></div>
+      <div class="pg-seg" id="pgShow" title="Recent hides patterns that broke out long ago"><button data-v="recent" class="on">Recent</button><button data-v="all">All</button></div>
+      <div class="pg-seg" id="pgBias"><button data-v="all" class="on">All</button><button data-v="bullish">Bullish</button><button data-v="bearish">Bearish</button></div>
+      <select id="patFilter" title="Pattern type"><option value="all">All types</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select>
+      <button class="btn" id="patScanBtn" title="Scan every stock and index on Daily and Hourly charts">Scan all stocks</button>
     </div>
     <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
-    <div id="patChart" style="width:100%;height:340px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;"></div>
-    <div id="patSummary" style="margin-bottom:6px;"></div>
-    <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status</th><th>Price action</th><th>Confidence</th><th>Levels</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
-    <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume, trend alignment and the price-action checks &mdash; it is a ranking aid, not a probability of profit.</div>
+    <div id="pgMtf"></div>
+    <div id="pgLevels"></div>
+    <div id="pgGrid" class="pg-grid"></div>
+    <div class="pg-detail">
+      <div class="pg-detail-head"><h4 style="margin:0;">Detailed view</h4><div class="pg-seg" id="pgDtf"><button data-v="15m">Intraday</button><button data-v="1h">Hourly</button><button data-v="1D" class="on">Daily</button><button data-v="1W">Weekly</button></div></div>
+      <div id="patChart" style="width:100%;height:360px;border:1px solid var(--border);border-radius:8px;margin:8px 0 10px;overflow:hidden;"></div>
+      <div id="patSummary" style="margin-bottom:6px;"></div>
+      <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status &amp; age</th><th>Price action</th><th>Confidence</th><th>Levels &amp; distance</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
+      <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume, trend alignment and the price-action checks &mdash; a ranking aid, not a probability of profit. Points = price move in rupees (index points for indices).</div>
+    </div>
     <div id="patPlan" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
       <h4 style="margin:0 0 4px;">Trade planner <span class="metric-sub">stop, targets, timeline and expiry view for any price</span></h4>
       <div class="metric-sub" style="margin-bottom:8px;">A pattern's entry is the breakout price from when it confirmed. Type the price you would actually trade at (or leave it empty for the live price) and press <b>Analyse price</b> to get a fresh stop-loss, targets, how long they may take, and whether the monthly futures &amp; options expiry gives enough time.</div>
@@ -421,7 +443,7 @@
       </div>
       <div id="tpOut"></div>
     </div>
-    <h4 style="margin:16px 0 4px;">Scan across all stocks</h4>
+    <h4 style="margin:16px 0 4px;">Scan across all stocks <span class="metric-sub">recent patterns on Daily and Hourly; stocks where both agree come first</span></h4>
     <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
     <div id="patScanOut" style="overflow-x:auto;"></div>
     <h4 style="margin:18px 0 4px;">Historical hit rates <span class="metric-sub">how past signals actually played out</span></h4>
@@ -4968,7 +4990,7 @@ const PatternEngine = (function(){
   // ---------- helpers ----------
   function atrArr(C,p){ p=p||14; let a=null; const o=[]; for(let i=0;i<C.length;i++){ const tr=i===0?C[i].h-C[i].l:Math.max(C[i].h-C[i].l,Math.abs(C[i].h-C[i-1].c),Math.abs(C[i].l-C[i-1].c)); a=a==null?tr:(a*(p-1)+tr)/p; o.push(a);} return o; }
   function mirror(C,K){ return C.map(x=>({t:x.t,o:K/x.o,h:K/x.l,l:K/x.h,c:K/x.c,v:x.v})); }
-  function zigzag(C,dev){
+  function zigzag(C,dev,live){
     const n=C.length; if(n<5) return [];
     const P=[]; let dir=0, hi=C[0].h, hiI=0, lo=C[0].l, loI=0;
     for(let i=1;i<n;i++){
@@ -4984,6 +5006,12 @@ const PatternEngine = (function(){
       }
     }
     if(dir===1) P.push({i:hiI,p:hi,type:'H',prov:true}); else if(dir===-1) P.push({i:loI,p:lo,type:'L',prov:true});
+    // live swing (recency): the move since the last extreme has already retraced 60%+ of a full swing, so today's leg counts
+    // as a provisional pivot instead of waiting for the full reversal. Lets the newest formation be seen days earlier.
+    if(live&&P.length){ const q=P[P.length-1];
+      if(q.i<=n-3){ let x=q.type==='H'?Infinity:-Infinity, xi=-1;
+        for(let j=q.i+1;j<n;j++){ if(q.type==='H'?C[j].l<x:C[j].h>x){ x=q.type==='H'?C[j].l:C[j].h; xi=j; } }
+        if(xi>q.i&&(q.type==='H'?x<=q.p*(1-0.6*dev):x>=q.p*(1+0.6*dev))) P.push({i:xi,p:x,type:q.type==='H'?'L':'H',prov:true,live:true}); } }
     return P;
   }
   function linreg(xs,ys){ const n=xs.length; let sx=0,sy=0,sxx=0,sxy=0; for(let i=0;i<n;i++){sx+=xs[i];sy+=ys[i];sxx+=xs[i]*xs[i];sxy+=xs[i]*ys[i];}
@@ -5402,12 +5430,12 @@ const PatternEngine = (function(){
     for(const dev of devs){
       const g=Math.min(1,dev/0.04), tolEq=dev<0.024?dev*0.5:clamp(dev*0.5,0.012,0.03), minTrend=dev>=0.04?Math.max(0.08,1.5*dev):Math.max(0.03,2*dev);
       const run=(C,s)=>{
-        const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev),Pfine:zigzag(C,Math.max(0.03*g,dev*0.5)),dev,tolEq,atrPct,minTrend,g};
+        const ctx={C,C0,s,unm:s>0?(v=>v):(v=>K/v),n:C.length,P:zigzag(C,dev,true),Pfine:zigzag(C,Math.max(0.03*g,dev*0.5)),dev,tolEq,atrPct,minTrend,g};
         res.push(...detTops(ctx),...detFlags(ctx));
         res.push(...detCup(ctx));
       };
       run(C0,1); run(mirrored,-1);
-      const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,Math.max(0.025*g,dev*0.6)),dev,tolEq,atrPct,minTrend,g}; // finer swings: triangle apexes contract below the main swing size
+      const ch={C:C0,C0,s:1,unm:v=>v,n:C0.length,P:zigzag(C0,Math.max(0.025*g,dev*0.6),true),dev,tolEq,atrPct,minTrend,g}; // finer swings: triangle apexes contract below the main swing size
       res.push(...detChannels(ch));
     }
     const dev=devMain;
@@ -5421,12 +5449,16 @@ const PatternEngine = (function(){
     return {patterns,bars:C0.length,dev,atrPct};
   }
   // Walk-forward replay: detect on data up to bar e only, then see what price did next (target vs stop). No look-ahead.
-  function walk(candles,opts){
+  function walk(candles,opts){ const w=walker(candles,opts); for(const e of w.steps) w.at(e); return w.out; }
+  // same replay, but yields to the browser every few steps so the page never freezes (used for per-chart track records)
+  async function walkAsync(candles,opts){ const w=walker(candles,opts); let k=0; for(const e of w.steps){ w.at(e); if(++k%3===0) await new Promise(r=>setTimeout(r,0)); } return w.out; }
+  function walker(candles,opts){
     opts=opts||{}; const step=opts.step||4, H=opts.horizon||40, W=opts.win||250;
-    const C=(candles||[]).filter(x=>x&&x.h>0&&x.l>0&&x.c>0), n=C.length, seen=new Set(), out=[];
-    for(let e=Math.min(120,n-2); e<=n-2; e+=step){
+    const C=(candles||[]).filter(x=>x&&x.h>0&&x.l>0&&x.c>0), n=C.length, seen=new Set(), out=[], steps=[];
+    for(let e=Math.min(120,n-2); e<=n-2; e+=step) steps.push(e);
+    return {steps,out,at:e=>{
       const ws=Math.max(0,e-W+1), win=C.slice(ws,e+1);
-      let r; try{ r=detect(win); }catch(err){ continue; }
+      let r; try{ r=detect(win); }catch(err){ return; }
       for(const p of r.patterns){
         const pa=p.pa||{};
         // price-action retest entry (fresh on this bar): entry at the retest close, stop beyond the retest candle
@@ -5455,10 +5487,9 @@ const PatternEngine = (function(){
         if(!res){ if(e+H>n-1) continue; res='expired'; R=Math.max(-1,Math.min(rr,(C[e+H].c-p.entry)*dir/risk)); }
         out.push({key:p.key,name:p.name,bias:p.bias,status:p.status,mode:'breakout',pa:pa.action||null,outcome:res,R,rr,t:win[win.length-1].t});
       }
-    }
-    return out;
+    }};
   }
-  return {detect,walk,LIB,zigzag,_quadFit:quadFit,_mirror:mirror};
+  return {detect,walk,walkAsync,LIB,zigzag,_quadFit:quadFit,_mirror:mirror};
 })();
 
 
@@ -5467,47 +5498,248 @@ const PatternEngine = (function(){
    ============================================================ */
 const PatternUI = (function(){
   const $=id=>document.getElementById(id);
-  const S={hover:null,sym:null,tf:'1D',candles:[],res:null,chart:null,series:null,extra:[],priceLines:[],sel:null,filter:'all',open:{},loading:false,src:''};
+  // the four timeframes shown side by side: [tf, short name, bar word]
+  const TFS=[['15m','Intraday (15m)','15-min'],['1h','Hourly','1-hour'],['1D','Daily','daily'],['1W','Weekly','weekly']];
+  const TFN={'15m':'Intraday','1h':'Hourly','1D':'Daily','1W':'Weekly'}, ORD={'15m':0,'1h':1,'1D':2,'1W':3};
+  const FRESH={'15m':12,'1h':7,'1D':5,'1W':3};   // a breakout counts as recent for this many bars (~3 h, ~1 day, 1 week, 3 weeks)
+  const FORM={'15m':30,'1h':24,'1D':20,'1W':10}; // a forming pattern counts as recent if its last swing point is this recent
+  const HOR={'15m':25,'1h':20,'1D':40,'1W':20};  // track record: bars to wait for target / stop
+  // S = the detailed view (big chart + table); the Trade planner reads S.res / S.sym / S.tf / S.sel
+  const S={hover:null,sym:null,tf:'1D',candles:[],res:null,chart:null,series:null,extra:[],priceLines:[],sel:null,filter:'all',show:'recent',bias:'all',open:{},loading:false,src:''};
+  const M={sym:null,tf:{}}; // per timeframe: {candles, full, res, src, stale, err, chart, series, extra, priceLines, sel}
+  const TR={};              // track records: 'SYM|tf' -> {state:'run'|'done', list}
+  let LV=[];                // key levels shared by 2+ timeframes
   const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const biasCls=b=>b==='Bullish'?'up':b==='Bearish'?'down':'';
   const barTime=(C,i)=>C[Math.max(0,Math.min(C.length-1,i))].t;
+  const dirOf=p=>p.bias==='Bullish'?1:p.bias==='Bearish'?-1:0;
+  const ptsPct=(d,base)=>(d>=0?'+':'&minus;')+fmt(Math.abs(d),2)+' pts ('+(d>=0?'+':'&minus;')+fmt(Math.abs(d)/base*100,2)+'%)';
 
   function sectionReady(){ return !!$('patBody'); }
   function currentSym(){ return (window.CURRENT&&window.CURRENT.symbol)||'NIFTY'; }
 
+  /* ---------- age, recency, distance ---------- */
+  function ageOf(p,C){ // bars since the breakout, or since the pattern's last swing point while it is still forming
+    const last=C.length-1;
+    if(p.brk!=null) return {bars:last-p.brk,i:p.brk,kind:'break'};
+    let m=p.i0; (p.lines||[]).forEach(l=>{ [l.i1,l.i2].forEach(x=>{ if(x<last&&x>m) m=x; }); });
+    return {bars:last-m,i:m,kind:'form'};
+  }
+  function agoTxt(tf,C,i,bars){
+    if(tf==='1D') return bars===0?'today':bars===1?'yesterday':bars+' trading days ago';
+    if(tf==='1W') return bars===0?'this week':bars===1?'last week':bars+' weeks ago';
+    const d=t=>Math.floor((t+19800)/86400), t=C[i].t, lt=C[C.length-1].t;
+    const hm=new Date((t+19800)*1000).toISOString().slice(11,16);
+    if(d(t)===d(lt)) return 'today '+hm;
+    let k=0; for(let j=i;j<C.length-1;j++) if(d(C[j+1].t)!==d(C[j].t)) k++;
+    return k===1?'yesterday '+hm:new Date((t+19800)*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'UTC'})+' '+hm+' ('+k+' sessions ago)';
+  }
+  function isRecent(p,tf,C){ if(p.status==='Failed') return false; const a=ageOf(p,C); return a.kind==='break'?a.bars<=FRESH[tf]:a.bars<=FORM[tf]; }
+  function ageHtml(p,tf,C){
+    const a=ageOf(p,C), ago=agoTxt(tf,C,a.i,a.bars);
+    if(p.status==='Failed') return '<span class="pg-pill">failed</span>';
+    if(a.kind==='break'){ const stale=a.bars>FRESH[tf];
+      return '<span class="pg-pill '+(stale?'':'amb')+'">'+(p.status==='Weak break'?'low-volume break ':'broke out ')+ago+'</span>'+(stale?'<span class="pg-pill" title="Old breakout: the original entry is no longer fresh">stale</span>':''); }
+    return '<span class="pg-pill">forming · last swing '+ago+'</span>';
+  }
+  function distHtml(p,C){ // suggestion 1: how far price is from the trigger, the target and the stop, in points and %
+    const d=dirOf(p), last=C[C.length-1].c; if(!d||p.entry==null) return '';
+    const out=[];
+    if(p.status==='Forming'){ const gap=(p.entry-last)*d;
+      out.push(gap>0?'Needs <b>'+ptsPct(gap*d,last)+'</b> to '+(d>0?'break above':'break below')+' '+fmt(p.entry,2):'Price is at / past the trigger '+fmt(p.entry,2)+' &mdash; waiting for a close'); }
+    else if(p.status!=='Failed'){ const past=(last-p.entry)*d; out.push(past>=0?'<b>'+ptsPct(past*d,last)+'</b> past the breakout '+fmt(p.entry,2):'Back below the breakout by <b>'+ptsPct(past*d,last)+'</b>'); }
+    if(p.target!=null&&p.status!=='Failed'){ const t=(p.target-last)*d; if(t>0) out.push('target '+fmt(p.target,2)+' is '+ptsPct(t*d,last)+' away'); else out.push('target '+fmt(p.target,2)+' already reached'); }
+    if(p.stop!=null&&p.status!=='Failed'){ const st=(last-p.stop)*d; out.push('stop '+fmt(p.stop,2)+(st>0?' is '+ptsPct(-st*d,last)+' away':' already hit')); }
+    return out.join(' &middot; ');
+  }
+  function trHtml(p,tf){ // suggestion 2: this pattern's own record on this chart
+    const r=TR[M.sym+'|'+tf]; if(!r) return ''; if(r.state!=='done') return '<span class="pg-sub">Track record on this chart: checking history…</span>';
+    const a=r.list.filter(o=>o.key===p.key&&(o.mode||'breakout')==='breakout');
+    const word=TFN[tf].toLowerCase()+' chart', nm=esc(M.sym);
+    if(!a.length) return '<span class="pg-sub">No past confirmed '+esc(p.name.replace(' (failed)',''))+' signals on the '+nm+' '+word+' ('+r.bars+' bars tested)</span>';
+    const hit=a.filter(o=>o.outcome==='target').length, R=a.reduce((s,o)=>s+o.R,0)/a.length;
+    return '<span class="pg-sub">Track record on the '+nm+' '+word+': <b class="'+(hit/a.length>=0.5?'up':'down')+'">'+hit+' of '+a.length+'</b> hit the target first &middot; avg <b class="'+(R>=0?'up':'down')+'">'+(R>=0?'+':'')+R.toFixed(2)+'R</b>'+(a.length<5?' <span class="pg-pill amb" title="Fewer than 5 past signals: treat as anecdotal">small sample</span>':'')+'</span>';
+  }
+
+  /* ---------- filters ---------- */
+  function passes(p,tf,C){
+    if(S.bias!=='all'&&p.bias.toLowerCase()!==S.bias) return false;
+    const f=S.filter;
+    if(f==='confirmed'&&p.status!=='Confirmed') return false; if(f==='forming'&&p.status!=='Forming') return false;
+    if((f==='reversal'||f==='continuation')&&p.type.toLowerCase()!==f) return false;
+    if(S.show==='recent'&&!isRecent(p,tf,C)) return false;
+    return true;
+  }
+  function listFor(tf){ const T=M.tf[tf]; if(!T||!T.res) return [];
+    return T.res.patterns.map((p,i)=>({p,i})).filter(({p})=>passes(p,tf,T.candles))
+      .sort((x,y)=>(x.p.status==='Failed')-(y.p.status==='Failed')||ageOf(x.p,T.candles).bars-ageOf(y.p,T.candles).bars||y.p.conf-x.p.conf); }
+
+  /* ---------- multi-timeframe agreement ---------- */
+  function tfBias(tf){ const T=M.tf[tf]; if(!T||!T.res) return null;
+    const rec=T.res.patterns.filter(p=>p.status!=='Failed'&&isRecent(p,tf,T.candles)&&(p.bias==='Bullish'||p.bias==='Bearish'));
+    let b=0; rec.forEach(p=>{ b+=dirOf(p)*(p.status==='Confirmed'?1.3:1)*(p.conf/100); });
+    const top=rec.slice().sort((x,y)=>y.conf-x.conf)[0];
+    return {dir:b>0.15?1:b<-0.15?-1:0,n:rec.length,top,rec}; }
+  function mtf(){
+    const B={}; TFS.forEach(([tf])=>B[tf]=tfBias(tf));
+    const up=TFS.map(x=>x[0]).filter(tf=>B[tf]&&B[tf].dir>0), dn=TFS.map(x=>x[0]).filter(tf=>B[tf]&&B[tf].dir<0);
+    const names=a=>a.map(tf=>TFN[tf]).join(a.length>2?', ':' and ').replace(/, ([^,]*)$/,' and $1');
+    const hi=a=>a.slice().sort((x,y)=>ORD[y]-ORD[x])[0], lo=a=>a.slice().sort((x,y)=>ORD[x]-ORD[y])[0];
+    let cls='', head='', why=[];
+    if(up.length>=2&&!dn.length){ cls='bull'; head='&#9650; Bullish on '+names(up)+' &mdash; timeframes agree';
+      why.push('Recent patterns on more than one timeframe point up. This is the strongest kind of setup: the bigger chart sets the direction, the smaller one gives the timing.');
+      why.push('Time the entry on the '+TFN[lo(up)]+' pattern; use the '+TFN[hi(up)]+' pattern for the bigger target and the stop that matters.'); }
+    else if(dn.length>=2&&!up.length){ cls='bear'; head='&#9660; Bearish on '+names(dn)+' &mdash; timeframes agree';
+      why.push('Recent patterns on more than one timeframe point down. Weak stocks tend to stay weak while every timeframe agrees.');
+      why.push('Time a short (or an exit) on the '+TFN[lo(dn)]+' pattern; the '+TFN[hi(dn)]+' pattern gives the bigger target. Avoid fresh buys until a timeframe turns.'); }
+    else if(up.length&&dn.length){ cls='mixed'; const hu=hi(up), hd=hi(dn);
+      if(ORD[hu]>ORD[hd]){ head='Mixed: '+names(up)+' bullish, '+names(dn)+' bearish';
+        why.push('The bigger timeframe ('+TFN[hu]+') points up while the shorter one ('+names(dn)+') points down: most likely a <b>pullback inside an uptrend</b>.');
+        why.push('Better to wait for the '+TFN[lo(dn)]+' chart to turn back up (its bearish pattern failing, or a fresh bullish one) and then buy, than to short against the bigger trend.'); }
+      else { head='Mixed: '+names(dn)+' bearish, '+names(up)+' bullish';
+        why.push('The bigger timeframe ('+TFN[hd]+') points down while the shorter one ('+names(up)+') points up: most likely a <b>bounce inside a downtrend</b>.');
+        why.push('Rallies like this often fail near the bigger pattern&rsquo;s breakdown level. Prefer quick trades, or wait for the '+TFN[hd]+' chart to repair before holding longs.'); } }
+    else if(up.length===1||dn.length===1){ const tf=(up[0]||dn[0]), d=up.length?'bullish':'bearish';
+      head='Only '+TFN[tf]+' shows a recent '+d+' pattern'; why.push('No other timeframe confirms it, so it is a lower-conviction setup. Check the other charts for support or resistance in the way (key levels below).'); }
+    else { head='No recent pattern on any timeframe'; why.push('Nothing has formed or broken out recently. Switch <b>Show</b> to <b>All</b> to see older formations.'); }
+    // the same pattern on two timeframes
+    const seen={}; TFS.forEach(([tf])=>{ const b=B[tf]; if(b) b.rec.forEach(p=>{ const k=p.name; (seen[k]=seen[k]||new Set()).add(tf); }); });
+    Object.entries(seen).forEach(([k,set])=>{ if(set.size>=2) why.push('<b>'+esc(k)+'</b> appears on '+names([...set])+' at the same time.'); });
+    const chips=TFS.map(([tf])=>{ const b=B[tf]; const T=M.tf[tf];
+      if(!T||T.err) return '<span class="pg-tfchip">'+TFN[tf]+': <span class="pg-sub">no data</span></span>';
+      return '<span class="pg-tfchip">'+TFN[tf]+': '+(b&&b.dir>0?'<b class="up">&#9650; bullish</b>':b&&b.dir<0?'<b class="down">&#9660; bearish</b>':'<span class="pg-sub">neutral</span>')+(b&&b.top?' <span class="pg-sub">'+esc(b.top.name)+'</span>':'')+'</span>'; }).join('');
+    $('pgMtf').innerHTML='<div class="pg-mtf '+cls+'"><div class="pg-tfchips">'+chips+'</div><div style="font-weight:700;margin-bottom:4px;" class="'+(cls==='bull'?'up':cls==='bear'?'down':'')+'">'+head+'</div>'+why.map(w=>'<div class="pg-sub" style="font-size:12.5px;line-height:1.55;">'+w+'</div>').join('')+'<div class="pg-sub" style="margin-top:4px;font-size:11px;">Counts only recent, non-failed patterns, weighted by confidence and confirmation. A screen to read the chart, not a trade instruction.</div></div>';
+    return {up,dn,B};
+  }
+
+  /* ---------- key levels shared by 2+ timeframes (suggestion 3) ---------- */
+  function levels(){
+    const D=M.tf['1D']; const ref=(D&&D.candles.length?D:Object.values(M.tf).find(t=>t&&t.candles&&t.candles.length)); if(!ref) return [];
+    const px=ref.candles[ref.candles.length-1].c, atr=(D&&D.res&&D.res.atrPct)||0.015, tol=Math.min(0.012,Math.max(0.003,0.4*atr));
+    const pts=[];
+    TFS.forEach(([tf])=>{ const T=M.tf[tf]; if(!T||!T.res||!T.candles.length) return; const C=T.candles;
+      T.res.patterns.forEach(p=>{ if(p.status==='Failed'||p.entry==null) return; if(!isRecent(p,tf,C)&&S.show==='recent') return; pts.push({p:p.entry,tf,what:p.name+(p.brk!=null?' breakout level':' trigger')}); });
+      const piv=PatternEngine.zigzag(C,T.res.dev||0.04).filter(q=>!q.prov).slice(-6);
+      piv.forEach(q=>pts.push({p:q.p,tf,what:q.type==='H'?'swing high':'swing low'})); });
+    pts.sort((a,b)=>a.p-b.p);
+    const cl=[]; pts.forEach(x=>{ const c=cl[cl.length-1]; if(c&&Math.abs(x.p/c.avg-1)<=tol){ c.m.push(x); c.avg=c.m.reduce((s,y)=>s+y.p,0)/c.m.length; } else cl.push({avg:x.p,m:[x]}); });
+    return cl.filter(c=>new Set(c.m.map(x=>x.tf)).size>=2&&Math.abs(c.avg/px-1)<=0.15).map(c=>({p:c.avg,m:c.m,d:c.avg-px})).sort((a,b)=>Math.abs(a.d)-Math.abs(b.d)).slice(0,5).sort((a,b)=>b.p-a.p);
+  }
+  function levelsHtml(){
+    if(!LV.length) return '';
+    const D=Object.values(M.tf).find(t=>t&&t.candles&&t.candles.length), px=M.tf['1D']&&M.tf['1D'].candles.length?M.tf['1D'].candles[M.tf['1D'].candles.length-1].c:D.candles[D.candles.length-1].c;
+    return '<div class="pg-levels"><div style="font-weight:700;margin-bottom:4px;">Key levels where 2+ timeframes line up <span class="pg-sub">(purple dashed lines on the charts)</span></div>'+
+      LV.map(l=>{ const by={}; l.m.forEach(x=>{ (by[x.tf]=by[x.tf]||new Set()).add(x.what); });
+        return '<div style="margin:2px 0;"><b class="lv">'+fmt(l.p,2)+'</b> <span class="pg-pill '+(l.d>0?'down':'up')+'">'+(l.d>0?'resistance':'support')+'</span> <span class="pg-sub">'+ptsPct(l.d,px)+' from price</span> &middot; '+
+          TFS.filter(([tf])=>by[tf]).map(([tf])=>'<b>'+TFN[tf]+'</b>: '+esc([...by[tf]].join(', '))).join(' &middot; ')+'</div>'; }).join('')+'</div>';
+  }
+
+  /* ---------- loading: all four timeframes at once ---------- */
+  async function fetchTf(sym,tf){
+    const resp=await fetch('/api/candles/'+encodeURIComponent(sym)+'?tf='+encodeURIComponent(tf),{cache:'no-store'});
+    const data=await resp.json();
+    if(!resp.ok||!data.series||!data.series.length) throw new Error(data.error||'no candles returned');
+    const full=data.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
+    return {full,candles:tf==='1D'?full.slice(-320):full.slice(-600),src:data.source,stale:data.stale?data.ageSec:null};
+  }
   async function load(sym){
     if(!sectionReady()) return;
-    S.sym=(sym||$('patSym').value||currentSym()).trim().toUpperCase(); $('patSym').value=S.sym;
-    S.tf=$('patTf').value; S.loading=true; S.sel=null;
-    $('patStatus').textContent='Loading '+S.sym+' candles…';
-    try{
-      const resp=await fetch('/api/candles/'+encodeURIComponent(S.sym)+'?tf='+encodeURIComponent(S.tf),{cache:'no-store'});
-      const data=await resp.json();
-      if(!resp.ok||!data.series||!data.series.length) throw new Error(data.error||'no candles returned');
-      S.stale=data.stale?data.ageSec:null; S.src=data.source; S.candles=data.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
-      if(S.tf==='1D') S.candles=S.candles.slice(-320);
-      analyse();
-    }catch(e){
-      S.candles=[]; S.res=null; render();
-      $('patStatus').innerHTML='<span class="down">Could not load candles for '+esc(S.sym)+':</span> '+esc(e.message);
-    }
+    sym=(sym||$('patSym').value||currentSym()).trim().toUpperCase(); $('patSym').value=sym;
+    S.loading=true; S.sym=M.sym=sym; S.sel=null;
+    TFS.forEach(([tf])=>destroyMini(tf)); M.tf={};
+    $('patStatus').textContent='Loading '+sym+' on 4 timeframes…';
+    buildGrid();
+    await Promise.all(TFS.map(async([tf])=>{
+      try{ const r=await fetchTf(sym,tf); if(M.sym!==sym) return; M.tf[tf]={...r,res:PatternEngine.detect(r.candles),extra:[],priceLines:[],sel:null}; }
+      catch(e){ if(M.sym!==sym) return; M.tf[tf]={candles:[],full:[],res:null,err:e.message,extra:[],priceLines:[],sel:null}; }
+      if(M.sym===sym) card(tf);
+    }));
+    if(M.sym!==sym) return;
     S.loading=false;
+    const ok=TFS.filter(([tf])=>M.tf[tf]&&!M.tf[tf].err), src=new Set(ok.map(([tf])=>M.tf[tf].src)), stale=ok.filter(([tf])=>M.tf[tf].stale!=null);
+    $('patStatus').innerHTML=esc(sym)+' &middot; '+ok.length+' of 4 timeframes loaded &middot; data: '+[...src].map(x=>x==='upstox'?'Upstox':x==='yahoo'?'Yahoo (fallback)':esc(x)).join(', ')+(stale.length?' <span class="sim-tag">STALE: '+stale.map(([tf])=>TFN[tf]).join(', ')+' (last good Upstox data)</span>':'');
+    refresh(); setDetail(S.tf); trackRecords(sym);
+  }
+  function refresh(){ if(!M.sym) return; const ag=mtf(); LV=levels(); $('pgLevels').innerHTML=levelsHtml();
+    TFS.forEach(([tf])=>{ const c=$('pgCard-'+tf); if(!c) return; c.classList.toggle('mtf-bull',ag.up.length>=2&&ag.up.includes(tf)); c.classList.toggle('mtf-bear',ag.dn.length>=2&&ag.dn.includes(tf)); card(tf,true); });
+    M._ag=ag; }
+  async function trackRecords(sym){
+    const order=[S.tf,...TFS.map(x=>x[0]).filter(t=>t!==S.tf)];
+    for(const tf of order){ const T=M.tf[tf]; if(M.sym!==sym) return; if(!T||T.err||!T.full.length) continue;
+      const k=sym+'|'+tf; if(TR[k]&&TR[k].state==='done') continue;
+      const C=tf==='1D'?T.full.slice(-750):T.full.slice(-700);
+      TR[k]={state:'run'}; card(tf,true);
+      try{ const list=await PatternEngine.walkAsync(C,{step:tf==='1W'?2:4,horizon:HOR[tf]}); TR[k]={state:'done',list,bars:C.length}; }catch(e){ TR[k]={state:'done',list:[],bars:C.length}; }
+      if(M.sym!==sym) return; card(tf,true); if(tf===S.tf) render(); }
   }
 
-  function analyse(){
-    S.res=PatternEngine.detect(S.candles);
-    const n=S.res.patterns.length;
-    $('patStatus').innerHTML=esc(S.sym)+' &middot; '+S.candles.length+' '+({'1D':'daily','1W':'weekly','1h':'hourly'}[S.tf]||S.tf)+' bars &middot; data: '+(S.stale!=null?"<span class=\"sim-tag\">STALE \u2013 last good Upstox data, "+Math.round(S.stale/60)+" min old</span> ":"")+(S.src==='upstox'?'Upstox':S.src==='yahoo'?'Yahoo (fallback)':esc(S.src))+
-      ' &middot; '+(n?n+' pattern'+(n>1?'s':'')+' active':'no pattern currently qualifies');
-    render();
-    if(n) select(0); else drawChart(); // always redraw, so the chart never keeps the previous symbol
+  /* ---------- the 2x2 grid of cards ---------- */
+  function buildGrid(){
+    $('pgGrid').innerHTML=TFS.map(([tf,name])=>'<div class="pg-card" id="pgCard-'+tf+'"><div class="pg-card-h"><b>'+name+'</b><span class="pg-sub" id="pgMeta-'+tf+'">loading…</span><span id="pgBiasChip-'+tf+'"></span><button class="btn pg-open" data-open="'+tf+'">Detailed view &#9656;</button></div><div class="pg-mini" id="pgMini-'+tf+'"></div><div id="pgList-'+tf+'"><div class="pg-sub" style="padding:6px;">Loading candles…</div></div></div>').join('');
+    $('pgMtf').innerHTML=''; $('pgLevels').innerHTML='';
+  }
+  function card(tf,keepChart){
+    const T=M.tf[tf], meta=$('pgMeta-'+tf), list=$('pgList-'+tf); if(!meta||!T) return;
+    if(T.err){ meta.textContent='not available'; list.innerHTML='<div class="pg-sub" style="padding:6px;"><span class="down">Could not load '+TFN[tf].toLowerCase()+' candles:</span> '+esc(T.err)+'</div>'; $('pgMini-'+tf).innerHTML=''; return; }
+    const C=T.candles, last=C[C.length-1];
+    meta.innerHTML=C.length+' '+TFS.find(x=>x[0]===tf)[2]+' bars &middot; last '+(tf==='1D'||tf==='1W'?new Date((last.t+19800)*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'UTC'}):agoTxt(tf,C,C.length-1,0));
+    const b=tfBias(tf); $('pgBiasChip-'+tf).innerHTML=b&&b.dir>0?'<span class="pg-pill up">&#9650; bullish</span>':b&&b.dir<0?'<span class="pg-pill down">&#9660; bearish</span>':'<span class="pg-pill">neutral</span>';
+    const vis=listFor(tf), hidden=T.res.patterns.length-vis.length, ag=M._ag||{up:[],dn:[]};
+    if(T.sel==null||!vis.some(v=>v.i===T.sel)) T.sel=vis.length?vis[0].i:null;
+    list.innerHTML=(vis.length?vis.slice(0,5).map(({p,i})=>{
+      const d=dirOf(p), others=(d>0?ag.up:d<0?ag.dn:[]).filter(x=>x!==tf);
+      const pa=p.pa&&p.pa.action?{enter:'<span class="pg-pill '+(d<0?'down':'up')+'">PA: '+(d<0?'SELL':'BUY')+'</span>',wait:'<span class="pg-pill amb">PA: wait</span>',watch:'<span class="pg-pill">PA: watch</span>',avoid:'<span class="pg-pill down">PA: avoid</span>'}[p.pa.action]||'':'';
+      return '<div class="pg-row'+(T.sel===i?' sel':'')+'" data-tf="'+tf+'" data-i="'+i+'"><b class="'+biasCls(p.bias)+'">'+(d>0?'&#9650; ':d<0?'&#9660; ':'')+esc(p.name)+'</b>'+
+        (p.status==='Confirmed'?'<span class="pg-pill '+(d<0?'down':'up')+'">confirmed</span>':p.status==='Forming'?'':'')+ageHtml(p,tf,C)+pa+
+        (others.length?'<span class="pg-pill mtf" title="Same direction on another timeframe">&#10003; also '+(d>0?'bullish':'bearish')+' on '+others.map(x=>TFN[x]).join(' + ')+'</span>':'')+
+        '<div class="pg-sub">'+distHtml(p,C)+'</div><div>'+trHtml(p,tf)+'</div></div>'; }).join('')+(vis.length>5?'<div class="pg-sub" style="padding:4px 6px;">+'+(vis.length-5)+' more in the detailed view</div>':'')
+      :'<div class="pg-sub" style="padding:8px 6px;">No '+(S.show==='recent'?'recent ':'')+'pattern'+(S.bias!=='all'?' ('+S.bias+')':'')+' on this timeframe.</div>')+
+      (S.show==='recent'&&hidden>0?'<div class="pg-sub" style="padding:4px 6px;">'+hidden+' older or failed pattern'+(hidden>1?'s':'')+' hidden &middot; <a href="#" data-showall="1">show all</a></div>':'');
+    mini(tf,keepChart);
+  }
+  function destroyMini(tf){ const T=M.tf[tf]; if(T&&T.chart){ try{ T.chart.remove(); }catch(e){} T.chart=null; } }
+  function chartOpts(box,h,tf){ return {width:box.clientWidth||400,height:h,layout:{background:{color:'#0b0f17'},textColor:'#8a94a6',fontSize:10},grid:{vertLines:{color:'#121925'},horzLines:{color:'#121925'}},rightPriceScale:{borderColor:'#1f2733'},timeScale:{borderColor:'#1f2733',timeVisible:tf==='15m'||tf==='1h',rightOffset:3},crosshair:{mode:0}}; }
+  function mini(tf){
+    const T=M.tf[tf], box=$('pgMini-'+tf); if(!T||!box||!T.candles.length||typeof LightweightCharts==='undefined') return;
+    if(!T.chart||!box.firstChild){ destroyMini(tf); box.innerHTML='';
+      T.chart=LightweightCharts.createChart(box,chartOpts(box,200,tf));
+      T.series=T.chart.addCandlestickSeries({upColor:'#26c281',downColor:'#ef5350',borderUpColor:'#26c281',borderDownColor:'#ef5350',wickUpColor:'#26c281',wickDownColor:'#ef5350',priceLineVisible:false});
+      T.series.setData(T.candles.map(c=>({time:c.t,open:c.o,high:c.h,low:c.l,close:c.c})));
+      T.extra=[]; T.priceLines=[]; }
+    drawOn(T,T.res&&T.sel!=null?T.res.patterns[T.sel]:null,false,true);
+  }
+  window.addEventListener('resize',()=>{ TFS.forEach(([tf])=>{ const T=M.tf[tf], box=$('pgMini-'+tf); if(T&&T.chart&&box) try{ T.chart.applyOptions({width:box.clientWidth}); }catch(e){} }); });
+
+  /* ---------- drawing a pattern on a chart (mini or detailed) ---------- */
+  function drawOn(X,p,hover,isMini){
+    if(!X.chart) return;
+    X.extra.forEach(s=>{ try{ X.chart.removeSeries(s); }catch(e){} }); X.extra=[];
+    X.priceLines.forEach(l=>{ try{ X.series.removePriceLine(l); }catch(e){} }); X.priceLines=[];
+    try{ X.series.setMarkers([]); }catch(e){}
+    const C=X.candles, pl=(price,c,title,st)=>{ if(price) X.priceLines.push(X.series.createPriceLine({price,color:c,lineWidth:1,lineStyle:st==null?2:st,axisLabelVisible:!isMini||title!=='',title:isMini?'':title})); };
+    LV.forEach(l=>pl(l.p,'#a78bfa',isMini?'':'Key level',1));
+    if(p){
+      const color=hover?'#ffd400':p.bias==='Bearish'?'#ef5350':p.bias==='Bullish'?'#26c281':'#f0a93a', marks=[];
+      p.lines.forEach(l=>{ const a=barTime(C,l.i1), b=barTime(C,l.i2); if(a===b) return;
+        const ls=X.chart.addLineSeries({color,lineWidth:hover?3:2,lineStyle:l.dash?2:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+        ls.setData([{time:Math.min(a,b),value:l.p1},{time:Math.max(a,b),value:l.p2}]); X.extra.push(ls);
+        if(hover&&l.label) marks.push({time:Math.min(a,b),position:l.p1>=l.p2?'aboveBar':'belowBar',color:'#ffd400',shape:'circle',text:l.label}); });
+      if(hover){ const m={}; marks.forEach(k=>{ if(m[k.time]) m[k.time].text+=' / '+k.text; else m[k.time]=k; }); try{ X.series.setMarkers(Object.values(m).sort((x,y)=>x.time-y.time)); }catch(e){} }
+      pl(p.entry,'#3d8bfd',isMini?'':'Entry'); pl(p.stop,'#ef5350',isMini?'':'Stop'); pl(p.target,'#26c281',isMini?'':'Target');
+    }
+    // focus on the recent end of the chart (or on the whole pattern if it started earlier)
+    try{ const n=C.length, from=p?Math.max(0,Math.min(p.i0-8,n-(isMini?90:140))):Math.max(0,n-(isMini?90:160)); X.chart.timeScale().setVisibleRange({from:C[from].t,to:C[n-1].t}); }catch(e){}
   }
 
-  function visible(){
-    if(!S.res) return [];
-    return S.res.patterns.map((p,i)=>({p,i})).filter(({p})=>S.filter==='all'||(S.filter==='recent'?(p.brk==null?p.status!=='Failed':p.barsSince<=10):S.filter==='confirmed'?p.status==='Confirmed':S.filter==='forming'?p.status==='Forming':(S.filter==='reversal'||S.filter==='continuation')?p.type.toLowerCase()===S.filter:p.bias.toLowerCase()===S.filter));
+  /* ---------- detailed view (big chart + full table) ---------- */
+  function setDetail(tf,sel){
+    const T=M.tf[tf]; S.tf=tf;
+    document.querySelectorAll('#pgDtf button').forEach(b=>b.classList.toggle('on',b.dataset.v===tf));
+    S.candles=T&&!T.err?T.candles:[]; S.res=T&&!T.err?T.res:null; S.src=T?T.src:''; S.stale=T?T.stale:null; S.sym=M.sym; S.hover=null;
+    if(sel!=null) S.sel=sel; else { const v=visible(); S.sel=v.length?v[0].i:null; }
+    render(); drawChart();
   }
-
+  function visible(){ if(!S.res) return []; return listFor(S.tf); }
   function fullHtml(p){
     const f=(window.PatternEngine.LIB[p.key]||{}).full; if(!f) return '';
     const row=(k,v)=>'<div class="pat-x-row"><b>'+k+'</b><span>'+v+'</span></div>';
@@ -5516,7 +5748,6 @@ const PatternUI = (function(){
       (p.pa&&p.pa.notes&&p.pa.notes.length?row('Price action',esc(p.pa.label)+'<br>'+p.pa.notes.map(esc).join('<br>')):'')+
       '<div class="metric-sub" style="margin-top:6px;">Detected by rule-based swing-point analysis (thresholds scale with the stock&apos;s volatility) &mdash; a screening aid, not a trade instruction. Confirm on the chart before acting.</div></div>';
   }
-
   function paHtml(p){
     const a=p.pa; if(!a) return '<span class="metric-sub">&mdash;</span>';
     const col=a.action==='enter'?(p.bias==='Bearish'?'var(--red)':'var(--green)'):a.action==='avoid'?'var(--red)':a.action==='wait'?'var(--amber)':'var(--text2)';
@@ -5525,116 +5756,100 @@ const PatternUI = (function(){
     const ck=Object.keys(a.checks||{}).map(k=>'<span style="color:var(--'+(a.checks[k]?'green':'text2')+')">'+(a.checks[k]?'✓':'✗')+' '+NM[k]+'</span>').join(' ');
     const lv=a.entryPx!=null&&a.action==='enter'?'<div class="metric-sub">PA entry <b>'+fmt(a.entryPx,2)+'</b> &middot; stop <b class="down">'+fmt(a.stopPx,2)+'</b></div>':'';
     const canMon=(p.bias==='Bullish'||p.bias==='Bearish')&&p.status!=='Failed'&&p.stop!=null;
-    const mon=canMon?'<div style="margin-top:4px">'+window.monBtn({source:'pattern',symbol:S.sym,side:p.bias==='Bearish'?'SELL':'BUY',mode:'swing',sl:a.action==='enter'&&a.stopPx!=null?a.stopPx:p.stop,target:p.target,label:p.name+' ('+S.tf+')',note:p.name+' on '+S.tf+' chart. Price action: '+a.label+'.'})+'</div>':'';
+    const mode=S.tf==='15m'||S.tf==='1h'?'intraday':'swing';
+    const mon=canMon?'<div style="margin-top:4px">'+window.monBtn({source:'pattern',symbol:S.sym,side:p.bias==='Bearish'?'SELL':'BUY',mode,sl:a.action==='enter'&&a.stopPx!=null?a.stopPx:p.stop,target:p.target,label:p.name+' ('+TFN[S.tf]+')',note:p.name+' on the '+TFN[S.tf].toLowerCase()+' chart. Price action: '+a.label+'.'})+'</div>':'';
     return '<b style="color:'+col+'">'+word+'</b> <span style="font-size:12px">'+esc(a.label)+'</span>'+lv+mon+(ck?'<div class="metric-sub" style="margin-top:3px">'+ck+'</div>':'')+(a.notes&&a.notes.length?'<div class="metric-sub" title="'+esc(a.notes.join('. '))+'">'+esc(a.notes[0])+(a.notes.length>1?' &middot; &hellip;':'')+'</div>':'');
   }
   function render(){
     const body=$('patBody'); if(!body) return;
     const sum=$('patSummary');
-    if(!S.res){ body.innerHTML=''; sum.innerHTML=''; return; }
-    const all=S.res.patterns, vis=visible();
-    const live=all.filter(p=>p.status!=='Failed');
-    const bull=live.filter(p=>p.bias==='Bullish').length, bear=live.filter(p=>p.bias==='Bearish').length;
-    const conf=live.filter(p=>p.status==='Confirmed').length, weak=live.filter(p=>p.status==='Weak break').length, paEnter=live.filter(p=>p.pa&&p.pa.action==='enter');
-    let ctxChip='';
-    try{ const cur=window.CURRENT; if(cur&&cur.symbol===S.sym&&cur.horizons&&cur.horizons.swing&&all.length){ const h=cur.horizons.swing; const hb=h.signal.indexOf('buy')>=0?1:h.signal.indexOf('sell')>=0?-1:0; const pb=bull-bear;
-      const agree=hb===0?'':(pb===0?'':((hb>0)===(pb>0)?' &mdash; agrees with the patterns':' &mdash; conflicts with the patterns, be careful'));
-      ctxChip='<span class="pat-chip '+(hb>0?'up':hb<0?'down':'')+'">Composite swing signal: '+h.signalLabel+' ('+h.score+')'+agree+'</span>'; } }catch(e){}
-    sum.innerHTML=all.length?
-      '<span class="pat-chip up">'+bull+' bullish</span><span class="pat-chip down">'+bear+' bearish</span><span class="pat-chip">'+conf+' confirmed / '+(live.length-conf-weak)+' forming'+(weak?' / '+weak+' low-volume break'+(weak>1?'s':''):'')+(all.length>live.length?' / '+(all.length-live.length)+' failed':'')+'</span>'+
-      (paEnter.length?'<span class="pat-chip '+(paEnter[0].bias==='Bearish'?'down':'up')+'">Price action entry now: '+paEnter.map(p=>esc(p.name)).join(', ')+'</span>':'<span class="pat-chip">No price-action entry right now</span>')+
-      ctxChip+(bull&&bear?'<span class="pat-chip" style="color:var(--amber);">Mixed signals &mdash; patterns disagree, size down / wait</span>':(bull>=2?'<span class="pat-chip up">Bullish confluence</span>':bear>=2?'<span class="pat-chip down">Bearish confluence</span>':'')):
-      '<span class="pat-chip">'+(S.res.reason||'Nothing on this chart meets the pattern rules right now &mdash; try another timeframe.')+'</span>';
-    if(!vis.length){ body.innerHTML='<tr><td colspan="7" class="metric-sub" style="text-align:center;padding:16px;">'+(all.length?'No patterns match this filter.':'No patterns detected.')+'</td></tr>'; return; }
+    if(!S.res){ body.innerHTML='<tr><td colspan="7" class="metric-sub" style="text-align:center;padding:16px;">'+(M.tf[S.tf]&&M.tf[S.tf].err?'No '+TFN[S.tf].toLowerCase()+' data: '+esc(M.tf[S.tf].err):'Nothing loaded yet.')+'</td></tr>'; sum.innerHTML=''; return; }
+    const all=S.res.patterns, vis=visible(), C=S.candles;
+    const live=all.filter(p=>p.status!=='Failed'&&isRecent(p,S.tf,C));
+    const bull=live.filter(p=>p.bias==='Bullish').length, bear=live.filter(p=>p.bias==='Bearish').length, paEnter=live.filter(p=>p.pa&&p.pa.action==='enter');
+    sum.innerHTML='<span class="pat-chip">'+TFN[S.tf]+' &middot; '+C.length+' bars</span><span class="pat-chip up">'+bull+' recent bullish</span><span class="pat-chip down">'+bear+' recent bearish</span>'+
+      (paEnter.length?'<span class="pat-chip '+(paEnter[0].bias==='Bearish'?'down':'up')+'">Price-action entry now: '+paEnter.map(p=>esc(p.name)).join(', ')+'</span>':'<span class="pat-chip">No price-action entry right now</span>')+
+      (bull&&bear?'<span class="pat-chip" style="color:var(--amber);">Patterns disagree on this timeframe &mdash; size down / wait</span>':'')+
+      (all.length>vis.length?'<span class="pat-chip">'+(all.length-vis.length)+' hidden by the filters</span>':'');
+    if(!vis.length){ body.innerHTML='<tr><td colspan="7" class="metric-sub" style="text-align:center;padding:16px;">'+(all.length?'No patterns match the filters'+(S.show==='recent'?' (only recent ones are shown; switch Show to All for older)':'')+'.':'No patterns detected on this timeframe.')+'</td></tr>'; return; }
     body.innerHTML=vis.map(({p,i})=>{
       const lib=PatternEngine.LIB[p.key], op=S.open[p.key+i];
       const lv=(p.entry?'Entry <b>'+fmt(p.entry,2)+'</b>':'')+(p.stop?' &middot; Stop <b class="down">'+fmt(p.stop,2)+'</b>':'')+(p.target?' &middot; Target <b class="up">'+fmt(p.target,2)+'</b>':'')+(p.rr?' &middot; R:R '+p.rr.toFixed(1):'');
-      const st=p.status==='Failed'?'<span class="badge badge-hold">Failed</span>':p.status==='Weak break'?'<span class="badge badge-hold" style="color:var(--amber);">Breakout &middot; low volume &#9888;'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':p.status==='Confirmed'?'<span class="badge badge-'+(p.bias==='Bearish'?'sell':'buy')+'">Confirmed'+(p.barsSince!=null?' '+(p.barsSince===0?'today':p.barsSince+'b ago'):'')+'</span>':'<span class="badge badge-hold">Forming</span>';
+      const st=p.status==='Failed'?'<span class="badge badge-hold">Failed</span>':p.status==='Weak break'?'<span class="badge badge-hold" style="color:var(--amber);">Breakout &middot; low volume &#9888;</span>':p.status==='Confirmed'?'<span class="badge badge-'+(p.bias==='Bearish'?'sell':'buy')+'">Confirmed</span>':'<span class="badge badge-hold">Forming</span>';
       let volTxt='';
       if(p.vol!=null) volTxt+='<div class="metric-sub">Breakout volume '+p.vol.toFixed(1)+'&times; avg'+(p.vol>=1.2?' &#10003; confirms':' &mdash; below the 1.2&times; needed to confirm')+'</div>';
       else if(p.status==='Forming') volTxt+='<div class="metric-sub">Wait for a break on 1.2&times;+ volume</div>';
       if(p.dry!=null) volTxt+='<div class="metric-sub">Volume while forming: '+Math.round(p.dry*100)+'% of before'+(p.dry<=0.85?' (dry-up &#10003;)':p.dry>1.15?' (expanding &#9888;)':'')+'</div>';
-      const dist=p.distPct!=null?'<div class="metric-sub">Price '+(p.distPct>=0?'+':'')+p.distPct.toFixed(1)+'% vs entry</div>':'';
       let warn='';
-      if(p.status!=='Forming'&&p.status!=='Failed'&&p.entry!=null&&p.stop!=null&&S.candles.length){ const lastC=S.candles[S.candles.length-1].c; const toStop=(p.bias==='Bullish'?(p.entry-lastC):(lastC-p.entry))/Math.abs(p.entry-p.stop);
+      if(p.status!=='Forming'&&p.status!=='Failed'&&p.entry!=null&&p.stop!=null&&C.length){ const lastC=C[C.length-1].c; const toStop=(p.bias==='Bullish'?(p.entry-lastC):(lastC-p.entry))/Math.abs(p.entry-p.stop);
         if(toStop>=0.6) warn='<div class="metric-sub" style="color:var(--amber)">&#9888; Price has moved '+Math.round(Math.min(toStop,1.5)*100)+'% of the way to the stop &mdash; this setup is failing. Use the Trade planner below for a fresh plan.</div>';
-        else if(p.barsSince!=null&&p.barsSince>=10) warn='<div class="metric-sub">Entry is the breakout level from '+p.barsSince+' bars ago. For a fresh entry at today\'s price use the Trade planner below.</div>'; }
-      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span>'+(p.scale==='minor'?' <span class="pat-type" title="Found at a finer swing scale, so treat it as lower-weight">minor swing</span>':'')+'<div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
-        '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+volTxt+'</td><td>'+paHtml(p)+'</td>'+
+        else if(p.barsSince!=null&&p.barsSince>FRESH[S.tf]) warn='<div class="metric-sub">The entry is the breakout level from '+p.barsSince+' bars ago. For a fresh entry at today\'s price use the Trade planner below.</div>'; }
+      const ag=M._ag||{up:[],dn:[]}, d=dirOf(p), others=(d>0?ag.up:d<0?ag.dn:[]).filter(x=>x!==S.tf);
+      return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span>'+(p.scale==='minor'?' <span class="pat-type" title="Found at a finer swing scale, so treat it as lower-weight">minor swing</span>':'')+
+        (others.length?'<div><span class="pg-pill mtf">&#10003; also '+(d>0?'bullish':'bearish')+' on '+others.map(x=>TFN[x]).join(' + ')+'</span></div>':'')+'<div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
+        '<td class="'+biasCls(p.bias)+'"><b>'+p.bias+'</b></td><td>'+st+'<div style="margin-top:3px">'+ageHtml(p,S.tf,C)+'</div>'+volTxt+'</td><td>'+paHtml(p)+'</td>'+
         '<td><div class="pat-conf"><i style="width:'+p.conf+'%"></i></div>'+p.conf+'%</td>'+
-        '<td>'+lv+dist+warn+'</td>'+
+        '<td>'+lv+'<div class="metric-sub">'+distHtml(p,C)+'</div><div>'+trHtml(p,S.tf)+'</div>'+warn+'</td>'+
         '<td class="pat-logic" data-toggle="'+p.key+i+'"><span class="pat-logic-brief">'+lib.brief+'</span> <a class="pat-more">'+(op?'less ▴':'full logic ▾')+'</a></td></tr>'+
         (op?'<tr class="pat-xrow"><td colspan="7">'+fullHtml(p)+'</td></tr>':'');
     }).join('');
   }
-
-  /* ---------- chart with pattern overlay ---------- */
   function ensureChart(){
     const box=$('patChart');
-    if(typeof LightweightCharts==='undefined'){ box.innerHTML='<div class="metric-sub" style="padding:30px;text-align:center;">Chart library not loaded &mdash; the table above still works.</div>'; return false; }
+    if(typeof LightweightCharts==='undefined'){ box.innerHTML='<div class="metric-sub" style="padding:30px;text-align:center;">Chart library not loaded &mdash; the table still works.</div>'; return false; }
     if(S.chart) return true;
     box.innerHTML='';
-    S.chart=LightweightCharts.createChart(box,{width:box.clientWidth||600,height:340,layout:{background:{color:'#0b0f17'},textColor:'#8a94a6'},grid:{vertLines:{color:'#151c28'},horzLines:{color:'#151c28'}},rightPriceScale:{borderColor:'#1f2733'},timeScale:{borderColor:'#1f2733',timeVisible:S.tf==='1h'}});
+    S.chart=LightweightCharts.createChart(box,chartOpts(box,360,S.tf));
     S.series=S.chart.addCandlestickSeries({upColor:'#26c281',downColor:'#ef5350',borderUpColor:'#26c281',borderDownColor:'#ef5350',wickUpColor:'#26c281',wickDownColor:'#ef5350'});
     window.addEventListener('resize',()=>{ try{ S.chart.applyOptions({width:box.clientWidth}); }catch(e){} });
     return true;
   }
-  function clearOverlay(){
-    S.extra.forEach(s=>{ try{ S.chart.removeSeries(s); }catch(e){} }); S.extra=[];
-    S.priceLines.forEach(l=>{ try{ S.series.removePriceLine(l); }catch(e){} }); S.priceLines=[];
-  }
   function drawChart(){
-    if(!S.candles.length||!ensureChart()) return;
-    try{ S.chart.applyOptions({timeScale:{timeVisible:S.tf==='1h'}}); }catch(e){}
+    if(!S.candles.length){ if(S.chart){ try{ S.series.setData([]); }catch(e){} } return; }
+    if(!ensureChart()) return;
+    try{ S.chart.applyOptions({timeScale:{timeVisible:S.tf==='15m'||S.tf==='1h'}}); }catch(e){}
     S.series.setData(S.candles.map(c=>({time:c.t,open:c.o,high:c.h,low:c.l,close:c.c})));
     overlay(S.res&&S.res.patterns[S.sel],false);
   }
-  // draws one pattern's formation; hover=true uses a bright, thick, labelled style so it stands out
-  function overlay(p,hover){
-    if(!S.chart) return;
-    clearOverlay();
-    try{ S.series.setMarkers([]); }catch(e){}
-    if(!p){ if(!hover){ try{ S.chart.timeScale().fitContent(); }catch(e){} } return; }
-    const C=S.candles;
-    const base=p.bias==='Bearish'?'#ef5350':p.bias==='Bullish'?'#26c281':'#f0a93a';
-    const color=hover?'#ffd400':base;
-    const marks=[];
-    p.lines.forEach(l=>{
-      const a=barTime(C,l.i1), b=barTime(C,l.i2); if(a===b) return;
-      const ls=S.chart.addLineSeries({color,lineWidth:hover?3:2,lineStyle:l.dash?2:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
-      ls.setData([{time:Math.min(a,b),value:l.p1},{time:Math.max(a,b),value:l.p2}]); S.extra.push(ls);
-      if(hover&&l.label) marks.push({time:Math.min(a,b),position:l.p1>=l.p2?'aboveBar':'belowBar',color:'#ffd400',shape:'circle',text:l.label});
-    });
-    if(hover){
-      marks.sort((x,y)=>x.time-y.time);
-      // one marker per bar time (library requirement): merge labels
-      const m={}; marks.forEach(k=>{ if(m[k.time]) m[k.time].text+=' / '+k.text; else m[k.time]=k; });
-      try{ S.series.setMarkers(Object.values(m).sort((x,y)=>x.time-y.time)); }catch(e){}
-    }
-    const pl=(price,c,title)=>{ if(price) S.priceLines.push(S.series.createPriceLine({price,color:c,lineWidth:1,lineStyle:2,axisLabelVisible:true,title})); };
-    pl(p.entry,'#3d8bfd','Entry'); pl(p.stop,'#ef5350','Stop'); pl(p.target,'#26c281','Target');
-    try{ const from=barTime(C,Math.max(0,p.i0-15)); S.chart.timeScale().setVisibleRange({from,to:C[C.length-1].t}); }catch(e){}
-  }
+  function overlay(p,hover){ if(S.chart) drawOn(S,p,hover,false); }
   function select(i){ S.sel=i; render(); drawChart(); }
 
-  /* ---------- multi-stock scan (uses the same real daily history as the screener) ---------- */
+  /* ---------- scan: every stock on Daily, then Hourly; stocks where both agree come first (suggestion 4) ---------- */
+  let scanStop=false, scanning=false;
+  function recentOf(C,tf){ let r; try{ r=PatternEngine.detect(C); }catch(e){ return []; } return r.patterns.filter(p=>p.status!=='Failed'&&isRecent(p,tf,C)); }
+  function biasOfList(l){ let b=0; l.forEach(p=>b+=dirOf(p)*(p.conf/100)); return b>0.15?1:b<-0.15?-1:0; }
+  function tagList(l,sym,tf){ return l.length?l.map(p=>'<span class="pat-tag '+biasCls(p.bias)+'" title="'+esc(p.status+' · conf '+p.conf+'%')+'">'+esc(p.name)+(p.status==='Confirmed'?' ✓':p.status==='Weak break'?' ⚠':' …')+(p.pa&&p.pa.action==='enter'?' <b>▶ '+(p.bias==='Bearish'?'SELL':'BUY')+'</b>':'')+'</span>'+
+      ((p.bias==='Bullish'||p.bias==='Bearish')&&p.stop!=null?window.monBtn({source:'pattern',symbol:sym,side:p.bias==='Bearish'?'SELL':'BUY',mode:tf==='1h'?'intraday':'swing',sl:p.pa&&p.pa.action==='enter'&&p.pa.stopPx!=null?p.pa.stopPx:p.stop,target:p.target,label:p.name+' ('+TFN[tf]+')',note:p.name+' on the '+TFN[tf].toLowerCase()+' chart. Price action: '+(p.pa?p.pa.label:'')+'.'},'+'):'')).join(''):'<span class="pg-sub">&mdash;</span>'; }
+  function scanTable(found){
+    const rows=Object.values(found).filter(f=>f.d.length||f.h.length);
+    rows.forEach(f=>{ f.bd=biasOfList(f.d); f.bh=biasOfList(f.h); f.agree=f.bd!==0&&f.bd===f.bh; });
+    rows.sort((a,b)=>b.agree-a.agree||(b.d.length+b.h.length)-(a.d.length+a.h.length));
+    return rows.length?'<table><thead><tr><th>Symbol</th><th>Daily (recent)</th><th>Hourly (recent)</th><th>Both agree?</th></tr></thead><tbody>'+rows.map(f=>'<tr><td><a class="pat-sym" data-sym="'+esc(f.s)+'"><b>'+esc(f.s)+'</b></a><div class="metric-sub">'+esc(f.name)+'</div></td><td>'+tagList(f.d,f.s,'1D')+'</td><td>'+(f.hDone?tagList(f.h,f.s,'1h'):'<span class="pg-sub">checking…</span>')+'</td><td>'+(f.agree?'<span class="pg-pill '+(f.bd>0?'up':'down')+'">'+(f.bd>0?'&#9650; both bullish':'&#9660; both bearish')+'</span>':f.hDone&&f.bd&&f.bh&&f.bd!==f.bh?'<span class="pg-pill amb">conflict</span>':'')+'</td></tr>').join('')+'</tbody></table>':'<div class="metric-sub">No recent patterns found yet.</div>';
+  }
   async function scan(){
-    const btn=$('patScanBtn'); btn.disabled=true; $('patScanOut').innerHTML='';
-    const rows=STOCKS.concat(INDEX_ROWS_LIST); const syms=rows.map(r=>r[0]);
-    $('patScanStatus').textContent='Loading daily history for '+syms.length+' symbols…';
+    const btn=$('patScanBtn');
+    if(scanning){ scanStop=true; btn.textContent='Stopping…'; return; }
+    scanning=true; scanStop=false; btn.textContent='■ Stop scan'; $('patScanOut').innerHTML=''; try{ $('patScanStatus').scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){}
+    const rows=STOCKS.concat(INDEX_ROWS_LIST); const syms=rows.map(r=>r[0]); const found={};
+    $('patScanStatus').textContent='Daily: loading history for '+syms.length+' symbols…';
     try{ await fetchScanHistory(syms); }catch(e){}
-    const found=[]; let done=0;
-    syms.forEach(s=>{
-      const h=window.REAL_HIST[s]; if(!h||!h.c||h.c.length<60) return; done++;
-      const C=h.c.map((c,i)=>({t:h.t?h.t[i]:i,o:h.o&&h.o[i]!=null?h.o[i]:c,h:h.h?h.h[i]:c,l:h.l?h.l[i]:c,c,v:h.v?h.v[i]:0}));
-      let r; try{ r=PatternEngine.detect(C); }catch(e){ return; }
-      if(r.patterns.length) found.push({s,name:(rows.find(x=>x[0]===s)||[])[1]||s,pats:r.patterns});
-    });
-    found.sort((a,b)=>b.pats.length-a.pats.length||b.pats[0].conf-a.pats[0].conf);
-    $('patScanStatus').textContent='Scanned '+done+' of '+syms.length+' symbols with real daily history · '+found.length+' with active patterns (click a symbol to open its chart).';
-    $('patScanOut').innerHTML=found.length?'<table><thead><tr><th>Symbol</th><th>Active patterns</th></tr></thead><tbody>'+found.map(f=>'<tr><td><a class="pat-sym" data-sym="'+esc(f.s)+'"><b>'+esc(f.s)+'</b></a><div class="metric-sub">'+esc(f.name)+'</div></td><td>'+
-      f.pats.map(p=>'<span class="pat-tag '+biasCls(p.bias)+'" title="'+esc(p.status+' · conf '+p.conf+'%')+'">'+esc(p.name)+(p.status==='Confirmed'?' ✓':p.status==='Weak break'?' ⚠':p.status==='Failed'?' ✗':' …')+(p.pa&&p.pa.action==='enter'?' <b>▶ '+(p.bias==='Bearish'?'SELL':'BUY')+'</b>':p.pa&&p.pa.action==='wait'?' (wait)':'')+'</span>'+((p.bias==='Bullish'||p.bias==='Bearish')&&p.status!=='Failed'&&p.stop!=null?window.monBtn({source:'pattern',symbol:f.s,side:p.bias==='Bearish'?'SELL':'BUY',mode:'swing',sl:p.pa&&p.pa.action==='enter'&&p.pa.stopPx!=null?p.pa.stopPx:p.stop,target:p.target,label:p.name+' (1D)',note:p.name+' on the daily chart. Price action: '+(p.pa?p.pa.label:'')+'.'},'+'):'')).join('')+'</td></tr>').join('')+'</tbody></table>':'<div class="metric-sub">No active patterns found in the scanned list.</div>';
-    btn.disabled=false;
+    let done=0;
+    syms.forEach(s=>{ const h=window.REAL_HIST[s]; if(!h||!h.c||h.c.length<60) return; done++;
+      const C=h.c.map((c,i)=>({t:h.t?h.t[i]:i,o:h.o&&h.o[i]!=null?h.o[i]:c,h:h.h?h.h[i]:c,l:h.l?h.l[i]:c,c,v:h.v?h.v[i]:0})).slice(-320);
+      found[s]={s,name:(rows.find(x=>x[0]===s)||[])[1]||s,d:recentOf(C,'1D'),h:[],hDone:false}; });
+    $('patScanOut').innerHTML=scanTable(found);
+    // hourly, a few symbols at a time (each is a separate Upstox request)
+    const list=syms.filter(s=>found[s]); let k=0, hOk=0;
+    async function worker(){ while(k<list.length&&!scanStop){ const s=list[k++];
+        try{ const r=await fetchTf(s,'1h'); found[s].h=recentOf(r.candles,'1h'); hOk++; }catch(e){}
+        found[s].hDone=true;
+        $('patScanStatus').textContent='Daily done ('+done+' symbols) · Hourly '+k+'/'+list.length+'… stocks where both timeframes agree are listed first';
+        if(k%8===0) $('patScanOut').innerHTML=scanTable(found); } }
+    await Promise.all([worker(),worker(),worker()]);
+    $('patScanOut').innerHTML=scanTable(found);
+    const agree=Object.values(found).filter(f=>f.agree).length;
+    $('patScanStatus').textContent=(scanStop?'Stopped. ':'')+'Scanned '+done+' symbols on Daily and '+hOk+' on Hourly (recent patterns only) · '+agree+' where both timeframes agree, listed first. Click a symbol to open it.';
+    scanning=false; btn.textContent='Scan all stocks';
   }
 
   /* ---------- historical hit rates ---------- */
@@ -5675,37 +5890,50 @@ const PatternUI = (function(){
   }
 
   /* ---------- wiring ---------- */
+  function rerenderAll(){ if(!M.sym) return; refresh(); const v=visible(); if(S.sel==null||!v.some(x=>x.i===S.sel)) S.sel=v.length?v[0].i:null; render(); drawChart(); }
+  function seg(id,key){ const el=$(id); if(!el) return; el.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; el.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); S[key]=b.dataset.v; try{ localStorage.setItem('pg_'+key,S[key]); }catch(x){} rerenderAll(); }); }
   function init(){
     try{ const c=JSON.parse(localStorage.getItem('patHit_v2')||'null'); if(c&&c.all&&$('patHitOut')) $('patHitOut').innerHTML=hitTable(c.all,c.meta+' (saved from your last run)'); }catch(e){}
     if($('patHitBtn')) $('patHitBtn').addEventListener('click',hitRates);
     if(!sectionReady()) return;
+    try{ ['show','bias'].forEach(k=>{ const v=localStorage.getItem('pg_'+k); if(v){ S[k]=v; const el=$(k==='show'?'pgShow':'pgBias'); el&&el.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.v===v)); } }); }catch(e){}
+    seg('pgShow','show'); seg('pgBias','bias');
     $('patGo').addEventListener('click',()=>load());
     $('patSym').addEventListener('keydown',e=>{ if(e.key==='Enter') load(); });
-    $('patTf').addEventListener('change',()=>{ S.chart&&(S.chart.remove(),S.chart=null); load(S.sym); });
-    $('patFilter').addEventListener('change',e=>{ S.filter=e.target.value; render(); });
+    $('patFilter').addEventListener('change',e=>{ S.filter=e.target.value; rerenderAll(); });
     $('patScanBtn').addEventListener('click',scan);
-    $('patBody').addEventListener('mouseover',e=>{
-      const r=e.target.closest('.pat-row'); if(!r||!S.res) return; const i=+r.dataset.i; if(S.hover===i) return;
-      S.hover=i; overlay(S.res.patterns[i],true); $('patChart').scrollIntoView&&0;
+    $('pgDtf').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b&&M.sym) setDetail(b.dataset.v); });
+    // grid: hover previews a pattern on its mini chart, click opens it in the detailed view
+    const grid=$('pgGrid');
+    grid.addEventListener('mouseover',e=>{ const r=e.target.closest('.pg-row'); if(!r) return; const T=M.tf[r.dataset.tf]; if(T&&T.res) drawOn(T,T.res.patterns[+r.dataset.i],true,true); });
+    grid.addEventListener('mouseout',e=>{ const r=e.target.closest('.pg-row'); if(!r||r.contains(e.relatedTarget)) return; const T=M.tf[r.dataset.tf]; if(T&&T.res) drawOn(T,T.sel!=null?T.res.patterns[T.sel]:null,false,true); });
+    grid.addEventListener('click',e=>{
+      if(e.target.closest('[data-addmon]')) return;
+      const sa=e.target.closest('[data-showall]'); if(sa){ e.preventDefault(); $('pgShow').querySelector('[data-v=all]').click(); return; }
+      const o=e.target.closest('[data-open]'); if(o){ setDetail(o.dataset.open); $('patChart').scrollIntoView({behavior:'smooth',block:'center'}); return; }
+      const r=e.target.closest('.pg-row'); if(!r) return; const tf=r.dataset.tf, i=+r.dataset.i, T=M.tf[tf];
+      T.sel=i; card(tf,true); setDetail(tf,i); $('patChart').scrollIntoView({behavior:'smooth',block:'center'});
     });
+    $('patBody').addEventListener('mouseover',e=>{ const r=e.target.closest('.pat-row'); if(!r||!S.res) return; const i=+r.dataset.i; if(S.hover===i) return; S.hover=i; overlay(S.res.patterns[i],true); });
     $('patBody').addEventListener('mouseleave',()=>{ if(S.hover==null||!S.res) return; S.hover=null; overlay(S.res.patterns[S.sel],false); });
     $('patBody').addEventListener('click',e=>{
+      if(e.target.closest('[data-addmon]')) return;
       const t=e.target.closest('[data-toggle]');
       if(t){ S.open[t.dataset.toggle]=!S.open[t.dataset.toggle]; render(); return; }
       const r=e.target.closest('.pat-row'); if(r) select(+r.dataset.i);
     });
-    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; $('patTf').value='1D'; load(a.dataset.sym); gotoSection('sec-patterns'); } });
+    $('patScanOut').addEventListener('click',e=>{ const a=e.target.closest('.pat-sym'); if(a){ $('patSym').value=a.dataset.sym; load(a.dataset.sym); gotoSection('sec-patterns'); } });
     // lazy: analyse the open stock the first time the section scrolls into view, and again when the stock changes
     let lastSym=null;
     const check=()=>{
       const el=$('sec-patterns'); if(!el||S.loading) return;
       const r=el.getBoundingClientRect(); const vis=r.top<window.innerHeight*1.2&&r.bottom>0&&el.offsetParent!==null;
       const cs=currentSym();
-      if(vis&&(!S.sym||cs!==lastSym)){ lastSym=cs; load(cs); }
+      if(vis&&(!M.sym||cs!==lastSym)){ lastSym=cs; load(cs); }
     };
     window.addEventListener('scroll',check,{passive:true}); setInterval(check,1500);
   }
-  return {init,load,scan,_S:S};
+  return {init,load,scan,_S:S,_M:M};
 })();
 window.PatternUI=PatternUI; window.PatternEngine=PatternEngine;
 PatternUI.init();

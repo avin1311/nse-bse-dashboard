@@ -5577,6 +5577,10 @@ const PatternUI = (function(){
     return '<span class="pg-sub">Track record on the '+nm+' '+word+': <b class="'+(hit/a.length>=0.5?'up':'down')+'">'+hit+' of '+a.length+'</b> hit the target first &middot; avg <b class="'+(R>=0?'up':'down')+'">'+(R>=0?'+':'')+R.toFixed(2)+'R</b>'+(a.length<5?' <span class="pg-pill amb" title="Fewer than 5 past signals: treat as anecdotal">small sample</span>':'')+'</span>';
   }
 
+  // "+ Monitor" for any live directional pattern (tracks it from the live price with the pattern's stop and target)
+  function monFor(p,tf){ if(!(p.bias==='Bullish'||p.bias==='Bearish')||p.status==='Failed') return '';
+    const a=p.pa||{}, sl=a.action==='enter'&&a.stopPx!=null?a.stopPx:p.stop;
+    return '<div style="margin-top:4px">'+window.monBtn({source:'pattern',symbol:M.sym||S.sym,side:p.bias==='Bearish'?'SELL':'BUY',mode:tf==='15m'||tf==='1h'?'intraday':'swing',sl,target:p.target,label:p.name+' ('+TFN[tf]+')',note:p.name+' on the '+TFN[tf].toLowerCase()+' chart.'+(a.label?' Price action: '+a.label+'.':'')})+'</div>'; }
   /* ---------- filters ---------- */
   function passes(p,tf,C){
     if(S.bias!=='all'&&p.bias.toLowerCase()!==S.bias) return false;
@@ -5756,7 +5760,7 @@ const PatternUI = (function(){
       return '<div class="pg-row'+(T.sel===i?' sel':'')+'" data-tf="'+tf+'" data-i="'+i+'"><b class="'+biasCls(p.bias)+'">'+(d>0?'&#9650; ':d<0?'&#9660; ':'')+esc(p.name)+'</b>'+
         (p.status==='Confirmed'?'<span class="pg-pill '+(d<0?'down':'up')+'">confirmed</span>':p.status==='Forming'?'':'')+ageHtml(p,tf,C)+pa+
         (others.length?'<span class="pg-pill mtf" title="Same direction on another timeframe">&#10003; also '+(d>0?'bullish':'bearish')+' on '+others.map(x=>TFN[x]).join(' + ')+'</span>':'')+
-        '<div class="pg-sub">'+distHtml(p,C)+'</div><div>'+trHtml(p,tf)+'</div></div>'; }).join('')+(vis.length>5?'<div class="pg-sub" style="padding:4px 6px;">+'+(vis.length-5)+' more in the detailed view</div>':'')
+        '<div class="pg-sub">'+distHtml(p,C)+'</div><div>'+trHtml(p,tf)+'</div>'+monFor(p,tf)+'</div>'; }).join('')+(vis.length>5?'<div class="pg-sub" style="padding:4px 6px;">+'+(vis.length-5)+' more in the detailed view</div>':'')
       :'<div class="pg-sub" style="padding:8px 6px;">No '+(S.show==='recent'?'recent ':'')+'pattern'+(S.bias!=='all'?' ('+S.bias+')':'')+' on this timeframe.</div>')+
       (S.show==='recent'&&hidden>0?'<div class="pg-sub" style="padding:4px 6px;">'+hidden+' older or failed pattern'+(hidden>1?'s':'')+' hidden &middot; <a href="#" data-showall="1">show all</a></div>':'');
     mini(tf,keepChart);
@@ -5814,15 +5818,13 @@ const PatternUI = (function(){
       '<div class="metric-sub" style="margin-top:6px;">Detected by rule-based swing-point analysis (thresholds scale with the stock&apos;s volatility) &mdash; a screening aid, not a trade instruction. Confirm on the chart before acting.</div></div>';
   }
   function paHtml(p){
-    const a=p.pa; if(!a) return '<span class="metric-sub">&mdash;</span>';
+    const a=p.pa; if(!a) return '<span class="metric-sub">&mdash;</span>'+monFor(p,S.tf);
     const col=a.action==='enter'?(p.bias==='Bearish'?'var(--red)':'var(--green)'):a.action==='avoid'?'var(--red)':a.action==='wait'?'var(--amber)':'var(--text2)';
     const word={enter:p.bias==='Bearish'?'SELL':'BUY',wait:'WAIT',watch:'WATCH',avoid:'AVOID'}[a.action]||'';
     const NM={structure:'Structure',candle:p.brk==null?'Candle at level':'Breakout candle',hold:'Held',retest:'Retest',room:'Room'};
     const ck=Object.keys(a.checks||{}).map(k=>'<span style="color:var(--'+(a.checks[k]?'green':'text2')+')">'+(a.checks[k]?'✓':'✗')+' '+NM[k]+'</span>').join(' ');
     const lv=a.entryPx!=null&&a.action==='enter'?'<div class="metric-sub">PA entry <b>'+fmt(a.entryPx,2)+'</b> &middot; stop <b class="down">'+fmt(a.stopPx,2)+'</b></div>':'';
-    const canMon=(p.bias==='Bullish'||p.bias==='Bearish')&&p.status!=='Failed'&&p.stop!=null;
-    const mode=S.tf==='15m'||S.tf==='1h'?'intraday':'swing';
-    const mon=canMon?'<div style="margin-top:4px">'+window.monBtn({source:'pattern',symbol:S.sym,side:p.bias==='Bearish'?'SELL':'BUY',mode,sl:a.action==='enter'&&a.stopPx!=null?a.stopPx:p.stop,target:p.target,label:p.name+' ('+TFN[S.tf]+')',note:p.name+' on the '+TFN[S.tf].toLowerCase()+' chart. Price action: '+a.label+'.'})+'</div>':'';
+    const mon=monFor(p,S.tf);
     return '<b style="color:'+col+'">'+word+'</b> <span style="font-size:12px">'+esc(a.label)+'</span>'+lv+mon+(ck?'<div class="metric-sub" style="margin-top:3px">'+ck+'</div>':'')+(a.notes&&a.notes.length?'<div class="metric-sub" title="'+esc(a.notes.join('. '))+'">'+esc(a.notes[0])+(a.notes.length>1?' &middot; &hellip;':'')+'</div>':'');
   }
   function render(){

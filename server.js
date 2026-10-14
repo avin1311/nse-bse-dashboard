@@ -362,6 +362,7 @@ app.get('/api/quotes', async (req, res) => {
 // if the token isn't set or Upstox errors.
 // ============================================================
 const ltpcCache = {};
+const badEqKeys = new Set(); // built-in stock IDs that returned no data (an ISIN changes after a split): never used again
 const LTPC_TTL = 5000; // 5 second local cache so rapid UI refreshes don't hammer the API
 
 async function getUpstoxLTPC(instrumentKey) {
@@ -379,7 +380,7 @@ async function getUpstoxLTPC(instrumentKey) {
     const data = await upstoxGet(`/market-quote/ltp?instrument_key=${encodeURIComponent(instrumentKey)}`);
     entry = data && (data[instrumentKey.replace('|', ':')] || Object.values(data)[0]);
   }
-  if (!entry) throw new Error('No quote returned for ' + instrumentKey);
+  if (!entry) { if (/^NSE_EQ\|/.test(instrumentKey)) badEqKeys.add(instrumentKey); throw new Error('No quote returned for ' + instrumentKey); }
   const price = entry.last_price;
   let prevClose = (entry.net_change != null && price != null) ? price - entry.net_change : (entry.cp || entry.ohlc?.close || price);
   const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : 0;
@@ -1175,7 +1176,7 @@ const UPSTOX_INDEX_KEYS = {
 // Hardcoded NSE_EQ instrument keys for the most commonly opened stocks.
 // These follow the pattern NSE_EQ|<ISIN> and are used as a fallback when
 // the Upstox instruments file hasn't loaded yet (or fails to fetch on Render).
-// Format: NSE_EQ|<ISIN> — ISINs are permanent and never change for a stock.
+// Format: NSE_EQ|<ISIN>. Note: an ISIN DOES change after a stock split, so the live Upstox list is preferred (see dataKeyFor).
 const HARDCODED_EQ_KEYS = {
   RELIANCE:   'NSE_EQ|INE002A01018',
   TCS:        'NSE_EQ|INE467B01029',
@@ -1431,16 +1432,19 @@ const APP_TO_YAHOO = Object.fromEntries(Object.entries(YAHOO_TO_APP).map(([y, a]
 const appSym = ys => YAHOO_TO_APP[ys] || String(ys).replace(/\.NS$/, '');
 const yahooSym = as => APP_TO_YAHOO[as] || (as + '.NS');
 
-const resolvedIdxKeys = {};
+const resolvedIdxKeys = {}, keyMemo = { t: 0, m: null };
 async function dataKeyFor(sym) {
   if (resolvedIdxKeys[sym]) return resolvedIdxKeys[sym];
   if (DATA_INDEX_KEYS[sym]) return DATA_INDEX_KEYS[sym];
   const normalized = sym.replace(/[&-]/g, '_');
-  if (HARDCODED_EQ_KEYS[sym]) return HARDCODED_EQ_KEYS[sym];
-  if (HARDCODED_EQ_KEYS[normalized]) return HARDCODED_EQ_KEYS[normalized];
-  if (!universeCache.data) await fetchAndCacheUniverse().catch(() => {});
-  const hit = universeCache.data && universeCache.data.find(x => x.symbol === sym);
-  if (hit && hit.instrument_key) return hit.instrument_key;
+  // Upstox's own instrument list (refreshed daily) wins: a stock's ISIN changes after a split, so a built-in ID can go stale
+  const live = () => { const U = universeCache.data; if (!U) return null; if (keyMemo.t !== universeCache.time) { keyMemo.t = universeCache.time; keyMemo.m = new Map(); for (const x of U) { const cur = keyMemo.m.get(x.symbol); if (!cur || (!/^NSE_EQ\|/.test(cur.instrument_key || '') && /^NSE_EQ\|/.test(x.instrument_key || ''))) keyMemo.m.set(x.symbol, x); } } return keyMemo.m.get(sym) || null; };
+  let hit = live(); if (hit && hit.instrument_key) return hit.instrument_key;
+  const hk = HARDCODED_EQ_KEYS[sym] || HARDCODED_EQ_KEYS[normalized];
+  if (hk && !badEqKeys.has(hk)) return hk; // fast fallback while the list is still loading
+  if (!universeCache.data || Date.now() - (universeCache.time || 0) > 3600000) await fetchAndCacheUniverse().catch(() => {}); // refresh at most hourly
+  hit = live(); if (hit && hit.instrument_key) return hit.instrument_key;
+  if (hk) return hk;
   throw new Error('No Upstox instrument key for ' + sym);
 }
 // [unit, interval, days back]  (weeks/months: from 2000)
@@ -1483,6 +1487,10 @@ async function getUpstoxCandles(sym, tf) {
     if (kw && DATA_INDEX_KEYS[sym] && /instrument|invalid|not found|400|404/i.test(e.message)) { // self-heal a wrong index key by name search
       key = await findIndexInstrumentKey(kw); resolvedIdxKeys[sym] = key; rows = await fetchCandlesForKey(key, tf);
     } else throw e;
+  }
+  if (!rows.length && /^NSE_EQ\|/.test(key) && !badEqKeys.has(key)) { // stale stock ID (e.g. after a split): mark it and retry with the live instrument list
+    badEqKeys.add(key); const k2 = await dataKeyFor(sym);
+    if (k2 !== key) { try { rows = await fetchCandlesForKey(k2, tf); } catch (e) { rows = []; } }
   }
   if (!rows.length) throw new Error('Upstox returned no candles for ' + sym);
   candleCache[ck] = { data: rows, time: Date.now() };

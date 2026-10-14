@@ -1506,13 +1506,8 @@ app.get('/api/candles/:symbol', async (req, res) => {
   const last = candleCache[sym + '|' + tf];
   const maxAge = (/m|h/.test(tf) && tf !== '1M') ? 30 * 60000 : 24 * 3600000;
   if (last && Date.now() - last.time < maxAge) return res.json({ symbol: sym, tf, source: 'upstox', stale: true, ageSec: Math.round((Date.now() - last.time) / 1000), series: last.data, note: errors.join(' | ') });
-  try {
-    const [r, i] = YF_TF[tf] || YF_TF['5m'];
-    const p = await getChartData(yahooSym(sym), r, i);
-    if (p && p.series && p.series.length > 5) return res.json({ symbol: sym, tf, source: 'yahoo', series: p.series, note: errors.join(' | ') });
-    errors.push('Yahoo: no data');
-  } catch (e) { errors.push('Yahoo: ' + e.message); }
-  res.status(502).json({ error: errors.join(' | '), symbol: sym });
+  // Upstox only: no other vendor's numbers are mixed in; the page shows the error instead
+  res.status(502).json({ error: 'Upstox data unavailable: ' + errors.join(' | '), symbol: sym });
 });
 
 app.get('/api/upstox/fno/:index', async (req, res) => {
@@ -2128,7 +2123,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-14-r23 (index options proven-only; proven calls not blocked by unproven; no re-entry after a stop; breakeven counted apart; stocks vs index options in summaries and Monitor filter)';
+const BUILD = '2026-10-14-r24 (auto-pause losing kinds; chart candles Upstox-only; old backtest box removed)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2392,10 +2387,16 @@ function maybeBuildGate() {
   gate.lastTry = Date.now();
   lowPriority.run(true, () => buildGate().catch(() => {}));
 }
+// Auto-pause: a kind with 100+ past trades whose average AND newer (unseen) half are both below zero issues no calls,
+// not even paper ones. It is re-tested at every lab rebuild and comes back by itself if the numbers recover.
+const RETIRE_MIN_TRADES = Number(process.env.GATE_RETIRE_MIN_TRADES) || 100;
+const isRetired = k => !!(k && !k.pass && k.n >= RETIRE_MIN_TRADES && k.avg != null && k.avg < 0 && k.newer != null && k.newer < 0);
+const retireReason = k => `paused: losing over ${k.n} past trades (avg ${k.avg}%, newer half ${k.newer}%); re-tested every 12 hours`;
 // { ok: issue the call, proven: passed the lab, reason }
 function gateCheck(key) {
   if (GATE_MODE === 'off') return { ok: true, proven: true };
   const k = gate.t && gate.kinds[key];
+  if (isRetired(k)) return { ok: false, proven: false, retired: true, reason: retireReason(k) };
   const reason = !gate.t ? (gate.building ? 'strategy lab still running' : 'strategy lab not run yet') : !k ? 'no past trades of this kind' : k.reason;
   const proven = !!(k && k.pass);
   return { ok: proven || GATE_MODE !== 'strict', proven, reason: proven ? 'passed' : reason };
@@ -2414,9 +2415,9 @@ app.get('/api/calls/gate', (req, res) => {
   if (req.query.rebuild === '1' && !gate.building) { gate.t = 0; gate.lastTry = 0; maybeBuildGate(); }
   else maybeBuildGate();
   const src = Object.keys(gate.kinds || {}).length ? gate.kinds : (gate.partial || {}); // while the first run is in progress, show finished families
-  const kinds = Object.entries(src).map(([key, v]) => ({ key, ...v })).sort((a, b) => a.key < b.key ? -1 : 1);
+  const kinds = Object.entries(src).map(([key, v]) => ({ key, ...v, retired: isRetired(v), reason: isRetired(v) ? retireReason(v) : v.reason })).sort((a, b) => a.key < b.key ? -1 : 1);
   const mem = process.memoryUsage();
-  res.json({ server: { upMin: Math.round(process.uptime() / 60), rssMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576) }, labStartedAt: gate.building ? gate.startedAt : null, tookMin: gate.tookMin || null, enabled: GATE_MODE !== 'off', mode: GATE_MODE, indexGate: INDEX_GATE, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
+  res.json({ server: { upMin: Math.round(process.uptime() / 60), rssMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576) }, labStartedAt: gate.building ? gate.startedAt : null, tookMin: gate.tookMin || null, enabled: GATE_MODE !== 'off', mode: GATE_MODE, indexGate: INDEX_GATE, retireMinTrades: RETIRE_MIN_TRADES, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
 });
 async function backtestOneCall(spec, supplied) {
   if (spec.kind === 'index') return backtestIndexCall(spec, supplied);

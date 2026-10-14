@@ -539,6 +539,96 @@ async function walkIndex(sym, bars, opts, yieldFn) {
   return out;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// EMA 20/50 CROSSOVER (index options, intraday) on 5-minute ('x5') or 15-minute ('x15') bars.
+// Price from the index spot; VOLUME from the index's near-month futures (an index itself has no volume).
+// Six checks: volume surge on the cross, bigger-timeframe trend, VWAP side, the averages actually separating
+// (not a flat market), trend strength (ADX), and a strong candle. Entry on the cross candle or on the first pullback
+// to the 20 EMA after it. The lab picks the combination; nothing goes live unless it is proven.
+// ---------------------------------------------------------------------------------------------
+function prepCross(bars, vols, tf) {
+  const c = bars.map(b => b.c), h = bars.map(b => b.h), l = bars.map(b => b.l), o = bars.map(b => b.o != null ? b.o : b.c), n = bars.length;
+  const v = bars.map(b => (vols && vols.get(b.t)) || 0), k = tf === '5m' ? 3 : 4; // bigger-timeframe proxy: 15-min (x3) or hourly (x4) 20/50
+  const e20 = ema(c, 20), e50 = ema(c, 50), eF = ema(c, 20 * k), eS = ema(c, 50 * k), A = atr(h, l, c);
+  // ADX(14), Wilder
+  const adx = new Array(n).fill(null); { let tr = 0, pd = 0, md = 0, ax = null, cnt = 0;
+    for (let i = 1; i < n; i++) { const up = h[i] - h[i - 1], dn = l[i - 1] - l[i], t = Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
+      const p = up > dn && up > 0 ? up : 0, m = dn > up && dn > 0 ? dn : 0;
+      if (i <= 14) { tr += t; pd += p; md += m; if (i === 14) cnt = 1; continue; }
+      tr = tr - tr / 14 + t; pd = pd - pd / 14 + p; md = md - md / 14 + m;
+      const pdi = tr ? 100 * pd / tr : 0, mdi = tr ? 100 * md / tr : 0, dx = pdi + mdi ? 100 * Math.abs(pdi - mdi) / (pdi + mdi) : 0;
+      ax = ax == null ? dx : (ax * 13 + dx) / 14; adx[i] = ax; } }
+  // session VWAP (futures volume) and volume vs the same time slot on the last 10 sessions
+  const vwap = [], volR = [], dayFirst = []; let day = null, pv = 0, vv = 0, first = 0; const slots = new Map();
+  for (let i = 0; i < n; i++) {
+    const d = Math.floor((bars[i].t + 19800) / 86400), slot = Math.floor(((bars[i].t + 19800) % 86400) / 60);
+    if (d !== day) { day = d; pv = 0; vv = 0; first = i; }
+    const tp = (h[i] + l[i] + c[i]) / 3; pv += tp * v[i]; vv += v[i]; vwap.push(vv > 0 ? pv / vv : null); dayFirst.push(first);
+    const hist = slots.get(slot) || []; const avg = hist.length >= 4 ? hist.reduce((a, b) => a + b, 0) / hist.length : null;
+    volR.push(avg && v[i] > 0 ? v[i] / avg : null);
+    if (v[i] > 0) { hist.push(v[i]); if (hist.length > 10) hist.shift(); slots.set(slot, hist); }
+  }
+  return { bars, c, h, l, o, v, e20, e50, eF, eS, A, adx, vwap, volR, dayFirst, tf };
+}
+// opts: side, entry ('cross'|'retest'), volK (0 = volume not required, else minimum volume ratio, mandatory), htf (bigger trend
+// required), minScore (of 6), stopK, exit (EXITS key), setup ('x5'|'x15')
+function evalCross(X, n, opts = {}) {
+  const { bars, c, h, l, o, e20, e50, eF, eS, A, adx, vwap, volR, dayFirst } = X;
+  if (n < 60 || A[n] == null) return null;
+  const a = A[n], px = c[n], dir = i => Math.sign(e20[i] - e50[i]);
+  let crossAt = -1, side = null;
+  if (opts.entry === 'retest') { // first pullback to the 20 EMA within 6 bars after a cross, closing back in the trend's direction
+    for (let j = n - 1; j >= Math.max(dayFirst[n], n - 6); j--) if (dir(j) !== dir(j - 1) && dir(j) !== 0) { crossAt = j; break; }
+    if (crossAt < 0 || dir(n) !== dir(crossAt)) return null;
+    const d = dir(n); for (let j = crossAt + 1; j < n; j++) if (d > 0 ? l[j] <= e20[j] : h[j] >= e20[j]) return null; // only the FIRST touch counts
+    if (!(d > 0 ? l[n] <= e20[n] * 1.0005 && px > e20[n] && px > o[n] : h[n] >= e20[n] * 0.9995 && px < e20[n] && px < o[n])) return null;
+    side = d > 0 ? 'BUY' : 'SELL';
+  } else {
+    if (dir(n) === dir(n - 1) || dir(n) === 0) return null; crossAt = n; side = dir(n) > 0 ? 'BUY' : 'SELL';
+  }
+  if (opts.side && side !== opts.side) return null;
+  if (n - dayFirst[n] < 1) return null; // never on the day's first candle
+  const d = side === 'BUY' ? 1 : -1, rng = Math.max(1e-9, h[n] - l[n]), vr = volR[crossAt] != null ? volR[crossAt] : volR[n];
+  const chk = {
+    vol: vr != null && vr >= Math.max(1.2, opts.volK || 0),
+    htf: d > 0 ? eF[n] > eS[n] && px > eS[n] : eF[n] < eS[n] && px < eS[n],
+    vwap: vwap[n] != null && (d > 0 ? px > vwap[n] : px < vwap[n]),
+    spread: Math.abs(e20[n] - e50[n]) >= 0.1 * a && (d > 0 ? e20[n] >= e20[n - 2] : e20[n] <= e20[n - 2]),
+    adx: adx[n] != null && adx[n] >= 20,
+    candle: d > 0 ? px > o[n] && (px - l[n]) / rng >= 0.6 : px < o[n] && (h[n] - px) / rng >= 0.6,
+  };
+  if (opts.volK && !(vr != null && vr >= opts.volK)) return null; // volume is mandatory when the lab chooses it
+  if (opts.htf && !chk.htf) return null;
+  const score = Object.values(chk).filter(Boolean).length; if (score < (opts.minScore || 4)) return null;
+  // stop: beyond the last 5 candles' extreme (or the 50 EMA), at least 1x ATR x stopK, at most 0.6% of price
+  const sk = opts.stopK || 1; let ext = d > 0 ? Math.min(...l.slice(n - 4, n + 1)) : Math.max(...h.slice(n - 4, n + 1));
+  let stopDist = Math.max(sk * a, Math.abs(px - ext) + 0.2 * a); stopDist = Math.min(stopDist, 0.006 * px); stopDist = Math.max(stopDist, 0.0015 * px);
+  const entry = tick(px), sl = tick(entry - d * stopDist), rr = EXITS[opts.exit] || EXITS.A, targets = rr.map(m => tick(entry + d * stopDist * m));
+  const f = x => r2(x), tfw = X.tf === '5m' ? '5-minute' : '15-minute', up = d > 0;
+  const why = [`${tfw} 20 EMA crossed ${up ? 'above' : 'below'} the 50 EMA${opts.entry === 'retest' ? ', then price pulled back to the 20 EMA and turned ' + (up ? 'up' : 'down') : ''}`,
+    vr != null ? `Volume ${f(vr)}x the usual for this time of day (index futures)` : 'Futures volume not available',
+    `Bigger trend (${X.tf === '5m' ? '15-minute' : 'hourly'} 20/50): ${chk.htf ? 'agrees' : 'does not agree'}`, vwap[n] != null ? `${px > vwap[n] ? 'Above' : 'Below'} session VWAP (${f(vwap[n])})` : '',
+    adx[n] != null ? `ADX ${f(adx[n])} (${adx[n] >= 20 ? 'trending' : 'weak trend'})` : ''].filter(Boolean);
+  return { side, mode: 'intraday', entry, sl, targets, riskLabel: stopDist / px * 100 < 0.35 ? 'LOW' : stopDist / px * 100 < 0.5 ? 'MEDIUM' : 'HIGH', score, checks: chk,
+    setup: opts.setup || (X.tf === '5m' ? 'x5' : 'x15'), engine: 'x1', kind: 'index', rr: 1, riskPct: r2(stopDist / px * 100), atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+}
+async function walkCross(sym, X, opts, yieldFn) {
+  const out = [], far = 4e9, bars = X.bars, step = X.tf === '5m' ? 300 : 900; let freeFrom = 0, cnt = 0; const perDay = {};
+  for (let i = 60; i < bars.length - 1; i++) {
+    const t = bars[i].t; if (t < freeFrom) continue;
+    const m = Math.floor(((t + 19800) % 86400) / 60); if (m < 555 || m > (opts.endMin || 840)) continue; // candles starting 9:15 (closing 9:20/9:30) to the cut-off
+    if (yieldFn && ++cnt % 400 === 0) await yieldFn();
+    const ev = evalCross(X, i, opts); if (!ev) continue;
+    const dk = Math.floor((t + 19800) / 86400); if ((perDay[dk] || 0) >= 3) continue; perDay[dk] = (perDay[dk] || 0) + 1;
+    const call = { t: t + step - 1, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets, costPct: IDX_COST };
+    const st = track(call, bars, far);
+    out.push({ ...tradeOf(sym, call, ev, st, 'MIXED'), mode: 'intraday' });
+    freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
+  }
+  return out;
+}
+
 /** Tracks an option-premium call; if the index spot closes beyond call.spotSl first, the call is closed at that bar's premium. */
 function trackOption(call, optBars, spotBars, nowSec) {
   let tInv = null;
@@ -732,6 +822,8 @@ const LAB_GRID = {
   stock_swing: product({ regime: ['any', 'b50', 'b60'], setup: ['trend', 'squeeze'], minScore: [4, 5, 6], stopK: [0.75, 1, 1.3], exit: ['A', 'B'] }),
   // trimmed to what earlier runs actually chose (5-6 checks, tighter stops, nearer targets) so the lab fits the server's small CPU
   // 'index must agree' was never chosen in earlier runs, so it is dropped to make room for the VWAP setup (built-in index check)
+  // EMA 20/50 crossover on 5- and 15-minute index bars (run once per timeframe; the setup key says which)
+  index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
   stock_intraday: product({ idxAgree: [false], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
 };
 function summarizeTrades(trades) {
@@ -740,4 +832,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

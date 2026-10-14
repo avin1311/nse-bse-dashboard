@@ -1633,15 +1633,34 @@ const SCAN_EVERY = 8 * 60 * 1000;
 const CALLS_MAX = 600;
 let callsDb = null; let callsLoading = null;
 const callsState = { running: false, lastScan: 0, lastErr: null, scanned: 0, found: 0 };
+let callsLoadedOk = false; // false = storage could not be read: never overwrite the stored history with a partial list
+async function storeGetStrict(key) { const raw = await redisCmd('GET', key); return raw ? JSON.parse(raw) : null; } // throws on a storage error
 async function loadCalls() {
   if (callsDb) return callsDb;
-  if (!callsLoading) callsLoading = storeGet('store:trade-calls', []).then(a => { callsDb = Array.isArray(a) ? a : [];
+  if (!callsLoading) callsLoading = (async () => {
+    for (let i = 0; i < 4; i++) {
+      try { const a = await storeGetStrict('store:trade-calls'); callsLoadedOk = true; return Array.isArray(a) ? a : []; }
+      catch (e) { if (/not configured/.test(e.message)) return []; await new Promise(r => setTimeout(r, 1500 * (i + 1))); }
+    }
+    return []; // storage unreachable: work in memory, and merge with the stored list before the next save
+  })().then(a => { callsDb = a;
     // repair: a closed call's result always comes from its exit price (an old race could leave a live-price P/L on it)
     callsDb.forEach(c => { if (c.closed && c.exit != null && c.entry > 0) { const sg = c.side === 'BUY' ? 1 : -1, g = sg * (c.exit - c.entry) / c.entry * 100, cost = c.costPct != null ? c.costPct : Calls.costPct(c.mode); c.grossPct = Math.round(g * 100) / 100; c.pnlPct = Math.round((g - cost) * 100) / 100; c.ltp = c.exit; } });
     return callsDb; });
   return callsLoading;
 }
-async function saveCalls() { try { await storeSet('store:trade-calls', callsDb.slice(-CALLS_MAX)); } catch (e) { /* memory-only mode */ } }
+async function saveCalls() {
+  try {
+    if (!callsLoadedOk) { // the first load failed: fetch the stored list now and merge, instead of overwriting it
+      const a = await storeGetStrict('store:trade-calls'); callsLoadedOk = true;
+      if (Array.isArray(a)) { const have = new Set(callsDb.map(c => c.id)); const old = a.filter(c => !have.has(c.id)); if (old.length) callsDb.unshift(...old); }
+    }
+    await storeSet('store:trade-calls', callsDb.slice(-CALLS_MAX));
+    const day = istDateKey(Math.floor(Date.now() / 1000)); // one rolling backup per day, kept 10 days
+    if (lastCallsBackup !== day) { lastCallsBackup = day; try { await redisCmd('SET', 'store:trade-calls:bak:' + day, JSON.stringify(callsDb.slice(-CALLS_MAX)), 'EX', '864000'); } catch (e) {} }
+  } catch (e) { /* storage unreachable: keep in memory, retry on the next save */ }
+}
+let lastCallsBackup = null;
 const toBars = rows => rows.map(r => ({ t: r.t, o: r.o, h: r.h, l: r.l, c: r.c, v: r.v }));
 function istMinsNow() { const p = istParts(); return p.mins; }
 
@@ -1704,6 +1723,28 @@ async function applyTrack(c) {
   if (c.closed && !before.closed) c.closedAt = c.exitT || Math.floor(Date.now() / 1000);
   for (const e of callEvents(c, before)) await emitEvent(e, true);
 }
+// Intraday calls are squared off at INTRADAY_EXIT (default 15:20 IST) at the live price, instead of waiting for the next scan.
+const INTRADAY_EXIT_MIN = (() => { const m = /^(\d{1,2}):(\d{2})$/.exec(process.env.INTRADAY_EXIT || '15:20'); return m ? +m[1] * 60 + +m[2] : 920; })();
+let squaring = false;
+async function squareOffIntraday() {
+  if (squaring || !upstoxTokens().length) return;
+  const { dow, mins } = istParts(); if (dow < 1 || dow > 5 || mins < INTRADAY_EXIT_MIN || mins > 16 * 60) return;
+  squaring = true;
+  try {
+    const db = await loadCalls(), now = Math.floor(Date.now() / 1000), day = istDateKey(now); let changed = false;
+    for (const c of db.filter(x => !x.closed && x.mode === 'intraday' && istDateKey(x.t) === day)) {
+      try {
+        const q = await getUpstoxLTPC(c.instrumentKey || await dataKeyFor(c.symbol)); if (!(q.price > 0) || c.closed) continue;
+        const sg = c.side === 'BUY' ? 1 : -1, cost = c.costPct != null ? c.costPct : Calls.costPct(c.mode), gross = sg * (q.price - c.entry) / c.entry * 100;
+        Object.assign(c, { status: 'EXPIRED', closed: true, exit: Math.round(q.price * 100) / 100, ltp: Math.round(q.price * 100) / 100, exitT: now, closedAt: now, grossPct: Math.round(gross * 100) / 100, pnlPct: Math.round((gross - cost) * 100) / 100 });
+        changed = true;
+        await emitEvent({ id: c.id + ':EXPIRED', callId: c.id, source: srcOf(c), symbol: c.symbol, side: c.side, mode: c.mode, kind: 'EXPIRED', level: 'info', t: now, price: c.exit, pnlPct: c.pnlPct, text: `⏰ Intraday time exit ${Math.floor(INTRADAY_EXIT_MIN / 60)}:${String(INTRADAY_EXIT_MIN % 60).padStart(2, '0')}: ${c.side} ${c.symbol} at ${c.exit} (${c.pnlPct > 0 ? '+' : ''}${c.pnlPct}%)` }, true);
+      } catch (e) { /* retry next minute */ }
+    }
+    if (changed) await saveCalls();
+  } finally { squaring = false; }
+}
+setInterval(() => { squareOffIntraday().catch(() => {}); }, 60000).unref();
 let lastLive = 0;
 async function liveMonitor() {
   if (Date.now() - lastLive < 15000) return; lastLive = Date.now();
@@ -1881,7 +1922,8 @@ async function buildOptionCall(u, ev, spotLtp, nowSec) {
   const stop = Math.abs(spotLtp - spotSl);
   const tk = x => Math.round(x * 20) / 20;
   const entry = tk(ltp);
-  let sl = Math.max(entry - delta * stop, entry * 0.75); sl = tk(Math.min(sl, entry * 0.94)); // never risk more than 25% of the premium
+  const maxSl = Math.min(0.5, Math.max(0.03, (Number(process.env.OPTION_MAX_SL_PCT) || 10) / 100)), minSl = Math.min(0.06, maxSl * 0.6);
+  let sl = Math.max(entry - delta * stop, entry * (1 - maxSl)); sl = tk(Math.min(sl, entry * (1 - minSl))); // never risk more than OPTION_MAX_SL_PCT (default 10%) of the premium
   const targets = [1, 2, 3].map(m => tk(entry + delta * stop * m));
   const hold = pe.hold ? pe.hold : null, limitT = hold ? nowSec + hold * 86400 : undefined;
   const label = `${fmtDate(pe.expiry)}${spec.weekly ? ' (weekly)' : ' (monthly)'}`;
@@ -1890,7 +1932,7 @@ async function buildOptionCall(u, ev, spotLtp, nowSec) {
   return {
     id: u + '-' + ev.mode + '-' + nowSec, symbol, kind: 'option', underlying: u, dir: ev.side, side: 'BUY', optType, strike: row.strike_price, expiry: pe.expiry, expiryLabel: label, dte: pe.dte,
     expiryWhy: pe.why, weekly: !!spec.weekly, lotSize: spec.lot_size || spec.minimum_lot || null, instrumentKey: opt.instrument_key, mode: ev.mode, delta: Math.round(delta * 100) / 100,
-    entry, sl, targets, riskLabel: risk < 20 ? 'MEDIUM' : 'HIGH', riskPct: Math.round(risk * 10) / 10, score: ev.score, setup: ev.setup, engine: ev.engine, rs: null,
+    entry, sl, targets, riskLabel: risk < 8 ? 'MEDIUM' : 'HIGH', riskPct: Math.round(risk * 10) / 10, score: ev.score, setup: ev.setup, engine: ev.engine, rs: null,
     costPct: COST_OPTION, checks: ev.checks, analysis: ev.analysis, limitT, holdDays: hold,
     spot: { entry: spotLtp, sl: spotSl, targets: spotT }, spotSl, t: nowSec,
   };
@@ -2123,7 +2165,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-14-r24 (auto-pause losing kinds; chart candles Upstox-only; old backtest box removed)';
+const BUILD = '2026-10-14-r25 (Reset keeps open calls; safe storage loading + daily backup; intraday square-off 15:20; option stop max 10%; restore endpoint)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2579,8 +2621,35 @@ app.post('/api/calls/eod/run', async (req, res) => {
 });
 
 app.post('/api/calls/reset', async (req, res) => {
-  const db = await loadCalls(); db.length = 0; await saveCalls(); callsState.lastScan = 0;
-  res.json({ ok: true });
+  const db = await loadCalls();
+  try { await redisCmd('SET', 'store:trade-calls:bak:reset', JSON.stringify(db), 'EX', '604800'); } catch (e) {} // undo copy, kept 7 days
+  const keep = db.filter(c => !c.closed || c.manual); // open calls and manual Monitor items stay
+  const removed = db.length - keep.length; db.length = 0; db.push(...keep); await saveCalls(); callsState.lastScan = 0;
+  res.json({ ok: true, removed, kept: keep.length });
+});
+// Put back a call lost before this fix (e.g. an open swing trade removed by the old Reset). The stop and targets are rebuilt
+// from the swing engine on the daily bars before the call's day, moved to the original entry price.
+app.post('/api/calls/restore', async (req, res) => {
+  try {
+    const b = req.body || {}, sym = String(b.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, ''), side = b.side === 'SELL' ? 'SELL' : 'BUY';
+    const entry = Number(b.entry), t = Number(b.t), mode = b.mode === 'intraday' ? 'intraday' : 'swing';
+    if (!sym || !(entry > 0) || !(t > 0)) return res.status(400).json({ error: 'symbol, entry and t are required' });
+    const db = await loadCalls();
+    if (db.some(c => c.symbol === sym && !c.closed && !c.manual)) return res.status(409).json({ error: sym + ' already has an open call' });
+    const bars = await getHistUpstox(sym, 400), dayStart = t - ((t + 19800) % 86400), k = bars.filter(x => x.t < dayStart).length - 1;
+    const P = Calls.prep(bars.slice(0, k + 1)); let ev = null;
+    for (const kd of liveKinds('stock_swing', ['stk|swing|BUY|trend'])) { const [, , sd, setup] = kd.key.split('|'); if (sd !== side) continue;
+      const e = Calls.evalAt(P, k, 'swing', { ...kd.params, side, setup: setup === 'bounce' ? 'trend' : setup }); if (e) { ev = { ...e, gateKey: kd.key }; break; } }
+    const sg = side === 'BUY' ? 1 : -1, A = Calls.atr(bars.map(x => x.h), bars.map(x => x.l), bars.map(x => x.c))[k];
+    const dist = ev ? Math.abs(ev.entry - ev.sl) : 2 * A, mult = ev ? ev.targets.map(x => Math.abs(x - ev.entry) / dist) : [1.5, 3, 4.5], tk = x => Math.round(x * 20) / 20;
+    const sl = Number(b.sl) > 0 ? Number(b.sl) : tk(entry - sg * dist), targets = Array.isArray(b.targets) && b.targets.length ? b.targets.map(Number) : mult.map(m => tk(entry + sg * dist * m));
+    const call = { id: 'restored-' + sym + '-' + t, symbol: sym, side, mode, entry, sl, activeSl: sl, targets, t, status: 'ACTIVE', targetsHit: 0, ltp: entry, exit: null, pnlPct: 0, closed: false,
+      riskLabel: (dist / entry * 100 < 3 ? 'LOW' : dist / entry * 100 < 5.5 ? 'MEDIUM' : 'HIGH'), riskPct: Math.round(dist / entry * 1000) / 10, score: ev ? ev.score : null, setup: ev ? ev.setup : 'trend', engine: 'v3',
+      gateKey: ev ? ev.gateKey : 'stk|swing|BUY|trend', unproven: true, restored: true, costPct: Calls.costPct(mode),
+      analysis: 'Restored after it was removed by the old Reset button. ' + (ev ? 'Stop and targets rebuilt from the swing rules on the daily bars before the call. ' + ev.analysis : 'Stop at 2x the daily ATR, targets 1.5/3/4.5x the risk (the swing signal could not be re-derived).') };
+    await trackCall(call); if (call.closed) call.closedAt = call.exitT || Math.floor(Date.now() / 1000);
+    db.push(call); await saveCalls(); res.json({ ok: true, call });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/calls', async (req, res) => {
   const db = await loadCalls();

@@ -111,6 +111,11 @@
   /* chart-pattern section */
   .sb-tbl{width:100%;border-collapse:collapse;font-size:12px;}
   .sb-tbl td{padding:5px 6px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  .sf-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:var(--panel2);font-size:13px;line-height:1.5;}
+  .sf-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;} .sf-chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .sf-chip{border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:12px;background:var(--panel);} .sf-chip.on{border-color:var(--blue);}
+  .sf-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;} .sf-list{margin:4px 0 6px;padding-left:18px;} .sf-list li{margin:2px 0;}
+  @media(max-width:760px){.sf-cols{grid-template-columns:1fr;}}
   .pg-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;}
   .pg-sym{display:flex;gap:6px;flex:1 1 260px;min-width:220px;} .pg-sym input{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;}
   .pg-controls select{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:7px 8px;border-radius:8px;font-size:12px;}
@@ -520,6 +525,7 @@
 <div class="vtab-pane" id="vtab-screener" data-vtab="screener" style="display:none;">
   <section id="sec-screener" class="panel">
     <div class="panel-head"><h3>Multi-stock screener</h3><span class="metric-sub" id="screenerCount"></span></div>
+    <div id="screenerFocus"></div>
     <div class="filters">
       <button class="btn scan-btn" id="screenerScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan now</button>
       <button class="btn" id="exportScreenerBtn">Export CSV</button>
@@ -2162,7 +2168,27 @@ function renderScreener(){
   }).join('');
   body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; selectStock(tr.dataset.symbol); }));
   body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
+  renderScreenerFocus();
 }
+// The open stock, explained: why the screener gives it this signal (score parts in plain words), above the multi-stock table
+function renderScreenerFocus(){
+  const el=document.getElementById('screenerFocus'); if(!el) return;
+  const d=window.CURRENT; if(!d||!d.horizons||!d.horizons.swing){ el.innerHTML=''; return; }
+  const hk=(document.getElementById('screenerHorizon')||{}).value, combo=HORIZON_COMBOS[hk]||['swing'], key=combo.includes('swing')?'swing':combo[0];
+  const NM={intraday:'Intraday',swing:'Swing',longterm:'Long-term'}, h=d.horizons[key]; if(!h) { el.innerHTML=''; return; }
+  const parts=(h.breakdown||[]).filter(x=>x.label.indexOf('Base')!==0).slice().sort((a,b)=>Math.abs(b.points)-Math.abs(a.points));
+  const pros=parts.filter(x=>x.points>0).slice(0,3), cons=parts.filter(x=>x.points<0).slice(0,3);
+  const li=x=>`<li><b class="${x.points>=0?'up':'down'}">${x.points>=0?'+':''}${x.points.toFixed(1)}</b> ${x.label} <span class="metric-sub">&middot; ${x.note}</span></li>`;
+  const chips=['intraday','swing','longterm'].map(k=>{ const y=d.horizons[k]; return y?`<span class="sf-chip${k===key?' on':''}">${NM[k]} <span class="signal-chip sig-${y.signal}">${y.signalLabel}</span> <b>${y.score}</b>/100</span>`:''; }).join('');
+  const verdict=h.signal.includes('buy')?'more reasons to buy than to sell':h.signal.includes('sell')?'more reasons to sell than to buy':'the reasons roughly cancel out';
+  el.innerHTML=`<div class="sf-card"><div class="sf-head"><div><b style="font-size:15px;">${d.symbol}</b> <span class="metric-sub">${d.name?d.name+' &middot; ':''}open stock</span></div><div class="sf-chips">${chips}</div></div>
+    <div style="margin:6px 0 4px;">Why <b>${h.signalLabel}</b> on the <b>${NM[key]}</b> view (score ${h.score}/100): ${verdict}. Every score starts at 50; each check below adds or subtracts points.</div>
+    <div class="sf-cols"><div><div class="metric-sub" style="font-weight:600;">PUSHING IT UP</div><ul class="sf-list">${pros.map(li).join('')||'<li class="metric-sub">Nothing positive</li>'}</ul></div>
+    <div><div class="metric-sub" style="font-weight:600;">HOLDING IT BACK</div><ul class="sf-list">${cons.map(li).join('')||'<li class="metric-sub">Nothing negative</li>'}</ul></div></div>
+    <details><summary class="metric-sub" style="cursor:pointer;">Full score breakdown</summary>${scoreBreakdownHtml(h)}</details>
+    <div class="metric-sub" style="margin-top:6px;">Click any row in the table below to open that stock; this panel then explains its signal. The view (Intraday / Swing / Long-term) follows the horizon picker.</div></div>`;
+}
+{ const _rs=renderSignal; renderSignal=function(d){ _rs(d); try{ renderScreenerFocus(); }catch(e){} }; }
 document.getElementById('screenerHorizon')?.addEventListener('change', renderScreener);
 document.getElementById('moreFiltersBtn')?.addEventListener('click',()=>{
   const panel=document.getElementById('moreFiltersPanel');
@@ -2544,10 +2570,10 @@ window.cbtBtn=function(c){
   async function load(scan){ try{ const r=await fetch('/api/calls'+(scan?'?scan=1':''),{cache:'no-store'}); data=await r.json(); }catch(e){} draw(); loadGate(false); }
   function open(){
     ov=document.createElement('div'); ov.className='ov'; ov.style.alignItems='flex-start';
-    ov.innerHTML='<div class="ov-card tc-wrap" style="max-width:820px;margin-top:20px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 style="margin:0">Trade Calls</h3><div><button class="btn" id="tcScan">Scan now</button> <button class="btn" id="tcReset" title="Delete all logged calls and start fresh">Reset calls</button> <button class="btn" id="tcClose">Close</button></div></div><div id="tcBody"></div></div>';
+    ov.innerHTML='<div class="ov-card tc-wrap" style="max-width:820px;margin-top:20px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h3 style="margin:0">Trade Calls</h3><div><button class="btn" id="tcScan">Scan now</button> <button class="btn" id="tcReset" title="Clear finished calls; open calls (incl. overnight swing trades) are kept">Clear closed</button> <button class="btn" id="tcClose">Close</button></div></div><div id="tcBody"></div></div>';
     document.body.appendChild(ov);
     ov.addEventListener('click',e=>{ if(e.target===ov||e.target.id==='tcClose'){ ov.remove(); ov=null; clearInterval(timer); } });
-    ov.querySelector('#tcReset').onclick=async()=>{ if(!confirm('Delete ALL logged calls (active and past) and start fresh?')) return; try{ await fetch('/api/calls/reset',{method:'POST'}); }catch(e){} data=null; load(true); };
+    ov.querySelector('#tcReset').onclick=async()=>{ if(!confirm('Clear finished (closed) calls? Open calls, including overnight swing trades, are kept until they exit.')) return; try{ await fetch('/api/calls/reset',{method:'POST'}); }catch(e){} data=null; load(true); };
     ov.querySelector('#tcScan').onclick=()=>{ load(true); setTimeout(()=>load(false),8000); setTimeout(()=>load(false),25000); };
     draw(); load(false); timer=setInterval(()=>load(false),60000);
   }

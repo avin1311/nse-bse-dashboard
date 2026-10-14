@@ -2688,7 +2688,7 @@ async function checkWatches() {
 app.post('/api/calls/monitor/remove', async (req, res) => {
   const db = await loadCalls(); const id = req.body && req.body.id; const i = db.findIndex(c => c.id === id);
   if (i < 0) return res.status(404).json({ error: 'not found' });
-  if (!db[i].manual) return res.status(400).json({ error: 'Trade Calls are tracked automatically and cannot be removed' });
+  if (!db[i].manual && !db[i].restored) return res.status(400).json({ error: 'Trade Calls are tracked automatically and cannot be removed' });
   db.splice(i, 1); await saveCalls(); res.json({ ok: true });
 });
 app.post('/api/calls/eod/run', async (req, res) => {

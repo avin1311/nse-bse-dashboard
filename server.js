@@ -1735,18 +1735,24 @@ const srcOf = c => c.source || 'calls';
 function buildEod(db, events, day, src) {
   if (src) { db = db.filter(c => srcOf(c) === src); const ids = new Set(db.map(c => c.id)); events = events.filter(e => ids.has(e.callId)); }
   const r2 = x => Math.round(x * 100) / 100;
-  const slim = c => ({ symbol: c.symbol, source: srcOf(c), side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0 });
+  const slim = c => ({ symbol: c.symbol, kind: c.kind || 'stock', source: srcOf(c), side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0 });
   const created = db.filter(c => istDateKey(c.t) === day);
   const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day);
   const active = db.filter(c => !c.closed);
-  const wins = closed.filter(c => c.pnlPct > 0.05), losses = closed.filter(c => c.pnlPct < -0.05);
+  // an exit at the entry price is breakeven (its small minus is only costs), never a loss
+  const isW = c => c.status !== 'BREAKEVEN' && c.pnlPct > 0.05, isL = c => c.status !== 'BREAKEVEN' && c.pnlPct < -0.05;
+  const wins = closed.filter(isW), losses = closed.filter(isL);
   const sum = a => a.reduce((s, c) => s + c.pnlPct, 0);
+  // stocks and index options are kept apart: an option's % is of its premium and is not comparable to a stock's %
+  const part = f => { const cl = closed.filter(f), ac = active.filter(f), w = cl.filter(isW).length, l = cl.filter(isL).length;
+    return { created: created.filter(f).length, closed: cl.length, wins: w, losses: l, flat: cl.length - w - l, netPct: r2(sum(cl)), winRate: w + l ? r2(w / (w + l) * 100) : null, open: ac.length, openPnlPct: r2(sum(ac)) }; };
   const evs = events.filter(e => istDateKey(e.t) === day);
   const sorted = closed.slice().sort((a, b) => b.pnlPct - a.pnlPct);
   return {
     date: day, built: Math.floor(Date.now() / 1000),
     created: { total: created.length, buy: created.filter(c => c.side === 'BUY').length, sell: created.filter(c => c.side === 'SELL').length, intraday: created.filter(c => c.mode === 'intraday').length, swing: created.filter(c => c.mode === 'swing').length },
     closed: { total: closed.length, wins: wins.length, losses: losses.length, flat: closed.length - wins.length - losses.length, netPct: r2(sum(closed)), winRate: wins.length + losses.length ? r2(wins.length / (wins.length + losses.length) * 100) : null },
+    byType: { stocks: part(c => c.kind !== 'option'), options: part(c => c.kind === 'option') },
     targetHits: evs.filter(e => /^T\d$/.test(e.kind)).length, slHits: evs.filter(e => e.kind === 'SL').length,
     active: { total: active.length, openPnlPct: r2(sum(active)), inProfit: active.filter(c => c.pnlPct > 0.05).length, inLoss: active.filter(c => c.pnlPct < -0.05).length, list: active.map(slim) },
     best: sorted[0] ? slim(sorted[0]) : null, worst: sorted.length ? slim(sorted[sorted.length - 1]) : null,
@@ -1760,7 +1766,10 @@ function eodText(x) {
   let t = `📊 <b>Monitor: end of day ${x.date}</b>\n`;
   if (x.bySource) t += Object.keys(SOURCES).filter(k => x.bySource[k].created.total || x.bySource[k].closed.total || x.bySource[k].active.total).map(k => { const y = x.bySource[k]; return `${SOURCES[k]}: ${y.closed.total} closed (${y.closed.wins}W/${y.closed.losses}L, net ${sg(y.closed.netPct)}), ${y.active.total} open`; }).join('\n') + '\n';
   t += `New today: ${x.created.total} (buy ${x.created.buy}, sell ${x.created.sell}; intraday ${x.created.intraday}, swing ${x.created.swing})\n`;
-  t += `Closed today: ${x.closed.total}, wins ${x.closed.wins}, losses ${x.closed.losses}, net ${sg(x.closed.netPct)}` + (x.closed.winRate != null ? `, win rate ${x.closed.winRate}%` : '') + '\n';
+  t += `Closed today: ${x.closed.total} (${x.closed.wins}W / ${x.closed.losses}L / ${x.closed.flat} breakeven)` + (x.closed.winRate != null ? `, win rate ${x.closed.winRate}%` : '') + '\n';
+  if (x.byType) { const S = x.byType.stocks, O = x.byType.options;
+    if (S.closed || S.open) t += `  Stocks: ${S.closed} closed (${S.wins}W/${S.losses}L/${S.flat} BE), net ${sg(S.netPct)}\n`;
+    if (O.closed || O.open) t += `  Index options: ${O.closed} closed (${O.wins}W/${O.losses}L/${O.flat} BE), net ${sg(O.netPct)} of premium\n`; }
   t += `Targets hit: ${x.targetHits}, stops hit: ${x.slHits}\n`;
   t += `Still open: ${x.active.total} (${x.active.inProfit} in profit, ${x.active.inLoss} in loss, combined running ${sg(x.active.openPnlPct)})\n`;
   if (x.best) t += `Best: ${x.best.symbol} ${sg(x.best.pnlPct)}\n`;
@@ -1930,15 +1939,20 @@ async function runIndexScan(db, notes) {
   found.sort((a, b) => b.score - a.score);
   const made = { intraday: 0, swing: 0 };
   const DAY_CAP = { intraday: 3, swing: 2 };
+  found.sort((a, b) => (gateCheck(b.gateKey || '').proven ? 1 : 0) - (gateCheck(a.gateKey || '').proven ? 1 : 0)); // proven signals first
   for (const f of found) {
     if (CAPS_ON && made[f.mode] >= 1) continue; // one new call per mode per scan
-    const openOpt = optCalls.filter(c => !c.closed);
-    if (openOpt.some(c => c.underlying === f.u && (c.mode === f.mode || c.dir !== f.side))) continue; // one open call per index per mode, never both directions on one index
-    if (CAPS_ON && openOpt.filter(c => c.dir === f.side).length >= 2) continue; // indices move together: no more than 2 on the same side
-    if (CAPS_ON && optCalls.filter(c => c.mode === f.mode && dayNo(c.t) === today).length >= DAY_CAP[f.mode]) continue;
-    if (optCalls.some(c => c.underlying === f.u && c.closed && nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 3600 : 2 * 86400))) continue;
     const gk = f.gateKey || `idx|${f.mode}|${f.side}|${f.setup}`, g = gateCheck(gk);
     if (!g.ok) { gateBlocked(`${f.u} ${f.mode} ${f.side} ${f.setup}`, gk, g.reason); st.skipped.push(f.u + ' ' + f.mode + ': paused by backtest gate'); continue; }
+    if (!g.proven && INDEX_GATE !== 'paper') { gateBlocked(`${f.u} ${f.mode} ${f.side} ${f.setup}`, gk, 'index options: proven kinds only (' + g.reason + ')'); st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ' ' + f.setup + ': not proven (index options are proven-only)'); continue; }
+    // proven and unproven calls never block each other: the limits below only look at calls of the same status
+    const same = c => !!c.unproven === !g.proven, peers = optCalls.filter(same), openOpt = peers.filter(c => !c.closed);
+    if (openOpt.some(c => c.underlying === f.u && (c.mode === f.mode || c.dir !== f.side))) continue; // one open call per index per mode, never both directions on one index
+    if (CAPS_ON && openOpt.filter(c => c.dir === f.side).length >= 2) continue; // indices move together: no more than 2 on the same side
+    if (CAPS_ON && peers.filter(c => c.mode === f.mode && dayNo(c.t) === today).length >= DAY_CAP[f.mode]) continue;
+    if (peers.some(c => c.underlying === f.u && c.closed && nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 3600 : 2 * 86400))) continue;
+    // no second try in the same direction on an index after a stop today (the idea already failed)
+    if (optCalls.some(c => c.underlying === f.u && c.dir === f.side && c.mode === f.mode && c.closed && c.status === 'SL_HIT' && dayNo(c.closedAt || c.t) === today)) { st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ': already stopped out in this direction today'); continue; }
     try {
       const q = await getUpstoxLTPC(await dataKeyFor(f.u)); const ltp = q.price;
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) { st.skipped.push(f.u + ': price already ran away from the signal'); continue; }
@@ -2114,7 +2128,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-14-r22 (patterns: V-shaped cups, sloping triple necklines, decision zones + trigger watch, confluence in hit-rate test)';
+const BUILD = '2026-10-14-r23 (index options proven-only; proven calls not blocked by unproven; no re-entry after a stop; breakeven counted apart; stocks vs index options in summaries and Monitor filter)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2243,7 +2257,10 @@ async function backtestIndexCall(spec, supplied) {
 const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.05, idx_swing: Number(process.env.GATE_IDX_SWING_MIN) || 0.25,
   stk_intraday: Number(process.env.GATE_STK_INTRADAY_MIN) || 0.03, stk_swing: Number(process.env.GATE_STK_SWING_MIN) || 0.10 };
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
-const CAPS_ON = process.env.CALLS_CAPS === 'on'; // count limits on calls; off by default during paper testing
+const CAPS_ON = process.env.CALLS_CAPS === 'on';
+// index option calls: 'strict' (default) = only kinds proven by the lab; 'paper' = unproven ones too (marked). Options lose
+// ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
+const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
 storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 7 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold' };
@@ -2399,7 +2416,7 @@ app.get('/api/calls/gate', (req, res) => {
   const src = Object.keys(gate.kinds || {}).length ? gate.kinds : (gate.partial || {}); // while the first run is in progress, show finished families
   const kinds = Object.entries(src).map(([key, v]) => ({ key, ...v })).sort((a, b) => a.key < b.key ? -1 : 1);
   const mem = process.memoryUsage();
-  res.json({ server: { upMin: Math.round(process.uptime() / 60), rssMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576) }, labStartedAt: gate.building ? gate.startedAt : null, tookMin: gate.tookMin || null, enabled: GATE_MODE !== 'off', mode: GATE_MODE, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
+  res.json({ server: { upMin: Math.round(process.uptime() / 60), rssMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576) }, labStartedAt: gate.building ? gate.startedAt : null, tookMin: gate.tookMin || null, enabled: GATE_MODE !== 'off', mode: GATE_MODE, indexGate: INDEX_GATE, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
 });
 async function backtestOneCall(spec, supplied) {
   if (spec.kind === 'index') return backtestIndexCall(spec, supplied);

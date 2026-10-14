@@ -782,7 +782,8 @@
       try{
         const r=await _f(u,o);
         let ct=''; try{ ct=(r.headers&&r.headers.get('content-type'))||''; }catch(e){}
-        const asleep=(r.status===502||r.status===503||r.status===504)||(/text\/html/.test(ct)&&r.status!==404);
+        // Render's sleep / wake-up answers are HTML (or empty); the dashboard's own errors are JSON and must be returned at once
+        const json=/application\/json/.test(ct), asleep=!json&&((r.status===502||r.status===503||r.status===504)||(/text\/html/.test(ct)&&r.status!==404));
         if(r.status===401 && !/^\/api\/auth/.test(url)){ if(counted) banner(false); if(window.showLogin) window.showLogin(); return r; }
         if(!asleep){ if(counted) banner(false); return r; }
         if(!counted){ counted=true; banner(true); }

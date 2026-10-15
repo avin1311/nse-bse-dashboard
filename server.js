@@ -524,6 +524,30 @@ app.get('/api/seasonality-batch', (req, res) => lowPriority.run(true, async () =
 // F&O-ENABLED UNDERLYINGS (from Upstox NSE instruments file), cached 24h
 // ============================================================
 const FNO_FALLBACK = ['RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','SBIN','BHARTIARTL','ITC','LT','KOTAKBANK','AXISBANK','HINDUNILVR','BAJFINANCE','MARUTI','SUNPHARMA','TITAN','ASIANPAINT','ULTRACEMCO','NESTLEIND','WIPRO','HCLTECH','TECHM','POWERGRID','NTPC','ONGC','COALINDIA','TATAMOTORS','TATASTEEL','JSWSTEEL','HINDALCO','ADANIENT','ADANIPORTS','M&M','BAJAJFINSV','DRREDDY','CIPLA','DIVISLAB','EICHERMOT','HEROMOTOCO','BPCL','GRASIM','INDUSINDBK','BRITANNIA','APOLLOHOSP','TATACONSUM','SBILIFE','HDFCLIFE','BAJAJ-AUTO','UPL','VOLTAS','PIDILITIND','DLF','GAIL','IOC','VEDL','SAIL','PNB','BANKBARODA','CANBK','IDFCFIRSTB','FEDERALBNK','AUBANK','BANDHANBNK','TATAPOWER','TATACHEM','TVSMOTOR','ASHOKLEY','BHEL','BEL','HAL','IRCTC','ZOMATO','PAYTM','NAUKRI','DMART','SIEMENS','ABB','HAVELLS','CROMPTON','GODREJCP','DABUR','MARICO','COLPAL','LUPIN','AUROPHARMA','TORNTPHARM','ALKEM','BIOCON','MCX','CHOLAFIN','MUTHOOTFIN','MANAPPURAM','LICHSGFIN','RECLTD','PFC','INDIGO','JUBLFOOD','PAGEIND','TRENT','BERGEPAINT','ACC','AMBUJACEM','SHREECEM','INDHOTEL','LTIM','PERSISTENT','COFORGE','MPHASIS','OFSS'];
+// The sector index each stock belongs to (for the sector-agreement rule and the safety block); stocks not listed use Nifty
+const SECTOR_GROUPS = {
+  BANKNIFTY: ['HDFCBANK','ICICIBANK','KOTAKBANK','AXISBANK','INDUSINDBK','IDFCFIRSTB','FEDERALBNK','AUBANK','BANDHANBNK'],
+  NIFTYPSUBANK: ['SBIN','PNB','BANKBARODA','CANBK'],
+  NIFTYIT: ['TCS','INFY','WIPRO','HCLTECH','TECHM','LTIM','PERSISTENT','COFORGE','MPHASIS','OFSS'],
+  NIFTYFMCG: ['ITC','HINDUNILVR','NESTLEIND','BRITANNIA','TATACONSUM','GODREJCP','DABUR','MARICO','COLPAL'],
+  NIFTYPHARMA: ['SUNPHARMA','DRREDDY','CIPLA','DIVISLAB','LUPIN','AUROPHARMA','TORNTPHARM','ALKEM','BIOCON'],
+  NIFTYAUTO: ['MARUTI','TATAMOTORS','M&M','EICHERMOT','HEROMOTOCO','BAJAJ-AUTO','TVSMOTOR','ASHOKLEY'],
+  NIFTYMETAL: ['TATASTEEL','JSWSTEEL','HINDALCO','VEDL','SAIL','COALINDIA'],
+  NIFTYENERGY: ['RELIANCE','ONGC','BPCL','IOC','GAIL','NTPC','POWERGRID','TATAPOWER'],
+  NIFTYREALTY: ['DLF'],
+  NIFTYINFRA: ['LT','ADANIPORTS','ULTRACEMCO','GRASIM','ACC','AMBUJACEM','SHREECEM','BHEL','SIEMENS','ABB']
+};
+const SECTOR_OF = {}; for (const [ix, list] of Object.entries(SECTOR_GROUPS)) for (const x of list) SECTOR_OF[x] = ix;
+const sectorOf = sym => SECTOR_OF[sym] || 'NIFTY';
+const SECTOR_LABEL = { NIFTY: 'Nifty 50', BANKNIFTY: 'Nifty Bank', NIFTYPSUBANK: 'Nifty PSU Bank', NIFTYIT: 'Nifty IT', NIFTYFMCG: 'Nifty FMCG', NIFTYPHARMA: 'Nifty Pharma', NIFTYAUTO: 'Nifty Auto', NIFTYMETAL: 'Nifty Metal', NIFTYENERGY: 'Nifty Energy', NIFTYREALTY: 'Nifty Realty', NIFTYINFRA: 'Nifty Infra' };
+// live move of a sector index today: { pct, aboveOpen }, cached 3 minutes
+const secMoveCache = {};
+async function getSectorMove(ix) {
+  const c = secMoveCache[ix]; if (c && Date.now() - c.t < 180000) return c.v;
+  let v = null;
+  try { const q = await getUpstoxLTPC(await dataKeyFor(ix)); if (q.price > 0 && q.prevClose > 0) v = { pct: (q.price / q.prevClose - 1) * 100, aboveOpen: q.open > 0 ? q.price >= q.open : null }; } catch (e) {}
+  secMoveCache[ix] = { t: Date.now(), v }; return v;
+}
 let fnoCache = { data: null, time: 0, source: null };
 app.get('/api/fno-stocks', (req, res) => lowPriority.run(true, async () => {
   if (fnoCache.data && Date.now() - fnoCache.time < 24 * 60 * 60 * 1000) return res.json({ symbols: fnoCache.data, source: fnoCache.source });
@@ -1737,6 +1761,7 @@ async function squareOffIntraday() {
       } catch (e) { /* retry next minute */ }
     }
     if (changed) await saveCalls();
+    try { await trackShadows(); } catch (e) {} // watch-only index signals get the same time exit
   } finally { squaring = false; }
 }
 setInterval(() => { squareOffIntraday().catch(() => {}); }, 60000).unref();
@@ -1941,6 +1966,41 @@ async function buildOptionCall(u, ev, spotLtp, nowSec) {
   };
 }
 const tickN = x => Math.round(x * 20) / 20;
+// ---- WATCH-ONLY index signals: a signal held back because its kind is not proven yet is still written up (strike,
+// premium, stop, targets) and followed to its result, but kept apart from the calls: never in P&L, summaries or alerts.
+let shadowDb = null;
+async function loadShadow() { if (!shadowDb) { const v = await storeGetStrict('store:calls-shadow').catch(() => undefined); if (v === undefined) return []; shadowDb = Array.isArray(v) ? v : []; } return shadowDb; }
+async function saveShadow() { if (!shadowDb) return; if (shadowDb.length > 200) shadowDb.splice(0, shadowDb.length - 200); try { await storeSet('store:calls-shadow', shadowDb); } catch (e) {} }
+async function addShadow(f, gk, reason, nowSec, st) {
+  const L = await loadShadow(); if (!shadowDb) return;
+  const dayNo = t => Math.floor((t + 19800) / 86400), today = dayNo(nowSec);
+  if (L.some(c => c.underlying === f.u && c.mode === f.mode && (!c.closed || nowSec - (c.closedAt || c.t) < 3600))) return; // one at a time per index and mode
+  if (L.some(c => c.underlying === f.u && c.dir === f.side && c.mode === f.mode && c.status === 'SL_HIT' && dayNo(c.closedAt || c.t) === today)) return;
+  try {
+    const q = await getUpstoxLTPC(await dataKeyFor(f.u)); const ltp = q.price;
+    if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) return;
+    const call = await buildOptionCall(f.u, f, ltp, nowSec);
+    Object.assign(call, { id: 'watch-' + call.id, watchOnly: true, status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false, gateKey: gk, gateLabel: gateLabel(gk), heldBack: reason, score: f.score });
+    L.push(call); await saveShadow();
+    st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ' ' + f.setup + ': written up as watch-only');
+  } catch (e) {}
+}
+async function trackShadows() {
+  const L = await loadShadow(); if (!shadowDb) return;
+  const now = Math.floor(Date.now() / 1000), { mins } = istParts(); let ch = false;
+  for (const c of L.filter(x => !x.closed)) {
+    try {
+      await trackCall(c); ch = true;
+      if (c.closed && !c.closedAt) c.closedAt = c.exitT || now;
+      if (!c.closed && c.mode === 'intraday' && (istDateKey(c.t) !== istDateKey(now) || mins >= INTRADAY_EXIT_MIN)) { // same time exit as real calls
+        const q = await getUpstoxLTPC(c.instrumentKey); if (!(q.price > 0)) continue;
+        const gross = (q.price - c.entry) / c.entry * 100, cost = c.costPct != null ? c.costPct : 0;
+        Object.assign(c, { status: 'EXPIRED', closed: true, exit: Math.round(q.price * 100) / 100, ltp: Math.round(q.price * 100) / 100, exitT: now, closedAt: now, grossPct: Math.round(gross * 100) / 100, pnlPct: Math.round((gross - cost) * 100) / 100 });
+      }
+    } catch (e) {}
+  }
+  if (ch) await saveShadow();
+}
 async function runIndexScan(db, notes) {
   if (process.env.CALLS_INDEX === 'off') return;
   const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
@@ -1954,18 +2014,21 @@ async function runIndexScan(db, notes) {
       let daily = toBars(await getUpstoxCandles(u, '1D'));
       if (mins < 915) daily = daily.slice(0, -1); // today's still-forming daily bar
       const dailyBias = Calls.marketBias(daily.slice(-150));
-      const sideSetup = key => { const [, , side, setup] = key.split('|'); return { side, setups: [setup] }; };
+      const sideSetup = key => { const p = keyParts(key); return { side: p.side, setups: [p.setup] }; };
+      // today's market type for this index: its own move so far (intraday), its daily trend (multi-day)
+      let dtI = null; try { const q = await getUpstoxLTPC(await dataKeyFor(u)); if (q.price > 0 && q.prevClose > 0) dtI = Calls.dtOf((q.price / q.prevClose - 1) * 100); } catch (e) {}
+      const dtS = Calls.biasDt(dailyBias);
       if (mins >= 570 && mins <= 925) {
         const D = daily.slice(-400), P = Calls.prep(D);
-        for (const k of liveKinds('index_swing', ['idx|swing|BUY|pullback', 'idx|swing|BUY|breakout', 'idx|swing|SELL|pullback', 'idx|swing|SELL|breakout'])) {
+        for (const k of liveKinds('index_swing', ['idx|swing|BUY|pullback', 'idx|swing|BUY|breakout', 'idx|swing|SELL|pullback', 'idx|swing|SELL|breakout'], dtS)) {
           const ev = Calls.evalIndexAt(P, D.length - 1, 'swing', { bias: dailyBias, ...k.params, ...sideSetup(k.key) });
           if (ev && Calls.regimeOk(ev.side, callsState.breadthPct, k.params.regime)) found.push({ u, gateKey: k.key, ...ev });
         }
       }
       if (mins >= 560 && mins <= 845 && process.env.CALLS_INTRADAY !== 'off') { // EMA 20/50 crossover (5- and 15-minute)
-        const xk = liveKinds('index_cross', ['idx|intraday|BUY|x5', 'idx|intraday|SELL|x5', 'idx|intraday|BUY|x15', 'idx|intraday|SELL|x15']), Xs = {};
+        const xk = liveKinds('index_cross', ['idx|intraday|BUY|x5', 'idx|intraday|SELL|x5', 'idx|intraday|BUY|x15', 'idx|intraday|SELL|x15'], dtI), Xs = {};
         for (const k of xk) {
-          const [, , side, setup] = k.key.split('|'), tf = setup === 'x5' ? '5m' : '15m', step = tf === '5m' ? 300 : 900;
+          const { side, setup } = keyParts(k.key), tf = setup === 'x5' ? '5m' : '15m', step = tf === '5m' ? 300 : 900;
           if (!Xs[tf]) { const D = await getCrossData(u, tf, false); let b = D.bars; if (b.length && b[b.length - 1].t + step > nowSec) b = b.slice(0, -1); Xs[tf] = Calls.prepCross(b, D.vols, tf); }
           const X = Xs[tf], n = X.bars.length - 1; if (n < 60) continue;
           for (const j of [n, n - 1]) { // the scan runs every few minutes: also look at the candle before the latest
@@ -1979,7 +2042,7 @@ async function runIndexScan(db, notes) {
         if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
         rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
         const barMin = n >= 0 ? Math.floor(((rows[n].t + 19800) % 86400) / 60) : 0;
-        for (const k of liveKinds('index_intraday', ['idx|intraday|BUY|orb', 'idx|intraday|BUY|pullback', 'idx|intraday|BUY|pdhl', 'idx|intraday|BUY|trendday', 'idx|intraday|SELL|orb', 'idx|intraday|SELL|pullback', 'idx|intraday|SELL|pdhl', 'idx|intraday|SELL|trendday'])) {
+        for (const k of liveKinds('index_intraday', ['idx|intraday|BUY|orb', 'idx|intraday|BUY|pullback', 'idx|intraday|BUY|pdhl', 'idx|intraday|BUY|trendday', 'idx|intraday|SELL|orb', 'idx|intraday|SELL|pullback', 'idx|intraday|SELL|pdhl', 'idx|intraday|SELL|trendday'], dtI)) {
           if (barMin > (k.params.endMin || 795)) continue;
           const ev = Calls.evalIndexAt(P, n, 'intraday', { bias: dailyBias, ...k.params, ...sideSetup(k.key) });
           if (ev && dayNo(ev.barTime) === today && Calls.regimeOk(ev.side, callsState.breadthPct, k.params.regime)) found.push({ u, gateKey: k.key, ...ev });
@@ -1996,7 +2059,7 @@ async function runIndexScan(db, notes) {
     if (CAPS_ON && made[f.mode] >= 1) continue; // one new call per mode per scan
     const gk = f.gateKey || `idx|${f.mode}|${f.side}|${f.setup}`, g = gateCheck(gk);
     if (!g.ok) { gateBlocked(`${f.u} ${f.mode} ${f.side} ${f.setup}`, gk, g.reason); st.skipped.push(f.u + ' ' + f.mode + ': paused by backtest gate'); continue; }
-    if (!g.proven && INDEX_GATE !== 'paper') { gateBlocked(`${f.u} ${f.mode} ${f.side} ${f.setup}`, gk, 'index options: proven kinds only (' + g.reason + ')'); st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ' ' + f.setup + ': not proven (index options are proven-only)'); continue; }
+    if (!g.proven && INDEX_GATE !== 'paper') { gateBlocked(`${f.u} ${f.mode} ${f.side} ${f.setup}`, gk, 'index options: proven kinds only (' + g.reason + ')'); st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ' ' + f.setup + ': not proven (index options are proven-only)'); await addShadow(f, gk, g.reason, nowSec, st); continue; }
     // proven and unproven calls never block each other: the limits below only look at calls of the same status
     const same = c => !!c.unproven === !g.proven, peers = optCalls.filter(same), openOpt = peers.filter(c => !c.closed);
     if (openOpt.some(c => c.underlying === f.u && (c.mode === f.mode || c.dir !== f.side))) continue; // one open call per index per mode, never both directions on one index
@@ -2010,7 +2073,7 @@ async function runIndexScan(db, notes) {
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) { st.skipped.push(f.u + ': price already ran away from the signal'); continue; }
       if (f.mode === 'swing' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) { st.skipped.push(f.u + ': moving against the idea today'); continue; }
       const call = await buildOptionCall(f.u, f, ltp, nowSec);
-      Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null });
+      Object.assign(call, { provenOn: keyParts(gk).dt || null, status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null });
       db.push(call); optCalls.push(call); made[f.mode]++;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 BUY ${call.symbol} (${call.mode}) premium ₹${call.entry}, expiry ${call.expiryLabel}` }, false);
       notes.push(`${call.unproven ? '🧪 <b>UNPROVEN (paper)</b> ' : ''}🆕 BUY <b>${call.symbol}</b> (${call.mode === 'swing' ? 'multi-day' : 'intraday'}) expiry ${call.expiryLabel}\nPremium ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}. Exit if ${f.u} ${f.side === 'BUY' ? 'closes below' : 'closes above'} ${call.spotSl}${call.holdDays ? ', or in ' + call.holdDays + ' days' : ', and by 15:15'}.`);
@@ -2027,6 +2090,7 @@ async function runCallsCycle(force) {
     const notes = [];
     // 1) update outcomes of active calls
     for (const c of db.filter(x => !x.closed)) await applyTrack(c);
+    try { await trackShadows(); } catch (e) {}
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK.slice(0, 90);
@@ -2050,8 +2114,8 @@ async function runCallsCycle(force) {
           const swingWindow = open && mins >= 570 && mins <= 925;
           if (swingWindow) {
             const P = Calls.prep(bars), n = bars.length - 1, got = {};
-            for (const k of liveKinds('stock_swing', ['stk|swing|BUY|trend', 'stk|swing|BUY|bounce', 'stk|swing|BUY|squeeze'])) {
-              const [, , side, setup] = k.key.split('|');
+            for (const k of liveKinds('stock_swing', ['stk|swing|BUY|trend', 'stk|swing|BUY|bounce', 'stk|swing|BUY|squeeze'], Calls.biasDt(ictx.dailyBias))) {
+              const { side, setup } = keyParts(k.key);
               const ev = Calls.evalAt(P, n, 'swing', { bias: swingBias, idxBars: ictx.idxBars, ...k.params, side, setup: setup === 'bounce' ? 'trend' : setup });
               if (ev && (ev.setup || 'trend') === setup && Calls.regimeOk(side, callsState.breadthPct, k.params.regime) && (!got[side] || ev.score > got[side].score)) got[side] = { symbol: sym, gateKey: k.key, ...ev };
             }
@@ -2063,10 +2127,11 @@ async function runCallsCycle(force) {
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
             rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
-            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl', 'stk|intraday|BUY|vwap', 'stk|intraday|SELL|vwap'])) {
-              const [, , side, setup = 'trend'] = k.key.split('|');
+            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl', 'stk|intraday|BUY|vwap', 'stk|intraday|SELL|vwap'], Calls.dtOf(ictx.todayPct))) {
+              const { side, setup = 'trend' } = keyParts(k.key);
+              const agree = k.params.agree || (k.params.idxAgree ? 'index' : 'none'), sm = agree === 'sector' ? await getSectorMove(sectorOf(sym)) : null;
               const id = Calls.evalAt(P, n, 'intraday', { bias: ictx.intradayBias, idxTodayPct: ictx.todayPct, ...k.params, side, setup });
-              if (id && (id.setup || 'trend') === setup && istDayEnd0(id.barTime) === istDayEnd0(nowSec) && Calls.regimeOk(side, callsState.breadthPct, k.params.regime) && Calls.idxAgreeOk(side, ictx.todayPct, k.params.idxAgree)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
+              if (id && (id.setup || 'trend') === setup && istDayEnd0(id.barTime) === istDayEnd0(nowSec) && Calls.regimeOk(side, callsState.breadthPct, k.params.regime) && Calls.agreeOk(side, agree, ictx.todayPct, sm ? sm.pct : null)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
             }
           }
           callsState.scanned++;
@@ -2090,6 +2155,10 @@ async function runCallsCycle(force) {
       if (CAPS_ON && (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode])) continue;
       const gk = f.gateKey || `stk|${f.mode}|${f.side}|${f.setup || 'trend'}`, g = gateCheck(gk);
       if (!g.ok) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, g.reason); continue; }
+      { // safety block: no stock sell while its sector index is up 0.7%+ and above its open (mirror for buys)
+        const ix = sectorOf(f.symbol), sm = await getSectorMove(ix);
+        if (sm && !Calls.safetyOk(f.side, sm.pct, sm.aboveOpen)) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, `safety: ${SECTOR_LABEL[ix] || ix} is ${sm.pct > 0 ? 'up' : 'down'} ${Math.abs(sm.pct).toFixed(2)}% and ${sm.pct > 0 ? 'above' : 'below'} its open, no ${f.side === 'SELL' ? 'sell' : 'buy'} against it`); continue; }
+      }
       // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
       if (db.some(c => !c.manual && c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
@@ -2098,7 +2167,7 @@ async function runCallsCycle(force) {
       if (f.mode === 'swing' && f.setup !== 'bounce' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) continue;
       const d = ltp - f.entry; const rb = x => Math.round((x + d) * 20) / 20;
       const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', engine: f.engine || 'v3', rs: f.rs == null ? null : f.rs, costPct: Calls.costPct(f.mode), checks: f.checks, analysis: f.analysis, t: nowSec, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null };
-      Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false });
+      Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false, provenOn: keyParts(gk).dt || null });
       db.push(call); open_.push(call); quota[f.mode]--;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}` }, false);
       notes.push(`${call.unproven ? '🧪 UNPROVEN (paper) ' : ''}🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
@@ -2180,7 +2249,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-15-r28 (no crash on Upstox stream errors, login token survives restarts, Upstox-only prices, server scans on its own)';
+const BUILD = '2026-10-15-r29 (lab v9: results by market type, sector agreement, safety block; watch-only index signals)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2360,10 +2429,13 @@ const CAPS_ON = process.env.CALLS_CAPS === 'on';
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
 const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 8 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 9 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold', x5: '5-min EMA 20/50 crossover', x15: '15-min EMA 20/50 crossover' };
+const DT_LABEL = { up: 'up days', down: 'down days', flat: 'sideways days' };
 function gateLabel(key) {
-  const [grp, mode, side, setup] = key.split('|');
+  const [base, dt] = String(key).split('@');
+  if (dt) return gateLabel(base) + ' · on ' + (DT_LABEL[dt] || dt);
+  const [grp, mode, side, setup] = base.split('|');
   if (grp === 'idx') return `Index option · ${mode === 'intraday' ? 'intraday' : 'multi-day'} · ${side === 'BUY' ? 'up (buy CE)' : 'down (buy PE)'} · ${SETUP_NAME[setup] || setup}`;
   return `Stock · ${mode === 'intraday' ? 'intraday' : 'swing'} · ${side}${setup ? ' · ' + (SETUP_NAME[setup] || setup) : ''}`;
 }
@@ -2373,13 +2445,13 @@ function gateLabel(key) {
 const GATE_MODE = (process.env.CALLS_GATE || 'paper').toLowerCase(); // paper (default): unproven kinds still issue calls, labelled; strict: only proven; off: no gate
 const LAB_MIN_OLDER = 12;
 const DEF_PARAMS = { index_cross: { entry: 'cross', volK: 1.3, htf: true, minScore: 4, stopK: 1.25, exit: 'A' }, index_intraday: { veto: true, regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A', endMin: 795 }, index_swing: { regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A' },
-  stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { idxAgree: false, regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
+  stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { agree: 'none', regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
 const famOf = key => { const [g, m] = key.split('|'); return (g === 'idx' ? 'index_' : 'stock_') + m; };
 function paramsLabel(p) {
   if (!p) return '';
   const ex = { S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R', C: '2/4/6R' }[p.exit || p.exitI] || '';
   const rg = p.regime === 'b50' ? ' · only when market breadth agrees (buys ≥50% of stocks above their 50-day average, sells ≤50%)' : p.regime === 'b60' ? ' · only in a strong market (buys ≥60% above their 50-day average, sells ≤40%)' : '';
-  const ia = p.idxAgree ? ' · only when Nifty agrees on the day (buys while it is up, sells while it is down)' : '';
+  const ia = p.idxAgree || p.agree === 'index' ? ' · only when Nifty agrees on the day (buys while it is up, sells while it is down)' : p.agree === 'sector' ? ' · only when its sector index agrees on the day (buys while it is up, sells while it is down)' : '';
   const vt = p.veto === false ? ' · may trade against the daily trend' : '';
   if (p.entry) return `${p.minScore}/6 checks · ${p.entry === 'retest' ? 'entry on the first pullback to the 20 EMA' : 'entry on the cross candle'}${p.volK ? ' · volume ≥' + p.volK + '× usual (required)' : ' · volume not required'}${p.htf ? ' · bigger trend must agree' : ''} · stop ×${p.stopK} · targets ${{ S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R' }[p.exit] || ''}`;
   return `${p.minScore}/6 checks${p.needHtf ? ' + bigger trend' : ''}${vt}${rg}${ia} · stop ×${p.stopK} · targets ${ex}${p.endMin ? ' · entries until ' + (p.endMin === 720 ? '12:15' : '13:30') : ''}`;
@@ -2389,11 +2461,14 @@ function paramsLabel(p) {
 function accum(map, trades, keyFn, cutoff) {
   for (const x of trades) {
     if (!x.closed) continue;
-    const k = keyFn(x); let a = map.get(k);
-    if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, w: 0, l: 0 }; map.set(k, a); }
-    a.n++; a.sum += x.pnlPct;
-    if (x.t < cutoff) { a.oN++; a.oSum += x.pnlPct; a.oSq += x.pnlPct * x.pnlPct; } else { a.nN++; a.nSum += x.pnlPct; }
-    if (x.status !== 'BREAKEVEN') { if (x.pnlPct > 0.05) a.w++; else if (x.pnlPct < -0.05) a.l++; }
+    const k0 = keyFn(x);
+    for (const k of x.dt ? [k0, k0 + '@' + x.dt] : [k0]) { // every kind is also measured per market type (up / down / sideways days)
+      let a = map.get(k);
+      if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, w: 0, l: 0 }; map.set(k, a); }
+      a.n++; a.sum += x.pnlPct;
+      if (x.t < cutoff) { a.oN++; a.oSum += x.pnlPct; a.oSq += x.pnlPct * x.pnlPct; } else { a.nN++; a.nSum += x.pnlPct; }
+      if (x.status !== 'BREAKEVEN') { if (x.pnlPct > 0.05) a.w++; else if (x.pnlPct < -0.05) a.l++; }
+    }
   }
 }
 function statsOf(a) {
@@ -2483,19 +2558,27 @@ async function buildGate() {
       let idx15 = null; try { idx15 = (await getIndex15mHistory('NIFTY')).bars; } catch (e) {}
       const fam = 'stock_intraday', combos = G[fam], perCombo = combos.map(() => new Map()); let cutoff = 0, k = 0;
       const keyFn = x => `stk|intraday|${x.side}|${x.setup || 'trend'}`;
-      const syms = FNO_FALLBACK.slice(0, 90);
+      const syms = FNO_FALLBACK.slice(0, 90), secBars = {};
+      // the 'agree' choice is a filter on the same replay: walk each rule set once, then file its trades under every agree option
+      const sig = c => JSON.stringify({ ...c, agree: undefined }), variants = {};
+      combos.forEach((c, ci) => { (variants[sig(c)] = variants[sig(c)] || []).push(ci); });
       for (const sym of syms) {
         gate.progress = `lab: stocks intraday ${++k}/${syms.length}`;
         try {
+          const ix = sectorOf(sym);
+          if (ix !== 'NIFTY' && secBars[ix] === undefined) { secBars[ix] = null; try { secBars[ix] = (await getIndex15mHistory(ix)).bars; } catch (e) {} }
           const h = await getIndex15mHistory(sym, 4, true); if (!cutoff) cutoff = mid(h.bars);
           const P = Calls.prep(h.bars);
-          for (let ci = 0; ci < combos.length; ci++) accum(perCombo[ci], await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, _P: P, breadth, ...combos[ci] }, yieldLoop), keyFn, cutoff);
+          for (const group of Object.values(variants)) {
+            const ts = await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, secBars15: (ix !== 'NIFTY' && secBars[ix]) || idx15, _P: P, breadth, ...combos[group[0]], agree: 'none' }, yieldLoop);
+            for (const ci of group) { const ag = combos[ci].agree; accum(perCombo[ci], ag === 'none' ? ts : ts.filter(x => Calls.agreeOk(x.side, ag, x.idxPct, x.secPct)), keyFn, cutoff); }
+          }
         } catch (e) {}
       }
       pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 8, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
+    gate = { t: Date.now(), labVersion: 9, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }
@@ -2522,10 +2605,15 @@ function gateCheck(key) {
   return { ok: proven || GATE_MODE !== 'strict', proven, reason: proven ? 'passed' : reason };
 }
 // parameter sets to evaluate live for one family: one per kind found by the lab, else the current defaults
-function liveKinds(fam, defaults) {
-  const ks = Object.entries((gate.t && gate.kinds) || {}).filter(([k, v]) => v.fam === fam).map(([key, v]) => ({ key, params: v.params }));
+// dt = today's market type ('up' / 'down' / 'flat'): a kind proven only on that type of day is added (proven ones first)
+function liveKinds(fam, defaults, dt) {
+  const all = Object.entries((gate.t && gate.kinds) || {}).filter(([k, v]) => v.fam === fam);
+  const base = all.filter(([k]) => !k.includes('@')).map(([key, v]) => ({ key, params: v.params, proven: !!v.pass && !isRetired(v) }));
+  const byDay = dt ? all.filter(([k, v]) => k.endsWith('@' + dt) && v.pass && !isRetired(v)).map(([key, v]) => ({ key, params: v.params, proven: true })) : [];
+  const ks = byDay.concat(base).sort((a, b) => (b.proven ? 1 : 0) - (a.proven ? 1 : 0));
   return ks.length ? ks : defaults.map(key => ({ key, params: DEF_PARAMS[fam] }));
 }
+const keyParts = key => { const [base, dt] = String(key).split('@'); const [grp, mode, side, setup] = base.split('|'); return { grp, mode, side, setup, dt }; };
 function gateBlocked(what, key, reason) {
   const list = callsState.gateBlocked = callsState.gateBlocked || [];
   const t = Math.floor(Date.now() / 1000);
@@ -2535,7 +2623,12 @@ app.get('/api/calls/gate', (req, res) => {
   if (req.query.rebuild === '1' && !gate.building) { gate.t = 0; gate.lastTry = 0; maybeBuildGate(); }
   else maybeBuildGate();
   const src = Object.keys(gate.kinds || {}).length ? gate.kinds : (gate.partial || {}); // while the first run is in progress, show finished families
-  const kinds = Object.entries(src).map(([key, v]) => ({ key, ...v, retired: isRetired(v), reason: isRetired(v) ? retireReason(v) : v.reason })).sort((a, b) => a.key < b.key ? -1 : 1);
+  const one = (key, v) => ({ key, ...v, retired: isRetired(v), reason: isRetired(v) ? retireReason(v) : v.reason });
+  // each kind carries its results per market type (up / down / sideways days) as byDay; those can go live on their own
+  const kinds = Object.entries(src).filter(([key]) => !key.includes('@')).map(([key, v]) => {
+    const byDay = {}; for (const dt of ['up', 'down', 'flat']) { const d = src[key + '@' + dt]; if (d) byDay[dt] = one(key + '@' + dt, d); }
+    return { ...one(key, v), byDay };
+  }).sort((a, b) => a.key < b.key ? -1 : 1);
   const mem = process.memoryUsage();
   res.json({ server: { upMin: Math.round(process.uptime() / 60), rssMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576) }, labStartedAt: gate.building ? gate.startedAt : null, tookMin: gate.tookMin || null, enabled: GATE_MODE !== 'off', mode: GATE_MODE, indexGate: INDEX_GATE, retireMinTrades: RETIRE_MIN_TRADES, built: gate.t, building: gate.building, progress: gate.progress, err: gate.err, minTrades: GATE_MIN_TRADES, min: GATE_MIN, kinds, blocked: callsState.gateBlocked || [] });
 });
@@ -2735,7 +2828,8 @@ app.get('/api/calls', async (req, res) => {
   else lowPriority.run(true, () => runCallsCycle(false));
   const own = db.filter(c => !c.manual);
   const calls = own.slice().sort((a, b) => b.t - a.t);
-  res.json({ build: BUILD, calls, stats: Calls.summarize(own), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: 90, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
+  let shadow = []; try { shadow = (await loadShadow()).slice().sort((a, b) => b.t - a.t).slice(0, 60); } catch (e) {}
+  res.json({ build: BUILD, calls, shadow, stats: Calls.summarize(own), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: 90, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

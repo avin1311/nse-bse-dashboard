@@ -291,6 +291,32 @@ function upto(arr, t) { // index of last element with .t <= t, or -1
   return r;
 }
 const istDayNo = t => Math.floor((t + 19800) / 86400);
+// Move of an intraday series on the day of t, using only bars up to t: { pct vs the previous day's last close, aboveOpen }
+function dayMove(I, t) {
+  if (!I || !I.length) return null;
+  const k = upto(I, t); if (k < 0) return null;
+  const day = istDayNo(I[k].t); let j = k; while (j > 0 && istDayNo(I[j].t) === day) j--;
+  if (istDayNo(I[j].t) === day || !(I[j].c > 0)) return null;
+  const open = I[j + 1].o != null ? I[j + 1].o : I[j + 1].c;
+  return { pct: (I[k].c / I[j].c - 1) * 100, aboveOpen: I[k].c >= open };
+}
+// Market type of a day, known at signal time: 'up' / 'down' / 'flat' (index move so far today, or the daily trend for multi-day)
+const DT_PCT = 0.4;
+function dtOf(pct) { return pct == null ? null : pct >= DT_PCT ? 'up' : pct <= -DT_PCT ? 'down' : 'flat'; }
+function biasDt(bias) { return bias === 'BULL' ? 'up' : bias === 'BEAR' ? 'down' : 'flat'; }
+// Agreement with the market: 'none' | 'index' (Nifty today) | 'sector' (the stock's sector index today)
+function agreeOk(side, agree, idxPct, secPct) {
+  if (!agree || agree === 'none') return true;
+  const p = agree === 'sector' ? secPct : idxPct; if (p == null) return false;
+  return side === 'BUY' ? p > 0 : p < 0;
+}
+// Safety block: never sell a stock while its sector is up 0.7%+ and holding above its open (mirror for buys)
+const SAFETY_PCT = 0.7;
+function safetyOk(side, secPct, aboveOpen) {
+  if (secPct == null) return true;
+  if (side === 'SELL') return !(secPct >= SAFETY_PCT && aboveOpen);
+  return !(secPct <= -SAFETY_PCT && aboveOpen === false);
+}
 function slotVolRatio(bars, n) { // volume vs the same 15-minute slot on previous days
   const slot = Math.floor(((bars[n].t + 19800) % 86400) / 900), day = istDayNo(bars[n].t);
   const prev = [];
@@ -533,7 +559,8 @@ async function walkIndex(sym, bars, opts, yieldFn) {
     if (intraday) { const dk = istDayNo(t); if ((perDay[dk] || 0) >= 2) continue; perDay[dk] = (perDay[dk] || 0) + 1; }
     const call = { t: intraday ? t + 899 : t, side: ev.side, mode: ev.mode, entry: ev.entry, sl: ev.sl, targets: ev.targets, costPct: IDX_COST, limitT: intraday ? undefined : t + IDX_HOLD_DAYS * 86400 };
     const st = track(call, bars, far);
-    out.push({ ...tradeOf(sym, call, ev, st, bias), mode: ev.mode });
+    const dt = intraday ? (m => m ? dtOf(m.pct) : null)(dayMove(bars, t)) : biasDt(bias); // intraday: the index's own move so far today
+    out.push({ ...tradeOf(sym, call, ev, st, bias), mode: ev.mode, dt });
     freeFrom = st.closed ? (st.exitT || t) + (intraday ? 60 : 86400) : bars[bars.length - 1].t + 1;
   }
   return out;
@@ -623,7 +650,8 @@ async function walkCross(sym, X, opts, yieldFn) {
     const dk = Math.floor((t + 19800) / 86400); if ((perDay[dk] || 0) >= 3) continue; perDay[dk] = (perDay[dk] || 0) + 1;
     const call = { t: t + step - 1, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets, costPct: IDX_COST };
     const st = track(call, bars, far);
-    out.push({ ...tradeOf(sym, call, ev, st, 'MIXED'), mode: 'intraday' });
+    const dm = dayMove(bars, t);
+    out.push({ ...tradeOf(sym, call, ev, st, 'MIXED'), mode: 'intraday', dt: dm ? dtOf(dm.pct) : null });
     freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
   }
   return out;
@@ -763,7 +791,7 @@ async function walkSwing(sym, bars, opts, yieldFn) {
     if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, bars[i].t, false), opts.regime)) continue;
     const call = { t: bars[i].t, side: ev.side, mode: 'swing', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
-    out.push(tradeOf(sym, call, ev, st, bias));
+    out.push({ ...tradeOf(sym, call, ev, st, bias), dt: biasDt(bias) });
     freeFrom = st.closed ? (st.exitT || bars[i].t) + 5 * 86400 : bars[bars.length - 1].t + 1;
   }
   return out;
@@ -794,14 +822,16 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
     if (yieldFn && ++cnt % 200 === 0) await yieldFn();
     let todayPct = null, bias = 'MIXED';
     if (I && opts.useGate !== false) {
-      const k = upto(I, t);
-      if (k >= 0) { let j = k; while (j > 0 && istDayNo(I[j].t) === istDayNo(t)) j--; const pc = I[j].c; if (istDayNo(I[j].t) !== istDayNo(t) && pc > 0) { todayPct = (I[k].c / pc - 1) * 100; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; } }
+      const m = dayMove(I, t);
+      if (m) { todayPct = m.pct; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; }
     }
     const ev = evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
     if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
+    const sm = dayMove(opts.secBars15 || I, t); // the stock's sector index (Nifty when it has none)
+    if (opts.safety !== false && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue;
     const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
-    out.push(tradeOf(sym, call, ev, st, bias));
+    out.push({ ...tradeOf(sym, call, ev, st, bias), idxPct: todayPct, secPct: sm ? sm.pct : null, dt: dtOf(todayPct) });
     freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
   }
   return out;
@@ -824,7 +854,9 @@ const LAB_GRID = {
   // 'index must agree' was never chosen in earlier runs, so it is dropped to make room for the VWAP setup (built-in index check)
   // EMA 20/50 crossover on 5- and 15-minute index bars (run once per timeframe; the setup key says which)
   index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
-  stock_intraday: product({ idxAgree: [false], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
+  // agree: must the stock's side agree with Nifty ('index') or with its sector index ('sector') on the day? Applied as a
+  // filter on one replay, so the extra choices cost almost no lab time
+  stock_intraday: product({ agree: ['none', 'index', 'sector'], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);
@@ -832,4 +864,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

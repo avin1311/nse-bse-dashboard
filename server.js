@@ -1745,6 +1745,14 @@ async function squareOffIntraday() {
   } finally { squaring = false; }
 }
 setInterval(() => { squareOffIntraday().catch(() => {}); }, 60000).unref();
+// Self-driven scans: during market hours the server scans on its own (every SCAN_EVERY),
+// so calls are generated even when no dashboard tab is open. UptimeRobot keeps it awake.
+setInterval(() => {
+  try {
+    const p = istParts(); if (p.dow === 0 || p.dow === 6 || p.mins < 555 || p.mins > 935 || !upstoxTokens().length) return;
+    lowPriority.run(true, async () => { try { await runCallsCycle(false); await liveMonitor(); await maybeEod(); } catch (e) {} });
+  } catch (e) {}
+}, 60000).unref();
 let lastLive = 0;
 async function liveMonitor() {
   if (Date.now() - lastLive < 15000) return; lastLive = Date.now();
@@ -2177,7 +2185,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-14-r26 (EMA 20/50 crossover setups on 5- and 15-minute index bars with futures volume; lab v8)';
+const BUILD = '2026-10-15-r27 (server scans on its own 9:15–15:35, no open tab needed)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

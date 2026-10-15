@@ -6405,6 +6405,7 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
     return {rows,hist,first:C[0].t,last:C[n].t};
   }
   function chips(){
+    if(!$('bkTf')||!$('bkCat')) return;
     $('bkTf').innerHTML='<span class="metric-sub">Timeframe:</span> '+Object.entries(TF).map(([k,v])=>`<span class="tc-chip${k===tf?' on':''}" data-bktf="${k}">${v.label}</span>`).join('');
     $('bkCat').innerHTML='<span class="metric-sub">Show:</span> '+CAT.map(([k,v])=>`<span class="tc-chip${k===cat?' on':''}" data-bkcat="${k}">${v}</span>`).join('');
   }
@@ -6413,7 +6414,7 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
     const stop=r.lvl-r.d*r.atr, risk=Math.abs(r.c-stop); return {stop,target:r.c+r.d*2*risk};
   }
   function draw(){
-    chips();
+    chips(); if(!$('bkOut')) return;
     const R=RES[tf]; if(!R){ $('bkOut').innerHTML=''; $('bkRecord').innerHTML=''; return; }
     let rows=R.rows.slice();
     if(cat==='break') rows=rows.filter(r=>r.type==='break'&&r.d>0); else if(cat==='near') rows=rows.filter(r=>r.type==='near'&&r.d>0); else if(cat==='pattern') rows=rows.filter(r=>r.type==='pattern'); else if(cat==='down') rows=rows.filter(r=>r.d<0&&r.type!=='pattern');

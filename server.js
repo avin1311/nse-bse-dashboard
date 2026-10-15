@@ -2249,7 +2249,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-15-r31 (lab results show the period and candle size of their trades)';
+const BUILD = '2026-10-15-r32 (breakout scanner: daily, weekly, 15-min; lab results show their period)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

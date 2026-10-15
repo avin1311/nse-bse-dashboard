@@ -601,6 +601,14 @@
       </table>
     </div>
   </section>
+  <section id="sec-breakout" class="panel">
+    <div class="panel-head"><h3>Breakout scanner</h3><span class="metric-sub">90 F&amp;O stocks &middot; real Upstox candles</span></div>
+    <div class="tc-bar" id="bkTf"></div>
+    <div class="tc-bar" id="bkCat"></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button class="btn scan-btn" id="bkScanBtn">Scan breakouts</button><span class="metric-sub" id="bkStatus">Pick a timeframe and press Scan.</span></div>
+    <div id="bkOut" style="overflow-x:auto;margin-top:8px;"></div>
+    <div id="bkRecord" style="margin-top:10px;"></div>
+  </section>
   <section id="sec-heatmap" class="panel">
     <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
     <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
@@ -5618,6 +5626,7 @@ const PatternUI = (function(){
     return k===1?'yesterday '+hm:new Date((t+19800)*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'UTC'})+' '+hm+' ('+k+' sessions ago)';
   }
   function isRecent(p,tf,C){ if(p.status==='Failed') return false; const a=ageOf(p,C); return a.kind==='break'?a.bars<=FRESH[tf]:a.bars<=FORM[tf]; }
+  window.__patHelp={isRecent:(p,tf,C)=>isRecent(p,tf,C),dirOf:p=>dirOf(p)}; // used by the breakout scanner
   function ageHtml(p,tf,C){
     const a=ageOf(p,C), ago=agoTxt(tf,C,a.i,a.bars);
     if(p.status==='Failed') return '<span class="pg-pill">failed</span>';
@@ -6275,6 +6284,183 @@ const PlannerUI = (function(){
 })();
 PlannerUI.init();
 window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
+</script>
+<script>
+/* ============================================================
+   BREAKOUT SCANNER (Screener & scans tab)
+   90 F&O stocks on daily, weekly or 15-minute Upstox candles. Finds:
+   - broke out: first close beyond a 20/55-bar or 52-week high (low for breakdowns), with volume vs normal
+   - about to break: within reach of that level while the range tightens and/or volume dries up
+   - chart-pattern breakouts from the pattern engine (fresh breaks, and forming patterns near their trigger)
+   Each timeframe also replays its own history to show how such signals did afterwards (with the period covered).
+   ============================================================ */
+(function(){
+  const UNI=["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","KOTAKBANK","AXISBANK","HINDUNILVR","BAJFINANCE","MARUTI","SUNPHARMA","TITAN","ASIANPAINT","ULTRACEMCO","NESTLEIND","WIPRO","HCLTECH","TECHM","POWERGRID","NTPC","ONGC","COALINDIA","TATAMOTORS","TATASTEEL","JSWSTEEL","HINDALCO","ADANIENT","ADANIPORTS","M&M","BAJAJFINSV","DRREDDY","CIPLA","DIVISLAB","EICHERMOT","HEROMOTOCO","BPCL","GRASIM","INDUSINDBK","BRITANNIA","APOLLOHOSP","TATACONSUM","SBILIFE","HDFCLIFE","BAJAJ-AUTO","UPL","VOLTAS","PIDILITIND","DLF","GAIL","IOC","VEDL","SAIL","PNB","BANKBARODA","CANBK","IDFCFIRSTB","FEDERALBNK","AUBANK","BANDHANBNK","TATAPOWER","TATACHEM","TVSMOTOR","ASHOKLEY","BHEL","BEL","HAL","IRCTC","ZOMATO","PAYTM","NAUKRI","DMART","SIEMENS","ABB","HAVELLS","CROMPTON","GODREJCP","DABUR","MARICO","COLPAL","LUPIN","AUROPHARMA","TORNTPHARM","ALKEM","BIOCON","MCX","CHOLAFIN"];
+  const TF={
+    D:{label:'Daily',api:'1D',pat:'1D',bars:'daily candles',unit:'days',look:[20,55,250],names:['20-day high','55-day high','52-week high'],lnames:['20-day low','55-day low','52-week low'],volN:20,near:0.02,fwd:10,mode:'swing'},
+    W:{label:'Weekly',api:'1W',pat:'1W',bars:'weekly candles',unit:'weeks',look:[20,52,156],names:['20-week high','52-week high','3-year high'],lnames:['20-week low','52-week low','3-year low'],volN:10,near:0.03,fwd:6,mode:'swing'},
+    M15:{label:'15-min',api:'15m',pat:'15m',bars:'15-minute candles',unit:'bars',near:0.004,fwd:0,mode:'intraday'}
+  };
+  const CAT=[['all','All'],['break','Broke out'],['near','About to break out'],['pattern','Chart patterns'],['down','Breakdowns']];
+  let tf='D', cat='all'; const RES={}; let busy=false;
+  try{ tf=localStorage.getItem('bkTf')||'D'; cat=localStorage.getItem('bkCat')||'all'; }catch(e){}
+  if(!TF[tf]) tf='D';
+  const $=id=>document.getElementById(id);
+  const esc=t=>String(t==null?'':t).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
+  const f2=x=>x==null||!isFinite(x)?'—':Number(x).toLocaleString('en-IN',{maximumFractionDigits:2});
+  const pc=x=>x==null||!isFinite(x)?'—':(x>0?'+':'')+x.toFixed(2)+'%';
+  const dstr=t=>new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'});
+  const dayNo=t=>Math.floor((t+19800)/86400);
+  function atrAt(C,i,n){ let s=0,k=0; for(let j=Math.max(1,i-n+1);j<=i;j++){ s+=Math.max(C[j].h-C[j].l,Math.abs(C[j].h-C[j-1].c),Math.abs(C[j].l-C[j-1].c)); k++; } return k?s/k:0; }
+  const maxH=(C,a,b)=>{ let m=-Infinity; for(let j=Math.max(0,a);j<=b;j++) if(C[j].h>m) m=C[j].h; return m; };
+  const minL=(C,a,b)=>{ let m=Infinity; for(let j=Math.max(0,a);j<=b;j++) if(C[j].l<m) m=C[j].l; return m; };
+  const avgV=(C,a,b)=>{ let s=0,k=0; for(let j=Math.max(0,a);j<=b;j++){ s+=C[j].v||0; k++; } return k?s/k:0; };
+  function paceFrac(C,cfgKey){ // share of the current (still forming) bar's session that has passed, for a fair volume comparison
+    const last=C[C.length-1], now=Date.now()/1000, ist=new Date((now+19800)*1000), mins=ist.getUTCHours()*60+ist.getUTCMinutes(), dow=ist.getUTCDay(), open=dow>=1&&dow<=5&&mins>=555&&mins<930;
+    if(!open) return 1;
+    if(cfgKey==='D') return dayNo(last.t)===dayNo(now)?Math.max(0.08,(mins-555)/375):1;
+    if(cfgKey==='W'){ if(now-last.t>7*86400) return 1; return Math.max(0.1,((dow-1)+(mins-555)/375)/5); }
+    return 1;
+  }
+  /* ---- daily / weekly: signal at bar i, using only bars up to i ---- */
+  function sigDW(C,i,cfg,frac){
+    const c=C[i].c, atr=atrAt(C,i,14); if(!(atr>0)) return null;
+    const volR=avgV(C,i-cfg.volN,i-1)>0?(C[i].v/(frac||1))/avgV(C,i-cfg.volN,i-1):null;
+    const out=[];
+    for(const d of [1,-1]){
+      let best=null;
+      cfg.look.forEach((N,li)=>{ if(i-N<0) return;
+        const lvl=d>0?maxH(C,i-N,i-1):minL(C,i-N,i-1);
+        const crossed=d>0?c>lvl&&C[i-1].c<=lvl:c<lvl&&C[i-1].c>=lvl;
+        if(crossed) best={type:'break',d,lvl,name:(d>0?cfg.names:cfg.lnames)[li],li}; });
+      if(best){ out.push(best); continue; }
+      // about to break: nearest level within reach, with a tightening range and/or drying volume
+      let near=null;
+      cfg.look.forEach((N,li)=>{ if(i-N<0) return; const lvl=d>0?maxH(C,i-N,i-1):minL(C,i-N,i-1); const dist=d>0?lvl/c-1:1-lvl/c;
+        if(dist>=0&&dist<=cfg.near&&(!near||dist<near.dist)) near={type:'near',d,lvl,dist,name:(d>0?cfg.names:cfg.lnames)[li],li}; });
+      if(near&&i>=60){
+        const coil=atrAt(C,i,10)/atrAt(C,i,50), dry=avgV(C,i-9,i)/Math.max(1,avgV(C,i-59,i-10));
+        near.coil=coil; near.dry=dry; if(coil<=0.85||dry<=0.85) out.push(near);
+      }
+    }
+    out.forEach(x=>{ x.c=c; x.atr=atr; x.volR=volR; const base=C.slice(Math.max(0,i-20),i); x.baseRange=base.length?(Math.max(...base.map(b=>b.h))/Math.min(...base.map(b=>b.l))-1)*100:null; });
+    return out;
+  }
+  /* ---- 15-minute: yesterday's high/low and today's opening range (first 30 minutes) ---- */
+  function sig15(C,i){
+    const day=dayNo(C[i].t); let s=i; while(s>0&&dayNo(C[s-1].t)===day) s--; if(s===0) return [];
+    let ps=s-1; while(ps>0&&dayNo(C[ps-1].t)===dayNo(C[s-1].t)) ps--;
+    const pdh=maxH(C,ps,s-1), pdl=minL(C,ps,s-1), k=i-s, atr=atrAt(C,i,14); if(!(atr>0)) return [];
+    const lv=[]; if(k>=2){ lv.push({n:"opening-range high",v:maxH(C,s,s+1),d:1},{n:"opening-range low",v:minL(C,s,s+1),d:-1}); }
+    lv.push({n:"yesterday's high",v:pdh,d:1},{n:"yesterday's low",v:pdl,d:-1});
+    // volume vs the same 15-minute slot on up to 10 earlier days
+    const slot=k, same=[]; let j=ps; for(let dd=0;dd<10&&j>0;dd++){ const st=(()=>{ let x=j; while(x>0&&dayNo(C[x-1].t)===dayNo(C[j].t)) x--; return x; })(); if(C[st+slot]&&dayNo(C[st+slot].t)===dayNo(C[st].t)) same.push(C[st+slot].v||0); j=st-1; }
+    const volR=same.length>=3?(C[i].v||0)/(same.reduce((a,b)=>a+b,0)/same.length||1):null;
+    const c=C[i].c, out=[];
+    for(const d of [1,-1]){
+      const L=lv.filter(x=>x.d===d).sort((a,b)=>(b.v-a.v)*d); // most significant first
+      const br=L.find(x=>(d>0?c>x.v:c<x.v)&&(()=>{ for(let q=s;q<i;q++) if(d>0?C[q].c>x.v:C[q].c<x.v) return false; return true; })());
+      if(br){ out.push({type:'break',d,lvl:br.v,name:br.n}); continue; }
+      const nr=L.map(x=>({x,dist:d>0?x.v/c-1:1-x.v/c})).filter(z=>z.dist>=0&&z.dist<=0.004).sort((a,b)=>a.dist-b.dist)[0];
+      if(nr) out.push({type:'near',d,lvl:nr.x.v,name:nr.x.n,dist:nr.dist});
+    }
+    out.forEach(x=>{ x.c=c; x.atr=atr; x.volR=volR; });
+    return out;
+  }
+  /* ---- forward result of a signal: +1 ATR before -1 ATR (in its direction), and the move after the horizon ---- */
+  function fwdRes(C,i,d,atr,horizon,sameDay){
+    const c=C[i].c, up=c+d*atr, dn=c-d*atr; let end=Math.min(C.length-1,i+horizon);
+    if(sameDay){ end=i; while(end+1<C.length&&dayNo(C[end+1].t)===dayNo(C[i].t)) end++; }
+    if(end<=i) return null;
+    for(let j=i+1;j<=end;j++){ const hitDn=d>0?C[j].l<=dn:C[j].h>=dn, hitUp=d>0?C[j].h>=up:C[j].l<=up; if(hitDn) return {win:false,ret:d*(C[end].c/c-1)*100}; if(hitUp) return {win:true,ret:d*(C[end].c/c-1)*100}; }
+    return {win:d*(C[end].c-c)>0,ret:d*(C[end].c/c-1)*100,open:true};
+  }
+  function record(all){ // all: [{type,d,strong,win,ret,t}]
+    const g={}, add=(k,x)=>{ const a=g[k]=g[k]||{n:0,w:0,ret:0,t0:x.t,t1:x.t}; a.n++; if(x.win) a.w++; a.ret+=x.ret; a.t0=Math.min(a.t0,x.t); a.t1=Math.max(a.t1,x.t); };
+    all.forEach(x=>{ const side=x.d>0?'up':'down'; if(x.type==='break') add('break_'+side+(x.strong?'_vol':'_novol'),x); else add('near_'+side,x); });
+    return g;
+  }
+  async function getCandles(sym,api){
+    if(api==='1D'){ const h=window.REAL_HIST&&window.REAL_HIST[sym]; if(h&&h.c) return h.c.map((c,i)=>({t:h.t[i],o:h.o?h.o[i]:c,h:h.h[i],l:h.l[i],c,v:h.v?h.v[i]||0:0})); }
+    const j=await fetch('/api/candles/'+encodeURIComponent(sym)+'?tf='+api,{cache:'no-store'}).then(r=>r.json());
+    return (j.series||[]).filter(x=>x&&x.c>0).map(x=>({t:x.t,o:x.o,h:x.h,l:x.l,c:x.c,v:x.v||0}));
+  }
+  function analyse(sym,C,key){
+    const cfg=TF[key], n=C.length-1, rows=[], hist=[];
+    if(key==='M15'){
+      // live: the last bar may still be forming; use the last bar that has closed
+      let i=n; if(C[i].t+900>Date.now()/1000) i--; if(i<30) return {rows,hist};
+      sig15(C,i).forEach(x=>rows.push({sym,...x,src:'level',t:C[i].t}));
+      for(let k=40;k<i;k++){ const m=Math.floor(((C[k].t+19800)%86400)/60); if(m<585||m>840) continue; // 9:45–14:00 signals only
+        sig15(C,k).forEach(x=>{ if(x.type!=='break') return; const r=fwdRes(C,k,x.d,x.atr,0,true); if(r) hist.push({type:'break',d:x.d,strong:x.volR!=null&&x.volR>=1.5,...r,t:C[k].t}); }); }
+    } else {
+      const frac=paceFrac(C,key);
+      (sigDW(C,n,cfg,frac)||[]).forEach(x=>rows.push({sym,...x,src:'level',t:C[n].t,paced:frac<1}));
+      for(let k=Math.max(60,cfg.look[0]+1);k<n-cfg.fwd;k++) (sigDW(C,k,cfg,1)||[]).forEach(x=>{ const r=fwdRes(C,k,x.d,x.atr,cfg.fwd,false); if(r) hist.push({type:x.type,d:x.d,strong:x.volR!=null&&x.volR>=1.5,...r,t:C[k].t}); });
+    }
+    // chart patterns
+    try{ const R=window.PatternEngine.detect(C), H=window.__patHelp; if(R&&R.patterns) R.patterns.forEach(p=>{ const d=H.dirOf(p); if(!d||p.status==='Failed'||!H.isRecent(p,cfg.pat,C)) return;
+      const c=C[n].c; if(p.brk!=null) rows.push({sym,type:'pattern',d,name:p.name,status:p.status,lvl:p.entry,c,target:p.target,stop:p.stop,conf:p.conf,src:'pattern'});
+      else if(p.entry!=null){ const dist=d>0?p.entry/c-1:1-p.entry/c; if(dist>=0&&dist<=(key==='M15'?0.006:cfg.near*1.5)) rows.push({sym,type:'pattern',d,name:p.name,status:'forming, '+(dist*100).toFixed(1)+'% from trigger',lvl:p.entry,c,target:p.target,stop:p.stop,conf:p.conf,src:'pattern',forming:true}); } }); }catch(e){}
+    return {rows,hist,first:C[0].t,last:C[n].t};
+  }
+  function chips(){
+    $('bkTf').innerHTML='<span class="metric-sub">Timeframe:</span> '+Object.entries(TF).map(([k,v])=>`<span class="tc-chip${k===tf?' on':''}" data-bktf="${k}">${v.label}</span>`).join('');
+    $('bkCat').innerHTML='<span class="metric-sub">Show:</span> '+CAT.map(([k,v])=>`<span class="tc-chip${k===cat?' on':''}" data-bkcat="${k}">${v}</span>`).join('');
+  }
+  function stopTarget(r){ // stop beyond the level by 1 ATR; target 2x the risk (or the pattern's own)
+    if(r.src==='pattern') return {stop:r.stop,target:r.target};
+    const stop=r.lvl-r.d*r.atr, risk=Math.abs(r.c-stop); return {stop,target:r.c+r.d*2*risk};
+  }
+  function draw(){
+    chips();
+    const R=RES[tf]; if(!R){ $('bkOut').innerHTML=''; $('bkRecord').innerHTML=''; return; }
+    let rows=R.rows.slice();
+    if(cat==='break') rows=rows.filter(r=>r.type==='break'&&r.d>0); else if(cat==='near') rows=rows.filter(r=>r.type==='near'&&r.d>0); else if(cat==='pattern') rows=rows.filter(r=>r.type==='pattern'); else if(cat==='down') rows=rows.filter(r=>r.d<0&&r.type!=='pattern');
+    const rank=r=>(r.type==='break'?0:r.type==='pattern'?(r.forming?3:1):2)*10-(r.volR||0);
+    rows.sort((a,b)=>rank(a)-rank(b));
+    const cfg=TF[tf];
+    const badge=r=>{ const up=r.d>0; const t=r.type==='break'?(up?'BROKE OUT':'BROKE DOWN'):r.type==='near'?(up?'NEAR BREAKOUT':'NEAR BREAKDOWN'):(r.forming?'PATTERN FORMING':'PATTERN BREAK');
+      return `<b class="${up?'up':'down'}">${t}</b>`; };
+    const body=rows.map(r=>{ const st=stopTarget(r), vol=r.volR!=null?r.volR.toFixed(1)+'×'+(r.paced?' <span class="metric-sub">(paced)</span>':''):'—';
+      const note=r.type==='near'?[(r.dist*100).toFixed(1)+'% away',r.coil!=null&&r.coil<=0.85?'range tightening':'',r.dry!=null&&r.dry<=0.85?'volume drying up':''].filter(Boolean).join(' · '):r.type==='break'?((r.volR!=null&&r.volR>=1.5)?'on strong volume':'<span style="color:var(--amber)">weak volume</span>')+(r.baseRange!=null&&r.baseRange<=12?' · from a tight base ('+r.baseRange.toFixed(0)+'% range)':''):esc(r.status||'')+(r.conf?' · conf '+r.conf+'%':'');
+      const mon=st.stop!=null&&st.target!=null?window.monBtn({source:'screener',symbol:r.sym,side:r.d>0?'BUY':'SELL',mode:cfg.mode,sl:Math.round(st.stop*20)/20,target:Math.round(st.target*20)/20,label:'Breakout scanner ('+cfg.label+'): '+(r.type==='pattern'?r.name:r.name+(r.type==='near'?' (near)':''))}):'';
+      return `<tr><td><a href="#" data-bkopen="${esc(r.sym)}"><b>${esc(r.sym)}</b></a></td><td>${badge(r)}<div class="metric-sub">${esc(r.name)}</div></td><td>₹${f2(r.lvl)}</td><td>₹${f2(r.c)}</td><td>${vol}</td><td class="metric-sub">${note}</td><td>${st.stop!=null?'₹'+f2(st.stop):'—'} / ${st.target!=null?'₹'+f2(st.target):'—'}</td><td>${mon}</td></tr>`; }).join('');
+    $('bkOut').innerHTML=rows.length?`<table style="width:100%;font-size:12px;"><thead><tr><th>Stock</th><th>Signal</th><th>Level</th><th>Last</th><th>Volume vs normal</th><th>Notes</th><th>Stop / target</th><th></th></tr></thead><tbody>${body}</tbody></table>`:'<div class="metric-sub">Nothing in this category on '+cfg.label.toLowerCase()+' right now.</div>';
+    // track record on the same 90 stocks
+    const g=R.record, line=(k,lab)=>{ const a=g[k]; if(!a||!a.n) return ''; return `<tr><td>${lab}</td><td>${a.n}</td><td class="metric-sub">${dstr(a.t0)} – ${dstr(a.t1)}</td><td>${Math.round(a.w/a.n*100)}%</td><td class="${a.ret>0?'up':'down'}">${pc(a.ret/a.n)}</td></tr>`; };
+    const hz=tf==='M15'?'by the close that day':'after '+cfg.fwd+' '+cfg.unit;
+    $('bkRecord').innerHTML=`<details class="cm-box" open><summary style="cursor:pointer"><b>How these signals did before</b> <span class="metric-sub">same 90 stocks, ${dstr(R.first)} – ${dstr(R.last)} of ${cfg.bars}</span></summary>
+      <table style="width:100%;font-size:12px;margin-top:6px;"><thead><tr><th>Signal</th><th>Past signals</th><th>Period</th><th>Reached +1 ATR before −1 ATR</th><th>Avg move ${hz}</th></tr></thead><tbody>
+      ${line('break_up_vol','Broke out, strong volume (1.5×+)')}${line('break_up_novol','Broke out, weak volume')}${tf==='M15'?'':line('near_up','About to break out')}${line('break_down_vol','Broke down, strong volume')}${line('break_down_novol','Broke down, weak volume')}${tf==='M15'?'':line('near_down','About to break down')}</tbody></table>
+      <div class="metric-sub" style="margin-top:4px;">Measured from the close of the signal bar, in the signal's direction, before costs. ATR = the average ${tf==='M15'?'15-minute':tf==='W'?'weekly':'daily'} range. ${tf==='M15'?'Breaks counted between 9:45 am and 2 pm. ':''}A rule-based scan of past data, not investment advice.</div></details>`;
+  }
+  async function scan(){
+    if(busy) return; busy=true; const key=tf, cfg=TF[key], btn=$('bkScanBtn'); btn.disabled=true; btn.textContent='Scanning…';
+    const rows=[], hist=[]; let first=Infinity,last=0,done=0,fail=0;
+    try{
+      if(key==="D"){ $("bkStatus").textContent="Loading daily history…"; UNI.forEach(s=>{ if(window.REAL_HIST) delete window.REAL_HIST[s]; }); try{ await fetchScanHistory(UNI); }catch(e){} } // fresh daily bars (the page keeps older copies)
+      let idx=0;
+      async function worker(){ while(idx<UNI.length){ const sym=UNI[idx++];
+        try{ const C=await getCandles(sym,cfg.api); if(C.length<(key==='M15'?60:80)){ fail++; continue; } const a=analyse(sym,C,key); rows.push(...a.rows); hist.push(...a.hist); first=Math.min(first,a.first); last=Math.max(last,a.last); }catch(e){ fail++; }
+        done++; if(done%5===0) $('bkStatus').textContent=cfg.label+': '+done+' of '+UNI.length+' stocks…'; } }
+      await Promise.all(Array.from({length:key==='D'?1:3},worker));
+      RES[key]={rows,record:record(hist),first,last,at:Date.now()};
+      const b=rows.filter(r=>r.type==='break'), n=rows.filter(r=>r.type==='near'), p=rows.filter(r=>r.type==='pattern');
+      $('bkStatus').textContent=`${cfg.label} · ${new Date().toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})}: ${b.filter(r=>r.d>0).length} broke out, ${b.filter(r=>r.d<0).length} broke down, ${n.length} near a level, ${p.length} pattern signals`+(fail?` · ${fail} stocks had no data`:'');
+    }catch(e){ $('bkStatus').textContent='Scan failed: '+e.message; }
+    busy=false; btn.disabled=false; btn.textContent='Scan breakouts'; draw();
+  }
+  document.addEventListener('click',e=>{
+    const t=e.target.closest&&e.target.closest('[data-bktf],[data-bkcat],[data-bkopen],#bkScanBtn'); if(!t) return;
+    if(t.id==='bkScanBtn'){ scan(); return; }
+    if(t.dataset.bkopen){ e.preventDefault(); openTab(t.dataset.bkopen); return; }
+    if(t.dataset.bktf){ tf=t.dataset.bktf; try{ localStorage.setItem('bkTf',tf); }catch(x){} $('bkStatus').textContent=RES[tf]?'Showing the last '+TF[tf].label.toLowerCase()+' scan.':'Press Scan for '+TF[tf].label.toLowerCase()+' breakouts'+(tf==='D'?'.':' (one request per stock, about a minute).'); draw(); return; }
+    if(t.dataset.bkcat){ cat=t.dataset.bkcat; try{ localStorage.setItem('bkCat',cat); }catch(x){} draw(); }
+  });
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',chips); else chips();
+  window.BreakoutScanner={analyse,sigDW,sig15,TF};
+})();
 </script>
 </body>
 </html>

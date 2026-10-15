@@ -2429,7 +2429,7 @@ const CAPS_ON = process.env.CALLS_CAPS === 'on';
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
 const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 9 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 10 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold', x5: '5-min EMA 20/50 crossover', x15: '15-min EMA 20/50 crossover' };
 const DT_LABEL = { up: 'up days', down: 'down days', flat: 'sideways days' };
 function gateLabel(key) {
@@ -2578,7 +2578,7 @@ async function buildGate() {
       pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 9, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
+    gate = { t: Date.now(), labVersion: 10, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }

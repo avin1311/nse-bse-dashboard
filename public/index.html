@@ -4141,6 +4141,9 @@ function applyStreamTick(d, q) {
 
 function startLiveFeed(d) {
   stopLiveFeed();
+  let gotTick = false;
+  // A stream can connect yet send nothing (no streaming permission on the token): fall back to 5s Upstox quotes
+  setTimeout(() => { if (!gotTick && window.CURRENT === d) startFallbackPoll(d); }, 6000);
   try {
     liveEventSource = new EventSource('/api/stream?symbols=' + encodeURIComponent(d.symbol));
     liveEventSource.onmessage = (e) => {
@@ -4148,6 +4151,8 @@ function startLiveFeed(d) {
         const tick = JSON.parse(e.data);
         const cur = window.CURRENT;
         if (!cur || cur.symbol !== d.symbol) return;
+        gotTick = true;
+        if (livePollInterval) { clearInterval(livePollInterval); livePollInterval = null; } // the stream is flowing, 5s polling not needed
         applyStreamTick(cur, tick);
         refreshLiveDom(cur);
         setLiveStatus('live');
@@ -4177,7 +4182,7 @@ async function tickLive(){
     if(window.CURRENT!==d) return; // the stock was switched while this was loading: never paint its price on another stock
     applyLiveQuote(d, q);
     refreshLiveDom(d);
-    setLiveStatus(liveEventSource?'live':'rest');
+    setLiveStatus('rest');
   }catch(e){
     // Never fabricate price moves: keep the last real values and just flag the feed as not live.
     if(window.CURRENT===d) setLiveStatus('sim');

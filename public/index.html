@@ -6364,6 +6364,7 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
       const nr=L.map(x=>({x,dist:d>0?x.v/c-1:1-x.v/c})).filter(z=>z.dist>=0&&z.dist<=0.004).sort((a,b)=>a.dist-b.dist)[0];
       if(nr) out.push({type:'near',d,lvl:nr.x.v,name:nr.x.n,dist:nr.dist});
     }
+    const nb=out.filter(x=>x.type==='near'); if(nb.length===2&&!out.some(x=>x.type==='break')) out.splice(out.indexOf(nb[0].dist<=nb[1].dist?nb[1]:nb[0]),1); // squeezed between two levels: keep the nearer
     out.forEach(x=>{ x.c=c; x.atr=atr; x.volR=volR; });
     return out;
   }
@@ -6377,7 +6378,7 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
   }
   function record(all){ // all: [{type,d,strong,win,ret,t}]
     const g={}, add=(k,x)=>{ const a=g[k]=g[k]||{n:0,w:0,ret:0,t0:x.t,t1:x.t}; a.n++; if(x.win) a.w++; a.ret+=x.ret; a.t0=Math.min(a.t0,x.t); a.t1=Math.max(a.t1,x.t); };
-    all.forEach(x=>{ const side=x.d>0?'up':'down'; if(x.type==='break') add('break_'+side+(x.strong?'_vol':'_novol'),x); else add('near_'+side,x); });
+    all.forEach(x=>{ const side=x.d>0?'up':'down'; if(x.type==='base') add('base_'+side,x); else if(x.type==='break') add('break_'+side+(x.strong?'_vol':'_novol'),x); else add('near_'+side,x); });
     return g;
   }
   async function getCandles(sym,api){
@@ -6392,10 +6393,12 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
       let i=n; if(C[i].t+900>Date.now()/1000) i--; if(i<30) return {rows,hist};
       sig15(C,i).forEach(x=>rows.push({sym,...x,src:'level',t:C[i].t}));
       for(let k=40;k<i;k++){ const m=Math.floor(((C[k].t+19800)%86400)/60); if(m<585||m>840) continue; // 9:45–14:00 signals only
+        { const A=atrAt(C,k,14); for(const d of [1,-1]){ const r=fwdRes(C,k,d,A,0,true); if(r) hist.push({type:'base',d,...r,t:C[k].t}); } } // no-signal baseline: every bar
         sig15(C,k).forEach(x=>{ if(x.type!=='break') return; const r=fwdRes(C,k,x.d,x.atr,0,true); if(r) hist.push({type:'break',d:x.d,strong:x.volR!=null&&x.volR>=1.5,...r,t:C[k].t}); }); }
     } else {
       const frac=paceFrac(C,key);
       (sigDW(C,n,cfg,frac)||[]).forEach(x=>rows.push({sym,...x,src:'level',t:C[n].t,paced:frac<1}));
+      for(let k=Math.max(60,cfg.look[0]+1);k<n-cfg.fwd;k++){ const A=atrAt(C,k,14); for(const d of [1,-1]){ const r=fwdRes(C,k,d,A,cfg.fwd,false); if(r) hist.push({type:'base',d,...r,t:C[k].t}); } } // no-signal baseline: every bar
       for(let k=Math.max(60,cfg.look[0]+1);k<n-cfg.fwd;k++) (sigDW(C,k,cfg,1)||[]).forEach(x=>{ const r=fwdRes(C,k,x.d,x.atr,cfg.fwd,false); if(r) hist.push({type:x.type,d:x.d,strong:x.volR!=null&&x.volR>=1.5,...r,t:C[k].t}); });
     }
     // chart patterns
@@ -6433,8 +6436,8 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
     const hz=tf==='M15'?'by the close that day':'after '+cfg.fwd+' '+cfg.unit;
     $('bkRecord').innerHTML=`<details class="cm-box" open><summary style="cursor:pointer"><b>How these signals did before</b> <span class="metric-sub">same 90 stocks, ${dstr(R.first)} – ${dstr(R.last)} of ${cfg.bars}</span></summary>
       <table style="width:100%;font-size:12px;margin-top:6px;"><thead><tr><th>Signal</th><th>Past signals</th><th>Period</th><th>Reached +1 ATR before −1 ATR</th><th>Avg move ${hz}</th></tr></thead><tbody>
-      ${line('break_up_vol','Broke out, strong volume (1.5×+)')}${line('break_up_novol','Broke out, weak volume')}${tf==='M15'?'':line('near_up','About to break out')}${line('break_down_vol','Broke down, strong volume')}${line('break_down_novol','Broke down, weak volume')}${tf==='M15'?'':line('near_down','About to break down')}</tbody></table>
-      <div class="metric-sub" style="margin-top:4px;">Measured from the close of the signal bar, in the signal's direction, before costs. ATR = the average ${tf==='M15'?'15-minute':tf==='W'?'weekly':'daily'} range. ${tf==='M15'?'Breaks counted between 9:45 am and 2 pm. ':''}A rule-based scan of past data, not investment advice.</div></details>`;
+      ${line('base_up','<span class="metric-sub">Baseline: any '+(tf==='M15'?'bar':tf==='W'?'week':'day')+', bought (no signal)</span>')}${line('break_up_vol','Broke out, strong volume (1.5×+)')}${line('break_up_novol','Broke out, weak volume')}${tf==='M15'?'':line('near_up','About to break out')}${line('base_down','<span class="metric-sub">Baseline: any '+(tf==='M15'?'bar':tf==='W'?'week':'day')+', sold (no signal)</span>')}${line('break_down_vol','Broke down, strong volume')}${line('break_down_novol','Broke down, weak volume')}${tf==='M15'?'':line('near_down','About to break down')}</tbody></table>
+      <div class="metric-sub" style="margin-top:4px;">Measured from the close of the signal bar, in the signal's direction, before costs. ATR = the average ${tf==='M15'?'15-minute':tf==='W'?'weekly':'daily'} range. ${tf==='M15'?'Breaks counted between 9:45 am and 2 pm. ':''}A signal type only has an edge if it does clearly better than the baseline row above it (the same holding period with no signal). A rule-based scan of past data, not investment advice.</div></details>`;
   }
   async function scan(){
     if(busy) return; busy=true; const key=tf, cfg=TF[key], btn=$('bkScanBtn'); btn.disabled=true; btn.textContent='Scanning…';

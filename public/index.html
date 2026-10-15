@@ -6446,7 +6446,8 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
       if(key==="D"){ $("bkStatus").textContent="Loading daily history…"; UNI.forEach(s=>{ if(window.REAL_HIST) delete window.REAL_HIST[s]; }); try{ await fetchScanHistory(UNI); }catch(e){} } // fresh daily bars (the page keeps older copies)
       let idx=0;
       async function worker(){ while(idx<UNI.length){ const sym=UNI[idx++];
-        try{ const C=await getCandles(sym,cfg.api); if(C.length<(key==='M15'?60:80)){ fail++; continue; } const a=analyse(sym,C,key); rows.push(...a.rows); hist.push(...a.hist); first=Math.min(first,a.first); last=Math.max(last,a.last); }catch(e){ fail++; }
+        try{ let C=await getCandles(sym,cfg.api); if(key==='W') C=C.slice(-260); else if(key==='D') C=C.slice(-320); // weekly: last 5 years
+          if(C.length<(key==='M15'?60:80)){ fail++; continue; } const a=analyse(sym,C,key); rows.push(...a.rows); hist.push(...a.hist); first=Math.min(first,a.first); last=Math.max(last,a.last); }catch(e){ fail++; }
         done++; if(done%5===0) $('bkStatus').textContent=cfg.label+': '+done+' of '+UNI.length+' stocks…'; } }
       await Promise.all(Array.from({length:key==='D'?1:3},worker));
       RES[key]={rows,record:record(hist),first,last,at:Date.now()};

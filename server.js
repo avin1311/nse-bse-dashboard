@@ -434,18 +434,10 @@ app.get('/api/quote/:symbol', async (req, res) => {
         const data = await getUpstoxLTPC(instrumentKey);
         return res.json(data);
       }
-    } catch (e) { /* fall through to Yahoo */ }
+      return res.status(502).json({ error: 'No Upstox instrument for ' + sym });
+    } catch (e) { return res.status(502).json({ error: 'Upstox quote failed: ' + e.message }); }
   }
-  // Yahoo fallback — always used for index symbols and when Upstox not configured
-  try {
-    const ySymbol = sym.startsWith('^') ? sym : sym + '.NS';
-    const data = await getChartData(ySymbol, '1d', '5m');
-    if (!data || data.price == null) return res.status(502).json({ error: 'No price data' });
-    const changePct = data.prevClose ? ((data.price - data.prevClose) / data.prevClose * 100) : 0;
-    res.json({ price: data.price, prevClose: data.prevClose, changePct, marketState: data.marketState, source: 'yahoo' });
-  } catch (e) {
-    res.status(502).json({ error: e.message });
-  }
+  res.status(503).json({ error: 'Upstox is not connected' }); // real Upstox prices only, no Yahoo fallback
 });
 
 
@@ -476,13 +468,8 @@ async function getScanHistory(sym) {
   const c = scanHistCache[sym];
   if (c && Date.now() - c.time < SCAN_HIST_TTL) return c.data;
   let ser = null, source = 'upstox';
-  try { const rows = await getUpstoxCandles(appSym(sym), '1D'); if (rows.length >= 30) ser = rows.slice(-320).map(r => ({ t: r.t, o: r.o, c: r.c, h: r.h, l: r.l, v: r.v })); } catch (e) { /* fall back to Yahoo */ }
-  if (!ser) {
-    source = 'yahoo';
-    const parsed = await getChartData(sym, '1y', '1d');
-    if (!parsed || !parsed.series || parsed.series.length < 30) throw new Error('insufficient history');
-    ser = parsed.series.slice(-320);
-  }
+  const rows = await getUpstoxCandles(appSym(sym), '1D'); if (rows.length >= 30) ser = rows.slice(-320).map(r => ({ t: r.t, o: r.o, c: r.c, h: r.h, l: r.l, v: r.v }));
+  if (!ser) throw new Error('insufficient Upstox history'); // Upstox only, no Yahoo fallback
   const data = { o: ser.map(p => p.o != null ? p.o : p.c), c: ser.map(p => p.c), h: ser.map(p => p.h), l: ser.map(p => p.l), v: ser.map(p => p.v), t: ser.map(p => p.t), source };
   scanHistCache[sym] = { data, time: Date.now() };
   return data;
@@ -512,13 +499,8 @@ async function getSeasonality(sym) {
   const c = seasCache[sym];
   if (c && Date.now() - c.time < SEAS_TTL) return c.data;
   let ser = null, source = 'upstox';
-  try { const rows = await getUpstoxCandles(appSym(sym), '1M'); if (rows.length >= 14) ser = rows; } catch (e) { /* fall back to Yahoo */ }
-  if (!ser) {
-    source = 'yahoo';
-    const parsed = await getChartData(sym, 'max', '1mo');
-    if (!parsed || !parsed.series || parsed.series.length < 14) throw new Error('insufficient monthly history');
-    ser = parsed.series;
-  }
+  const rows = await getUpstoxCandles(appSym(sym), '1M'); if (rows.length >= 14) ser = rows;
+  if (!ser) throw new Error('insufficient Upstox monthly history'); // Upstox only, no Yahoo fallback
   const data = { t: ser.map(p => p.t), c: ser.map(p => p.c), source };
   seasCache[sym] = { data, time: Date.now() };
   return data;
@@ -587,6 +569,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ============================================================
 // UPSTOX WEBSOCKET → SERVER-SENT EVENTS LIVE FEED
 // ============================================================
+// A crash restarts the free Render instance (~1 min of "waking up"), so log and carry on instead.
+process.on('uncaughtException', e => { console.error('Uncaught (kept running):', e && e.stack || e); });
+process.on('unhandledRejection', e => { console.error('Unhandled rejection (kept running):', e && e.stack || e); });
 let UpstoxClient;
 try { UpstoxClient = require('upstox-js-sdk'); } catch(e) { console.warn('upstox-js-sdk not installed — WebSocket feed unavailable'); }
 
@@ -594,11 +579,12 @@ let upstoxStreamer = null;
 let streamerConnected = false;
 const sseClients = new Map();
 const latestPrices = new Map();
-let streamerRetryTimer = null;
+let streamerRetryTimer = null, streamerFails = 0;
 
 function initUpstoxAuth() {
   if (!UpstoxClient) return false;
-  const token = process.env.UPSTOX_OAUTH_TOKEN || process.env.UPSTOX_ACCESS_TOKEN || process.env.UPSTOX_ANALYTICS_TOKEN;
+  const toks = upstoxTokens(), good = toks.filter(t => !tokenBad(t));
+  const token = good[0] || toks[0];
   if (!token) return false;
   const defaultClient = UpstoxClient.ApiClient.instance;
   const OAUTH2 = defaultClient.authentications['OAUTH2'];
@@ -631,9 +617,10 @@ function startUpstoxStreamer(instrumentKeys) {
 
   try {
     upstoxStreamer = new UpstoxClient.MarketDataStreamerV3(instrumentKeys, 'ltpc');
+    try { upstoxStreamer.autoReconnect(false); } catch (e) {} // the SDK's own reconnect throws (clearSubscriptions is not a function) and took the whole server down
 
     upstoxStreamer.on('open', () => {
-      streamerConnected = true;
+      streamerConnected = true; streamerFails = 0;
       console.log('Upstox WebSocket connected, streaming', instrumentKeys.length, 'instruments');
     });
 
@@ -660,11 +647,14 @@ function startUpstoxStreamer(instrumentKeys) {
         upstoxStreamer = null;
         return; // no retry for auth failures
       }
-      console.log('Upstox WebSocket closed — retrying in 10s');
+      streamerFails++;
+      const wait = Math.min(300000, 10000 * Math.pow(2, Math.min(streamerFails - 1, 5)));
+      console.log('Upstox WebSocket closed — retrying in ' + Math.round(wait / 1000) + 's');
+      upstoxStreamer = null;
       streamerRetryTimer = setTimeout(() => {
         const keys = allSubscribedKeys();
         if (keys.length) startUpstoxStreamer(keys);
-      }, 10000);
+      }, wait);
     });
 
     upstoxStreamer.on('error', (e) => {
@@ -689,6 +679,7 @@ function startUpstoxStreamer(instrumentKeys) {
 // Resolve an equity symbol to its Upstox instrument key via the universe cache
 async function symbolToInstrumentKey(symbol) {
   if (UPSTOX_INDEX_KEYS[symbol]) return UPSTOX_INDEX_KEYS[symbol];
+  try { const k = await dataKeyFor(symbol); if (k) return k; } catch (e) {} // live instrument list first (hardcoded ISINs go stale after splits)
   // Check hardcoded EQ keys first — instant, no network needed
   const normalized = symbol.replace(/[&-]/g, '_'); // handle M&M, BAJAJ-AUTO etc.
   if (HARDCODED_EQ_KEYS[symbol]) return HARDCODED_EQ_KEYS[symbol];
@@ -727,8 +718,8 @@ app.get('/api/stream', async (req, res) => {
     }
 
     if (!instrumentKeys.length) {
-      // Can't resolve yet — send a REST quote as a one-off so browser at least gets current price
-      for (const sym of rawSymbols) {
+      // Can't resolve yet (Upstox prices only): the browser keeps polling the Upstox REST quote meanwhile
+      for (const sym of (false ? rawSymbols : [])) {
         try {
           const ySymbol = ({NIFTY:'^NSEI',BANKNIFTY:'^NSEBANK',NIFTYIT:'^CNXIT',SENSEX:'^BSESN',NIFTYFMCG:'^CNXFMCG',NIFTYPHARMA:'^CNXPHARMA',NIFTYAUTO:'^CNXAUTO',NIFTYMETAL:'^CNXMETAL',NIFTYREALTY:'^CNXREALTY',NIFTYENERGY:'^CNXENERGY',NIFTYINFRA:'^CNXINFRA',NIFTYPSUBANK:'^CNXPSUBANK',NIFTYMIDCAP:'^CNXMIDCAP',NIFTYSMALLCAP:'^CNXSMALLCAP',NIFTYNXT50:'^NSMIDCP100',INDIAVIX:'^INDIAVIX'})[sym] || (sym + '.NS');
           const data = await getChartData(ySymbol, '1d', '5m');
@@ -1142,7 +1133,8 @@ app.get('/upstox-callback', async (req, res) => {
     if (!data.access_token) throw new Error(JSON.stringify(data));
     const token = data.access_token;
     // Update the running server's token immediately — no restart needed
-    process.env.UPSTOX_OAUTH_TOKEN = token;
+    process.env.UPSTOX_OAUTH_TOKEN = token; badTokenAt.delete(token);
+    try { await storeSet('upstox:oauth', { token, t: Date.now() }); } catch (e) {} // survives restarts until it expires
     upstoxTokenCheck = { time: 0, valid: false, reason: null, token: null };
     if (UpstoxClient) initUpstoxAuth();
     // Restart streamer with new token if clients are waiting
@@ -1239,6 +1231,8 @@ const HARDCODED_EQ_KEYS = {
 function upstoxTokens() {
   return [...new Set([process.env.UPSTOX_OAUTH_TOKEN, process.env.UPSTOX_ACCESS_TOKEN, process.env.UPSTOX_ANALYTICS_TOKEN].filter(Boolean))];
 }
+const badTokenAt = new Map(); // token -> when Upstox last rejected it (expired daily tokens stay in the env)
+function tokenBad(t) { const at = badTokenAt.get(t); return !!at && Date.now() - at < 30 * 60000; }
 let upstoxNext = 0, upstoxHiWaiting = 0;
 async function upstoxThrottle() { // keep well under Upstox rate limits (~9 req/s)
   if (lowPriority.getStore()) { // background scan: only go when no interactive request is waiting
@@ -1259,14 +1253,15 @@ async function upstoxFetchJson(url) {
   const toks = upstoxTokens();
   if (!toks.length) throw new Error('No Upstox token configured (set UPSTOX_ANALYTICS_TOKEN on Render)');
   let lastErr = null;
-  for (const tk of toks) {
+  const order = toks.filter(t => !tokenBad(t)).concat(toks.filter(tokenBad)); // known-bad tokens last
+  for (const tk of order) {
     await upstoxThrottle();
     const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${tk}` }, signal: AbortSignal.timeout(25000) }); // never hang on a stuck connection
     const json = await resp.json().catch(() => null);
-    if (resp.ok && json && json.status === 'success') { HEALTH.upstox.lastOk = Date.now(); return json.data; }
+    if (resp.ok && json && json.status === 'success') { HEALTH.upstox.lastOk = Date.now(); badTokenAt.delete(tk); return json.data; }
     const msg = (json && (json.errors?.[0]?.message || json.message)) || `Upstox request failed (${resp.status})`;
     lastErr = new Error(msg); HEALTH.upstox.lastErr = msg; HEALTH.upstox.lastErrAt = Date.now();
-    if (resp.status === 401 || resp.status === 403 || /invalid credentials|token/i.test(msg)) continue; // try the next token
+    if (resp.status === 401 || resp.status === 403 || /invalid credentials|token/i.test(msg)) { badTokenAt.set(tk, Date.now()); continue; } // try the next token
     throw lastErr;
   }
   throw lastErr;
@@ -2185,7 +2180,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-15-r27 (server scans on its own 9:15–15:35, no open tab needed)';
+const BUILD = '2026-10-15-r28 (no crash on Upstox stream errors, login token survives restarts, Upstox-only prices, server scans on its own)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2746,6 +2741,9 @@ app.get('/api/calls', async (req, res) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 if (process.env.CALLS_TEST_HOOKS) global.__hooks = { buildOptionCall, pickExpiry, trackCall, runIndexScan, backtestIndexCall, loadCalls, getOptionContracts, callsState };
+// Upstox daily tokens expire at 3:30 am IST; reload today's login token after a restart.
+function oauthExpiry(t) { const ist = t + 19800000, d = new Date(ist); const cut = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 3, 30); return (ist < cut ? cut : cut + 86400000) - 19800000; }
+(async () => { try { const o = await storeGet('upstox:oauth', null); if (o && o.token && Date.now() < oauthExpiry(o.t)) { process.env.UPSTOX_OAUTH_TOKEN = o.token; if (UpstoxClient) initUpstoxAuth(); console.log('Restored today\'s Upstox login token'); } } catch (e) {} })();
 app.listen(PORT, () => {
   console.log(`\nDashboard running at http://localhost:${PORT}`);
   console.log(`Live data proxied from Yahoo Finance (cache TTL ${CACHE_TTL_MS / 1000}s)\n`);

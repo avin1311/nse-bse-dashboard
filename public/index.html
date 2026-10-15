@@ -4063,9 +4063,14 @@ function setLiveStatus(mode){
     } else if(mode==='connecting'){
       el.style.color='var(--text2)'; el.style.background='rgba(138,148,166,.12)';
       el.innerHTML='<span class="pulse" style="background:var(--text2);"></span>Connecting&hellip;';
+    } else if(mode==='rest'){
+      el.style.color='var(--green)'; el.style.background='rgba(38,194,129,.12)';
+      el.innerHTML='<span class="pulse" style="background:var(--green);"></span>UPSTOX &middot; 5s';
+      el.title='Real Upstox price, refreshed every 5 seconds (the 1-second stream needs today\'s Upstox login)';
     } else {
       el.style.color='var(--amber)'; el.style.background='rgba(240,169,58,.12)';
-      el.innerHTML='<span class="pulse" style="background:var(--amber);"></span>YAHOO (15s delay)';
+      el.innerHTML='<span class="pulse" style="background:var(--amber);"></span>PRICE PAUSED &middot; retrying';
+      el.title='Could not reach the Upstox price just now; showing the last real price and retrying every 5 seconds';
     }
   }
   if(btn && label){
@@ -4108,6 +4113,7 @@ function applyLiveQuote(d,q){
 }
 
 function refreshLiveDom(d){
+  if(d!==window.CURRENT) return; // a late price for a stock you already left
   window.LAST_TICK=Date.now();
   const lp=document.getElementById('livePrice'); if(lp) lp.textContent=fmt(d.price);
   const chg=document.getElementById('liveChg');
@@ -4168,12 +4174,13 @@ async function tickLive(){
     const resp = await fetch('/api/quote/'+encodeURIComponent(d.symbol), {cache:'no-store'});
     const q = await resp.json();
     if(q.error) throw new Error(q.error);
+    if(window.CURRENT!==d) return; // the stock was switched while this was loading: never paint its price on another stock
     applyLiveQuote(d, q);
     refreshLiveDom(d);
-    setLiveStatus('live');
+    setLiveStatus(liveEventSource?'live':'rest');
   }catch(e){
     // Never fabricate price moves: keep the last real values and just flag the feed as not live.
-    setLiveStatus('sim');
+    if(window.CURRENT===d) setLiveStatus('sim');
   }
 }
 

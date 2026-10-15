@@ -828,10 +828,10 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
     const ev = evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
     if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     const sm = dayMove(opts.secBars15 || I, t); // the stock's sector index (Nifty when it has none)
-    if (opts.safety !== false && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue;
+    if (opts.safety === true && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue; // the lab normally applies it as a filter instead
     const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
-    out.push({ ...tradeOf(sym, call, ev, st, bias), idxPct: todayPct, secPct: sm ? sm.pct : null, dt: dtOf(todayPct) });
+    out.push({ ...tradeOf(sym, call, ev, st, bias), idxPct: todayPct, secPct: sm ? sm.pct : null, secUp: sm ? sm.aboveOpen : null, dt: dtOf(todayPct) });
     freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
   }
   return out;
@@ -856,7 +856,8 @@ const LAB_GRID = {
   index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
   // agree: must the stock's side agree with Nifty ('index') or with its sector index ('sector') on the day? Applied as a
   // filter on one replay, so the extra choices cost almost no lab time
-  stock_intraday: product({ agree: ['none', 'index', 'sector'], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
+  // safety: block sells while the sector is up 0.7%+ above its open (mirror for buys) — tested, not assumed
+  stock_intraday: product({ safety: [false, true], agree: ['none', 'index', 'sector'], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);

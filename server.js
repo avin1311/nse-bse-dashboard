@@ -2155,7 +2155,7 @@ async function runCallsCycle(force) {
       if (CAPS_ON && (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode])) continue;
       const gk = f.gateKey || `stk|${f.mode}|${f.side}|${f.setup || 'trend'}`, g = gateCheck(gk);
       if (!g.ok) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, g.reason); continue; }
-      { // safety block: no stock sell while its sector index is up 0.7%+ and above its open (mirror for buys)
+      if (f.mode === 'intraday' && ((gate.kinds || {})[gk] || {}).params?.safety) { // safety block, only where the lab chose it: no sell while the sector index is up 0.7%+ above its open (mirror for buys)
         const ix = sectorOf(f.symbol), sm = await getSectorMove(ix);
         if (sm && !Calls.safetyOk(f.side, sm.pct, sm.aboveOpen)) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, `safety: ${SECTOR_LABEL[ix] || ix} is ${sm.pct > 0 ? 'up' : 'down'} ${Math.abs(sm.pct).toFixed(2)}% and ${sm.pct > 0 ? 'above' : 'below'} its open, no ${f.side === 'SELL' ? 'sell' : 'buy'} against it`); continue; }
       }
@@ -2249,7 +2249,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-15-r29 (lab v9: results by market type, sector agreement, safety block; watch-only index signals)';
+const BUILD = '2026-10-15-r30 (lab v9: results by market type, sector agreement, safety block tested by the lab; watch-only index signals)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2445,14 +2445,14 @@ function gateLabel(key) {
 const GATE_MODE = (process.env.CALLS_GATE || 'paper').toLowerCase(); // paper (default): unproven kinds still issue calls, labelled; strict: only proven; off: no gate
 const LAB_MIN_OLDER = 12;
 const DEF_PARAMS = { index_cross: { entry: 'cross', volK: 1.3, htf: true, minScore: 4, stopK: 1.25, exit: 'A' }, index_intraday: { veto: true, regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A', endMin: 795 }, index_swing: { regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A' },
-  stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { agree: 'none', regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
+  stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_intraday: { safety: false, agree: 'none', regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
 const famOf = key => { const [g, m] = key.split('|'); return (g === 'idx' ? 'index_' : 'stock_') + m; };
 function paramsLabel(p) {
   if (!p) return '';
   const ex = { S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R', C: '2/4/6R' }[p.exit || p.exitI] || '';
   const rg = p.regime === 'b50' ? ' · only when market breadth agrees (buys ≥50% of stocks above their 50-day average, sells ≤50%)' : p.regime === 'b60' ? ' · only in a strong market (buys ≥60% above their 50-day average, sells ≤40%)' : '';
   const ia = p.idxAgree || p.agree === 'index' ? ' · only when Nifty agrees on the day (buys while it is up, sells while it is down)' : p.agree === 'sector' ? ' · only when its sector index agrees on the day (buys while it is up, sells while it is down)' : '';
-  const vt = p.veto === false ? ' · may trade against the daily trend' : '';
+  const vt = (p.veto === false ? ' · may trade against the daily trend' : '') + (p.safety ? ' · no trade against a strong sector move (0.7%+)' : '');
   if (p.entry) return `${p.minScore}/6 checks · ${p.entry === 'retest' ? 'entry on the first pullback to the 20 EMA' : 'entry on the cross candle'}${p.volK ? ' · volume ≥' + p.volK + '× usual (required)' : ' · volume not required'}${p.htf ? ' · bigger trend must agree' : ''} · stop ×${p.stopK} · targets ${{ S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R' }[p.exit] || ''}`;
   return `${p.minScore}/6 checks${p.needHtf ? ' + bigger trend' : ''}${vt}${rg}${ia} · stop ×${p.stopK} · targets ${ex}${p.endMin ? ' · entries until ' + (p.endMin === 720 ? '12:15' : '13:30') : ''}`;
 }
@@ -2560,7 +2560,7 @@ async function buildGate() {
       const keyFn = x => `stk|intraday|${x.side}|${x.setup || 'trend'}`;
       const syms = FNO_FALLBACK.slice(0, 90), secBars = {};
       // the 'agree' choice is a filter on the same replay: walk each rule set once, then file its trades under every agree option
-      const sig = c => JSON.stringify({ ...c, agree: undefined }), variants = {};
+      const sig = c => JSON.stringify({ ...c, agree: undefined, safety: undefined }), variants = {};
       combos.forEach((c, ci) => { (variants[sig(c)] = variants[sig(c)] || []).push(ci); });
       for (const sym of syms) {
         gate.progress = `lab: stocks intraday ${++k}/${syms.length}`;
@@ -2570,8 +2570,8 @@ async function buildGate() {
           const h = await getIndex15mHistory(sym, 4, true); if (!cutoff) cutoff = mid(h.bars);
           const P = Calls.prep(h.bars);
           for (const group of Object.values(variants)) {
-            const ts = await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, secBars15: (ix !== 'NIFTY' && secBars[ix]) || idx15, _P: P, breadth, ...combos[group[0]], agree: 'none' }, yieldLoop);
-            for (const ci of group) { const ag = combos[ci].agree; accum(perCombo[ci], ag === 'none' ? ts : ts.filter(x => Calls.agreeOk(x.side, ag, x.idxPct, x.secPct)), keyFn, cutoff); }
+            const ts = await Calls.walkIntraday(sym, h.bars, { idxBars15: idx15, secBars15: (ix !== 'NIFTY' && secBars[ix]) || idx15, _P: P, breadth, ...combos[group[0]], agree: 'none', safety: false }, yieldLoop);
+            for (const ci of group) { const { agree: ag, safety: sf } = combos[ci]; accum(perCombo[ci], ag === 'none' && !sf ? ts : ts.filter(x => Calls.agreeOk(x.side, ag, x.idxPct, x.secPct) && (!sf || Calls.safetyOk(x.side, x.secPct, x.secUp))), keyFn, cutoff); }
           }
         } catch (e) {}
       }

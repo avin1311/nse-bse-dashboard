@@ -2249,7 +2249,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-15-r30 (lab v9: results by market type, sector agreement, safety block tested by the lab; watch-only index signals)';
+const BUILD = '2026-10-15-r31 (lab results show the period and candle size of their trades)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2429,7 +2429,7 @@ const CAPS_ON = process.env.CALLS_CAPS === 'on';
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
 const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 10 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 11 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold', x5: '5-min EMA 20/50 crossover', x15: '15-min EMA 20/50 crossover' };
 const DT_LABEL = { up: 'up days', down: 'down days', flat: 'sideways days' };
 function gateLabel(key) {
@@ -2464,8 +2464,8 @@ function accum(map, trades, keyFn, cutoff) {
     const k0 = keyFn(x);
     for (const k of x.dt ? [k0, k0 + '@' + x.dt] : [k0]) { // every kind is also measured per market type (up / down / sideways days)
       let a = map.get(k);
-      if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, w: 0, l: 0 }; map.set(k, a); }
-      a.n++; a.sum += x.pnlPct;
+      if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, w: 0, l: 0, t0: x.t, t1: x.t }; map.set(k, a); }
+      a.n++; a.sum += x.pnlPct; if (x.t < a.t0) a.t0 = x.t; if (x.t > a.t1) a.t1 = x.t; // the period the trades span
       if (x.t < cutoff) { a.oN++; a.oSum += x.pnlPct; a.oSq += x.pnlPct * x.pnlPct; } else { a.nN++; a.nSum += x.pnlPct; }
       if (x.status !== 'BREAKEVEN') { if (x.pnlPct > 0.05) a.w++; else if (x.pnlPct < -0.05) a.l++; }
     }
@@ -2476,7 +2476,7 @@ function statsOf(a) {
   if (!a || !a.n) return { n: 0, avg: null, older: null, newer: null, olderN: 0, newerN: 0, winRate: null, olderLcb: null };
   let lcb = null; // conservative score for choosing rules: older-half average minus one standard error, so a lucky handful of trades cannot win
   if (a.oN >= 2) { const m = a.oSum / a.oN, v = Math.max(0, (a.oSq - a.oN * m * m) / (a.oN - 1)); lcb = m - Math.sqrt(v) / Math.sqrt(a.oN); }
-  return { n: a.n, avg: r(a.sum / a.n), older: a.oN ? r(a.oSum / a.oN) : null, newer: a.nN ? r(a.nSum / a.nN) : null, olderN: a.oN, newerN: a.nN, winRate: a.w + a.l ? Math.round(a.w / (a.w + a.l) * 100) : null, olderLcb: lcb };
+  return { from: a.t0, to: a.t1, n: a.n, avg: r(a.sum / a.n), older: a.oN ? r(a.oSum / a.oN) : null, newer: a.nN ? r(a.nSum / a.nN) : null, olderN: a.oN, newerN: a.nN, winRate: a.w + a.l ? Math.round(a.w / (a.w + a.l) * 100) : null, olderLcb: lcb };
 }
 function pickKinds(kinds, fam, combos, perCombo, cutoff) {
   const min = GATE_MIN[fam === 'index_intraday' || fam === 'index_cross' ? 'idx_intraday' : fam === 'index_swing' ? 'idx_swing' : fam === 'stock_intraday' ? 'stk_intraday' : 'stk_swing'];
@@ -2490,7 +2490,8 @@ function pickKinds(kinds, fam, combos, perCombo, cutoff) {
     if (st.n < GATE_MIN_TRADES) why.push(`only ${st.n} past trades (need ${GATE_MIN_TRADES})`);
     if (st.avg == null || st.avg <= min) why.push(`average ${st.avg == null ? '—' : (st.avg > 0 ? '+' : '') + st.avg + '%'} is not above +${min}%`);
     if (!(st.older > 0) || !(st.newer > 0) || st.newerN < 5) why.push('not profitable in both the older and the newer half');
-    kinds[key] = { label: gateLabel(key), fam, params: combos[win.ci], paramsText: paramsLabel(combos[win.ci]), tested: combos.length, min, ...st,
+    const set = keyParts(key).setup, bars = fam === 'index_swing' || fam === 'stock_swing' ? 'daily candles' : set === 'x5' ? '5-minute candles' : '15-minute candles';
+    kinds[key] = { label: gateLabel(key), fam, bars, params: combos[win.ci], paramsText: paramsLabel(combos[win.ci]), tested: combos.length, min, ...st,
       pass: !why.length, reason: why.length ? why.join('; ') : 'passed', current: cand[defIdx].st, cutoff };
   }
 }
@@ -2578,7 +2579,7 @@ async function buildGate() {
       pickKinds(kinds, fam, combos, perCombo, cutoff); gate.partial = { ...kinds };
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 10, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
+    gate = { t: Date.now(), labVersion: 11, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }

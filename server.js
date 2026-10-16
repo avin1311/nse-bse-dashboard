@@ -1336,12 +1336,25 @@ function isinFromKey(instrumentKey) {
   return parts.length > 1 ? parts[1] : null;
 }
 
+// Fundamentals change slowly: keep the last good answer (memory + saved store) and serve it, marked stale, when Upstox fails
+// (rate limits while the strategy lab pulls history, a restart before the instrument list loads, a brief outage).
 async function getUpstoxFundamentals(symbol) {
   const now = Date.now();
-  if (fundamentalsCache[symbol] && now - fundamentalsCache[symbol].time < FUNDAMENTALS_TTL) {
-    return { ...fundamentalsCache[symbol].data, cached: true };
+  if (fundamentalsCache[symbol] && now - fundamentalsCache[symbol].time < FUNDAMENTALS_TTL) return { ...fundamentalsCache[symbol].data, cached: true };
+  let err = null;
+  for (let a = 0; a < 2; a++) {
+    try { const r = await getUpstoxFundamentalsRaw(symbol); try { await storeSet('fund:' + symbol, { t: Date.now(), data: r }); } catch (e) {} return r; }
+    catch (e) { err = e; if (a === 0) await new Promise(r => setTimeout(r, 1500)); }
   }
-  const instrumentKey = HARDCODED_EQ_KEYS[symbol] || (universeCache.data && universeCache.data.find(s => s.symbol === symbol)?.instrument_key);
+  let old = fundamentalsCache[symbol] ? { t: fundamentalsCache[symbol].time, data: fundamentalsCache[symbol].data } : null;
+  if (!old) { try { old = await storeGet('fund:' + symbol, null); } catch (e) {} }
+  if (old && old.data) { fundamentalsCache[symbol] = { data: old.data, time: now - FUNDAMENTALS_TTL + 10 * 60 * 1000 }; return { ...old.data, stale: true, staleAt: old.t, staleWhy: err && err.message }; }
+  throw err || new Error('Upstox fundamentals unavailable for ' + symbol);
+}
+async function getUpstoxFundamentalsRaw(symbol) {
+  const now = Date.now();
+  let instrumentKey = HARDCODED_EQ_KEYS[symbol] || (universeCache.data && universeCache.data.find(s => s.symbol === symbol)?.instrument_key);
+  if (!instrumentKey) { try { const k = await dataKeyFor(symbol); if (k && /^NSE_EQ|^BSE_EQ/.test(k)) instrumentKey = k; } catch (e) {} }
   if (!instrumentKey) throw new Error(`No instrument key found for ${symbol}`);
   const isin = isinFromKey(instrumentKey);
   if (!isin) throw new Error(`Could not extract ISIN from instrument key: ${instrumentKey}`);
@@ -1361,7 +1374,7 @@ async function getUpstoxFundamentals(symbol) {
   if (Array.isArray(ratios)) ratios.forEach(r => { if (r && r.name) byName[String(r.name).trim().toUpperCase()] = r; });
   const cv = n => pr(byName[n]?.company_value);
   const sv = n => pr(byName[n]?.sector_value);
-  if (!Array.isArray(ratios) && !profile) throw new Error('Upstox fundamentals unavailable for ' + symbol);
+  if (!Array.isArray(ratios) && !profile) throw new Error('Upstox fundamentals unavailable for ' + symbol + (ratiosData.status === 'rejected' ? ' (' + String(ratiosData.reason && ratiosData.reason.message || ratiosData.reason).slice(0, 90) + ')' : ''));
 
   const result = {
     symbol,
@@ -1625,6 +1638,47 @@ app.get('/api/options/chain/:symbol', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message, symbol: req.params.symbol });
   }
+});
+
+// Open interest for one stock or index (Derivatives tab): every strike's call / put OI, today's change (vs the previous
+// day's OI that Upstox reports), volume, premium and IV; totals, PCR now and yesterday, max pain (computed), and the strikes
+// with the most call OI (resistance) and put OI (support). 60-second cache per symbol and expiry.
+const oiCache = {};
+app.get('/api/oi/:symbol', async (req, res) => {
+  const symbol = String(req.params.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, '');
+  try {
+    if (!upstoxTokens().length) return res.status(503).json({ error: 'Upstox is not connected', symbol });
+    const key = await resolveInstrumentKey(symbol);
+    const ck = symbol + '|' + (req.query.expiry || '');
+    if (oiCache[ck] && Date.now() - oiCache[ck].t < 60000) return res.json(oiCache[ck].v);
+    const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(key)}`);
+    const today = todayIso();
+    const expiries = [...new Set((contracts || []).map(c => c.expiry))].filter(e => e >= today).sort();
+    if (!expiries.length) return res.status(404).json({ error: 'No options trade on ' + symbol, symbol });
+    const expiry = expiries.includes(req.query.expiry) ? req.query.expiry : expiries[0];
+    const lot = ((contracts || []).find(c => c.lot_size) || {}).lot_size || null;
+    const chain = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(key)}&expiry_date=${expiry}`);
+    const side = o => { const m = (o && o.market_data) || {}, g = (o && o.option_greeks) || {};
+      return { oi: m.oi || 0, prevOi: m.prev_oi != null ? m.prev_oi : null, chg: m.prev_oi != null ? (m.oi || 0) - m.prev_oi : null, vol: m.volume || 0, ltp: m.ltp != null ? m.ltp : null, ltpChg: (m.ltp != null && m.close_price) ? m.ltp - m.close_price : null, iv: g.iv != null ? g.iv : null }; };
+    let spot = null;
+    const strikes = (chain || []).map(r => { if (r.underlying_spot_price) spot = r.underlying_spot_price; return { strike: r.strike_price, ce: side(r.call_options), pe: side(r.put_options) }; }).filter(x => x.strike != null).sort((a, b) => a.strike - b.strike);
+    if (!strikes.length) return res.status(502).json({ error: 'Upstox returned an empty option chain', symbol });
+    const sum = (f) => strikes.reduce((a, x) => a + (f(x) || 0), 0);
+    const ceOi = sum(x => x.ce.oi), peOi = sum(x => x.pe.oi), cePrev = sum(x => x.ce.prevOi), pePrev = sum(x => x.pe.prevOi);
+    const ceChg = sum(x => x.ce.chg), peChg = sum(x => x.pe.chg), ceVol = sum(x => x.ce.vol), peVol = sum(x => x.pe.vol);
+    // max pain: the expiry price at which option buyers' total payoff (writers' total loss) is smallest
+    let maxPain = null, best = Infinity;
+    for (const k of strikes) { let pain = 0; for (const x of strikes) { pain += x.ce.oi * Math.max(0, k.strike - x.strike) + x.pe.oi * Math.max(0, x.strike - k.strike); } if (pain < best) { best = pain; maxPain = k.strike; } }
+    const top = (f, n, filt) => strikes.filter(filt || (() => true)).slice().sort((a, b) => (f(b) || 0) - (f(a) || 0)).slice(0, n).filter(x => (f(x) || 0) > 0).map(x => ({ strike: x.strike, v: f(x) }));
+    const atm = spot != null ? strikes.reduce((a, x) => Math.abs(x.strike - spot) < Math.abs(a.strike - spot) ? x : a, strikes[0]) : null;
+    const v = { symbol, expiry, expiries: expiries.slice(0, 8), lot, spot, atm: atm && atm.strike, atmIv: atm ? (atm.ce.iv != null ? atm.ce.iv : atm.pe.iv) : null,
+      totals: { ceOi, peOi, ceChg, peChg, ceVol, peVol, pcr: ceOi ? Math.round(peOi / ceOi * 100) / 100 : null, pcrPrev: cePrev ? Math.round(pePrev / cePrev * 100) / 100 : null, hasPrev: cePrev > 0 || pePrev > 0 },
+      maxPain, resistance: top(x => x.ce.oi, 3, x => spot == null || x.strike >= spot * 0.98), support: top(x => x.pe.oi, 3, x => spot == null || x.strike <= spot * 1.02),
+      ceAdd: top(x => x.ce.chg, 3), peAdd: top(x => x.pe.chg, 3), ceCut: top(x => -(x.ce.chg || 0), 2), peCut: top(x => -(x.pe.chg || 0), 2),
+      strikes, market: marketState(), at: Date.now() };
+    oiCache[ck] = { t: Date.now(), v };
+    res.json(v);
+  } catch (e) { res.status(502).json({ error: e.message, symbol }); }
 });
 
 app.get('/api/options/expiries/:symbol', async (req, res) => {
@@ -2258,7 +2312,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-16-r39 (alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
+const BUILD = '2026-10-16-r40 (news fixed; OI analysis on Derivatives; F&O indices on Home; fundamentals keep last good values; scanner shows every pattern; alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

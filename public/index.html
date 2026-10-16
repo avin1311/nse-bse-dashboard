@@ -245,6 +245,19 @@
     .hm-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;} .hm-cards>.card:last-child{grid-column:1/-1;} .hm-big{font-size:18px;} .hm-idx .hm-top .metric-sub{display:none;}
   }
   .snd-unlock{position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:9500;max-width:min(92vw,620px);background:#f0a93a;color:#1a1204;border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;font-size:13px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);}
+  .oi-tbl td,.oi-tbl th{padding:5px 8px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .oi-tbl td{position:relative;}
+  .oi-bar{position:absolute;inset:4px 4px;z-index:0;display:flex;}
+  .oi-bar.r{justify-content:flex-end;}
+  .oi-bar>span{display:block;height:100%;border-radius:3px;}
+  .oi-tbl td>span{position:relative;z-index:1;}
+  .oi-tbl tr.oi-atm td{border-top:2px solid var(--blue);border-bottom:2px solid var(--blue);}
+  .oi-itm{background:rgba(240,169,58,.06);}
+  .oi-read{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;line-height:1.55;display:flex;flex-direction:column;gap:4px;}
+  .xs-mw{position:relative;display:inline-block;margin-top:3px;}
+  .xs-more{font:inherit;font-size:11px;font-weight:600;color:var(--blue);background:rgba(61,139,253,.12);border:1px solid rgba(61,139,253,.35);border-radius:10px;padding:1px 8px;cursor:pointer;}
+  .xs-pop{display:none;position:fixed;left:0;top:0;z-index:60;min-width:230px;max-width:320px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.45);font-size:12px;line-height:1.6;white-space:normal;}
+  .xs-mw:hover .xs-pop,.xs-mw:focus-within .xs-pop{display:block;}
   /* Home */
   .hm-row{margin-bottom:14px;}
   .hm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;}
@@ -779,21 +792,11 @@
   </div>
 </div>
 <div class="vtab-pane" id="vtab-derivatives" data-vtab="derivatives" style="display:none;">
-  <section id="sec-fno" class="panel">
-    <div class="panel-head"><h3>F&amp;O indices</h3>
-      <button class="btn scan-btn" id="fnoScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Refresh</button>
-    </div>
-    <p class="desc">PCR, max pain, IV, and OI across major F&amp;O indices &mdash; pulled from real Upstox option-chain data when <code>UPSTOX_ACCESS_TOKEN</code> is configured on the server (look for the <strong>REAL</strong> tag per row), otherwise falls back to a clearly-labeled <strong>SIMULATED</strong> row.</p>
-    <table>
-      <thead><tr><th>Index</th><th>Price</th><th>Change</th><th>PCR (OI)</th><th>Max pain</th><th>IV (ATM)</th><th>OI change</th></tr></thead>
-      <tbody id="fnoBody"></tbody>
-    </table>
+  <section id="sec-oi" class="panel">
+    <div class="panel-head"><h3 id="oiTitle">Open interest</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><select id="oiExpiry" title="Expiry"></select><button class="btn" id="oiRefresh">&#8635; Refresh</button></div></div>
+    <div id="oiBody"><div class="metric-sub">Open the Derivatives tab of an F&amp;O stock or index to see its open interest.</div></div>
   </section>
-    <div class="panel">
-      <h3>F&amp;O snapshot</h3>
-      <p class="desc">Options-market context, entirely absent from the original single-stock view.</p>
-      <div class="grid cols-4" id="fnoGrid" style="margin-top:4px;"></div>
-    </div>
   <section id="sec-options" class="panel">
     <div class="panel-head"><h3>Options &amp; futures scanning</h3></div>
     <p class="desc">Real Upstox option-chain data once <code>UPSTOX_ACCESS_TOKEN</code> is configured. The "signal" here is the standard OI-buildup classification traders use (Long/Short Buildup, Long Unwinding, Short Covering) &mdash; derived from price direction + open-interest direction together, since RSI/MACD-style indicators don't translate meaningfully to option premiums. The very first scan of any stock/expiry shows "No comparison yet" since there's nothing prior to compare against &mdash; scan again a few minutes later to see real classifications.</p>
@@ -841,10 +844,13 @@ function xsPattern(C,tf){
   if(!L.length) return null;
   // direction the same way as the pattern panel's timeframe summary: recent patterns weighted by confidence (a breakout counts more)
   let w=0; L.forEach(p=>{ w+=H.dirOf(p)*(p.conf||50)/100*(p.brk!=null?1.5:1); }); const dir=w>0.15?1:w<-0.15?-1:0;
-  if(!dir) return null;
+  const rank=(a,b)=>((b.brk!=null)-(a.brk!=null))||((b.conf||0)-(a.conf||0));
+  const brief=q=>({d:H.dirOf(q),name:q.name,status:q.brk!=null?q.status:'forming',conf:q.conf});
+  if(!dir){ const S=L.slice().sort(rank); return {d:0,name:'Mixed patterns',status:S.length+' pointing different ways',conf:null,forming:true,others:S.slice(0,5).map(brief)}; }
   const pool=L.filter(p=>H.dirOf(p)===dir);
-  const p=pool.slice().sort((a,b)=>((b.brk!=null)-(a.brk!=null))||((b.conf||0)-(a.conf||0)))[0];
-  return {d:H.dirOf(p),name:p.name,status:p.brk!=null?p.status:'forming',conf:p.conf,forming:p.brk==null,entry:p.entry,stop:p.stop,target:p.target};
+  const p=pool.slice().sort(rank)[0];
+  const others=L.filter(q=>q!==p).sort(rank).slice(0,5).map(brief);
+  return {d:H.dirOf(p),name:p.name,status:p.brk!=null?p.status:'forming',conf:p.conf,forming:p.brk==null,entry:p.entry,stop:p.stop,target:p.target,others};
 }
 function xsBreak(C,key){
   if(!window.BreakoutScanner||!C||C.length<80) return null;
@@ -877,7 +883,10 @@ const xsTfLine=(lab,y)=>y?'<div class="metric-sub">'+lab+': <span class="'+(y.d>
 function esc0(t){ return String(t==null?'':t).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); }
 function xsPatHtml(x){
   if(!x) return '<span class="metric-sub">—</span>';
-  const p=x.pat; let h=p?'<span class="'+(p.d>0?'up':'down')+'">'+(p.d>0?'▲ ':'▼ ')+esc0(p.name)+'</span><div class="metric-sub">'+esc0(p.status)+(p.conf?' · conf '+p.conf+'%':'')+'</div>':'<span class="metric-sub">none recent</span>';
+  const p=x.pat; let h=p?'<span class="'+(p.d>0?'up':p.d<0?'down':'')+'">'+(p.d>0?'▲ ':p.d<0?'▼ ':'● ')+esc0(p.name)+'</span><div class="metric-sub">'+esc0(p.status)+(p.conf?' · conf '+p.conf+'%':'')+'</div>':'<span class="metric-sub">none recent</span>';
+  const o=(p&&p.others)||[];
+  if(o.length){ const li=q=>'<div><span class="'+(q.d>0?'up':'down')+'">'+(q.d>0?'▲ ':'▼ ')+esc0(q.name)+'</span> <span class="metric-sub">'+esc0(q.status)+(q.conf?' · '+q.conf+'%':'')+'</span></div>';
+    h+='<span class="xs-mw"><button type="button" class="xs-more" title="'+esc0(o.map(q=>(q.d>0?'▲ ':'▼ ')+q.name+' ('+q.status+(q.conf?', '+q.conf+'%':'')+')').join('\n'))+'">+'+o.length+' more</button><span class="xs-pop">'+(p.d?'<div class="metric-sub" style="margin-bottom:4px;">Also on the daily chart</div>':'<div class="metric-sub" style="margin-bottom:4px;">Recent daily patterns</div>')+o.map(li).join('')+'</span></span>'; }
   return h+xsTfLine('Weekly',x.wp)+xsTfLine('Hourly',x.h1);
 }
 function xsBkHtml(x){
@@ -902,6 +911,9 @@ function xsChipsRender(){
   const el=document.getElementById('xsChips'); if(!el) return;
   el.innerHTML='<span class="metric-sub">Show:</span> '+XS_CHIPS.map(([k,v])=>'<span class="tc-chip'+(k===XS_CHIP?' on':'')+'" data-xschip="'+k+'">'+v+'</span>').join('');
 }
+// "+N more" patterns: the list floats above the table (tables scroll sideways, which would clip it)
+['mouseover','focusin'].forEach(ev=>document.addEventListener(ev,e=>{ const w=e.target.closest&&e.target.closest('.xs-mw'); if(!w) return; const b=w.querySelector('.xs-more'), p=w.querySelector('.xs-pop'); if(!b||!p) return;
+  const r=b.getBoundingClientRect(); p.style.left=Math.max(8,Math.min(r.left,innerWidth-330))+'px'; p.style.top=(r.bottom+1)+'px'; }));
 document.addEventListener('click',e=>{ const c=e.target.closest&&e.target.closest('[data-xschip]'); if(!c) return; XS_CHIP=c.dataset.xschip; try{ localStorage.setItem('xsChip',XS_CHIP); }catch(x){} renderScreener(); });
 const xsYield=()=>new Promise(r=>setTimeout(r,0));
 let xsBusy=false;
@@ -956,7 +968,7 @@ async function renderVerdict(){
     const n=ag?Math.abs(ag.a):0, up=ag&&ag.a>0;
     el.innerHTML=
       card('Screener (swing)',(s>0?'▲ ':s<0?'▼ ':'● ')+h.signalLabel,h.score+'/100 · reasons below',s>0?'up':s<0?'down':'')+
-      card('Chart pattern (daily)',p?(p.d>0?'▲ ':'▼ ')+esc0(p.name):'● None recent',p?esc0(p.status)+(p.conf?' · conf '+p.conf+'%':''):'no fresh formation near price',p?(p.d>0?'up':'down'):'')+
+      card('Chart pattern (daily)',p?(p.d>0?'▲ ':p.d<0?'▼ ':'● ')+esc0(p.name):'● None recent',p?esc0(p.status)+(p.conf?' · conf '+p.conf+'%':'')+(p.others&&p.others.length?' · +'+p.others.length+' more in the pattern charts below':''):'no fresh formation near price',p?(p.d>0?'up':p.d<0?'down':''):'')+
       card('Breakout (daily)',b?(b.d>0?'▲ ':'▼ ')+(b.type==='break'?'Broke ':'Near ')+esc0(b.name):'● Inside its range',b?'level ₹'+fmt(b.lvl,2)+(b.type==='near'?' · '+(b.dist*100).toFixed(1)+'% away':'')+(b.volR!=null?' · volume '+b.volR.toFixed(1)+'×':''):'no 20/55-day or 52-week level in reach',b&&b.type==='break'?(b.d>0?'up':'down'):(b?'amber':''))+
       card('Weekly chart',wk&&wk.d?(wk.d>0?'▲ ':'▼ ')+esc0(xx.w.name):'● Neutral',wk&&wk.d?'adds a point when it agrees':'no weekly breakout or pattern',wk&&wk.d?(wk.d>0?'up':'down'):'')+
       '<div class="vd-card vd-agree '+(ag&&n>=3?(up?'vd-up':'vd-dn'):'')+'"><div class="metric-sub">Agreement</div><div class="vd-main '+(ag&&ag.a?(up?'up':'down'):'')+'">'+(ag&&ag.a?(up?'▲':'▼').repeat(Math.min(n,4))+(n>=3?' Aligned':''):'● Mixed')+'</div><div class="metric-sub">'+(ag?(ag.a?n+' point'+(n>1?'s':'')+(up?' up':' down'):'checks disagree or none fired'):'loading…')+'</div></div>';
@@ -1954,8 +1966,14 @@ function renderOverview(d){
   grid.innerHTML=overviewCards(d).map(([l,v,sub,live])=>`
     <div class="card"><div class="card-title">${l}${tag(live)}</div><div class="metric-val">${v}</div><div class="metric-sub">${sub||''}</div></div>`).join('');
   if(isIndexSym(d.symbol)) return;
-  if(window.FUND[d.symbol] && !window.FUND[d.symbol].error) { const f=window.FUND[d.symbol]; if(f.description&&document.getElementById('stockDesc')) document.getElementById('stockDesc').textContent=f.description; return; }
-  if(window.FUND[d.symbol] && Date.now()-window.FUND[d.symbol].at<120000) return; // recent failure — don't hammer
+  if(window.FUND[d.symbol] && !window.FUND[d.symbol].error) { const f=window.FUND[d.symbol]; if(f.description&&document.getElementById('stockDesc')) document.getElementById('stockDesc').textContent=f.description;
+    if(f.stale) grid.insertAdjacentHTML('beforeend',`<div class="metric-sub" style="grid-column:1/-1;">Company ratios are the last saved figures${f.staleAt?' ('+new Date(f.staleAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'})+')':''}; Upstox did not answer just now.</div>`);
+    return; }
+  const F=window.FUND[d.symbol];
+  if(F && F.error){ // failed: say why, and try again by itself a few times
+    grid.insertAdjacentHTML('beforeend',`<div class="metric-sub" style="grid-column:1/-1;color:var(--amber);">Company ratios unavailable right now (${String(F.error).replace(/[<>&]/g,'').slice(0,110)})${(d.__fundTries||0)<4?' &mdash; retrying automatically':''}.</div>`);
+    if(!d.__fundRetry && (d.__fundTries||0)<4){ d.__fundTries=(d.__fundTries||0)+1; d.__fundRetry=setTimeout(()=>{ d.__fundRetry=null; if(window.CURRENT!==d) return; delete window.FUND[d.symbol]; loadFund(d.symbol).then(()=>{ if(window.CURRENT===d){ renderOverview(d); const c=document.querySelector('#fourPanel .card'); if(c) updateFundCard(d); } }); },20000*d.__fundTries); }
+    return; }
   loadFund(d.symbol).then(()=>{ if(window.CURRENT && window.CURRENT.symbol===d.symbol){ renderOverview(window.CURRENT); const c=document.querySelector('#fourPanel .card'); if(c) updateFundCard(window.CURRENT); } });
 }
 
@@ -2159,17 +2177,55 @@ function renderMacro(d){
   });
 }
 
-function renderFno(d){
-  const grid=document.getElementById('fnoGrid'); if(!grid) return;
-  const isIdx=typeof FNO_INDICES!=='undefined' && FNO_INDICES.some(x=>x[0]===d.symbol);
-  if(!isIdx){ grid.innerHTML='<div class="metric-sub" style="grid-column:1/-1;">Live PCR / max pain / IV are shown for indices (table above). For this stock use <b>Options &amp; futures</b> below for the real option chain.</div>'; return; }
-  grid.innerHTML='<div class="metric-sub" style="grid-column:1/-1;">Loading&hellip;</div>';
-  fetch('/api/upstox/fno/'+d.symbol,{cache:'no-store'}).then(r=>r.json()).then(o=>{
-    if(window.CURRENT!==d) return; if(o.error) throw new Error(o.error);
-    const oi=o.totalCallOi>0?((o.totalPutOi-o.totalCallOi)/o.totalCallOi*100):null;
-    const items=[["PCR (OI)",fmt(o.pcr,2)],["Max pain",`&#8377;${fmt(o.maxPain,0)}`],["IV (ATM)",o.atmIv!=null?fmt(o.atmIv,1)+'%':'&mdash;'],["Put vs call OI",oi==null?'&mdash;':`<span class="${oi>=0?'up':'down'}">${oi>=0?'+':''}${fmt(oi,1)}%</span>`]];
-    grid.innerHTML=items.map(([l,v])=>`<div class="card"><div class="card-title">${l} <span class="live-tag">LIVE</span></div><div class="metric-val" style="font-size:17px;">${v}</div></div>`).join('');
-  }).catch(e=>{ grid.innerHTML=`<div class="metric-sub" style="grid-column:1/-1;color:var(--amber)">Option-chain data unavailable right now (${(e.message||'').slice(0,80)}).</div>`; });
+// Derivatives tab: open interest for the open stock or index (Upstox option chain; today's change vs the previous day's OI)
+const OI_IDX=new Set(['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX','NIFTYNXT50']);
+let oiSeq=0;
+function oiFmt(n){ if(n==null||!isFinite(n)) return '&mdash;'; const a=Math.abs(n), s=n<0?'-':''; if(a>=1e7) return s+(a/1e7).toFixed(2)+' Cr'; if(a>=1e5) return s+(a/1e5).toFixed(2)+' L'; if(a>=1e3) return s+(a/1e3).toFixed(1)+' K'; return s+Math.round(a); }
+function oiSg(n){ return n==null?'&mdash;':(n>0?'+':'')+oiFmt(n); }
+async function renderOI(d,expiry){
+  const box=document.getElementById('oiBody'), sel=document.getElementById('oiExpiry'), title=document.getElementById('oiTitle'); if(!box) return;
+  const sym=d.symbol, seq=++oiSeq; title.textContent='Open interest — '+sym;
+  const noOpt=n=>'<div class="metric-sub">'+esc0(n||sym)+' has no options or futures on NSE / BSE, so there is no open interest to show.'+(isIndexSym(sym)?' Index options trade on Nifty 50, Bank Nifty, Fin Nifty, Midcap Select, Next 50, Sensex and Bankex.':'')+'</div>';
+  if(isIndexSym(sym)&&!OI_IDX.has(sym)){ sel.style.display='none'; box.innerHTML='<div class="metric-sub">'+esc0(d.name||sym)+' has no options or futures on NSE / BSE, so there is no open interest to show.'+(isIndexSym(sym)?' Index options trade on Nifty 50, Bank Nifty, Fin Nifty, Midcap Select, Next 50, Sensex and Bankex.':'')+'</div>'; return; }
+  sel.style.display=''; box.innerHTML='<div class="metric-sub">Loading the option chain&hellip;</div>';
+  let o; try{ const r=await fetch('/api/oi/'+encodeURIComponent(sym)+(expiry?'?expiry='+encodeURIComponent(expiry):''),{cache:'no-store'}); o=await r.json(); if(!r.ok||o.error) throw new Error(o.error||('HTTP '+r.status)); }
+  catch(e){ if(seq!==oiSeq) return; if(/No options trade|not be F&O|Could not resolve/.test(e.message||'')){ sel.style.display='none'; box.innerHTML=noOpt(d.name); return; } box.innerHTML='<div class="metric-sub" style="color:var(--amber)">Option chain unavailable right now ('+esc0(e.message)+'). <a href="#" id="oiRetry">Retry</a></div>'; const a=document.getElementById('oiRetry'); if(a) a.onclick=ev=>{ ev.preventDefault(); renderOI(d,expiry); }; return; }
+  if(seq!==oiSeq||window.CURRENT!==d) return;
+  sel.innerHTML=o.expiries.map(x=>`<option value="${x}"${x===o.expiry?' selected':''}>${new Date(x+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit'})}</option>`).join('');
+  sel.onchange=()=>renderOI(d,sel.value);
+  document.getElementById('oiRefresh').onclick=()=>renderOI(d,sel.value);
+  const T=o.totals, sp=o.spot, R=o.resistance[0], S=o.support[0];
+  const pcrTxt=T.pcr==null?'&mdash;':T.pcr.toFixed(2), pcrD=T.pcr!=null&&T.pcrPrev!=null?T.pcr-T.pcrPrev:null;
+  // a plain reading: who is writing (adding OI) more today, and where the walls are
+  const bull=(T.peChg||0)>(T.ceChg||0);
+  let read=[];
+  if(T.hasPrev) read.push(bull?'Put writers added more open interest than call writers today (<b class="up">'+oiSg(T.peChg)+'</b> puts vs '+oiSg(T.ceChg)+' calls), which traders read as support building below the price.':'Call writers added more open interest than put writers today (<b class="down">'+oiSg(T.ceChg)+'</b> calls vs '+oiSg(T.peChg)+' puts), which traders read as a ceiling building above the price.');
+  if(R&&S&&sp) read.push('The biggest call OI sits at <b>'+R.strike+'</b> ('+((R.strike/sp-1)*100).toFixed(1)+'% away) and the biggest put OI at <b>'+S.strike+'</b> ('+((S.strike/sp-1)*100).toFixed(1)+'% away): the range option writers are defending for this expiry.');
+  if(T.pcr!=null) read.push('PCR '+pcrTxt+(T.pcr>1.2?' is high (more puts than calls: often support, but very high readings can mean crowded hedging)':T.pcr<0.7?' is low (calls dominate: often a ceiling, or bearish positioning)':' is in the neutral band')+(pcrD!=null?', '+(pcrD>=0?'up ':'down ')+Math.abs(pcrD).toFixed(2)+' from yesterday':'')+'.');
+  if(o.maxPain&&sp) read.push('Max pain '+o.maxPain+' is '+((o.maxPain/sp-1)*100).toFixed(1)+'% from the price; near expiry, price sometimes drifts toward it.');
+  const card=(l,v,sub,cls)=>`<div class="card"><div class="card-title">${l} <span class="live-tag">LIVE</span></div><div class="metric-val ${cls||''}" style="font-size:18px;">${v}</div><div class="metric-sub">${sub||''}</div></div>`;
+  const cards=`<div class="grid cols-4" style="margin-bottom:10px;">`
+    +card('Price',sp!=null?fmt(sp,2):'&mdash;','ATM strike '+(o.atm??'&mdash;')+(o.atmIv!=null?' &middot; IV '+fmt(o.atmIv,1)+'%':''))
+    +card('PCR (OI)',pcrTxt,pcrD!=null?'yesterday '+T.pcrPrev.toFixed(2):'put OI &divide; call OI',T.pcr==null?'':T.pcr>=1?'up':'down')
+    +card('Resistance (most call OI)',R?R.strike:'&mdash;',o.resistance.slice(1).map(x=>x.strike).join(' &middot; ')||'&nbsp;','down')
+    +card('Support (most put OI)',S?S.strike:'&mdash;',o.support.slice(1).map(x=>x.strike).join(' &middot; ')||'&nbsp;','up')
+    +card('Max pain',o.maxPain??'&mdash;','computed from all strikes')
+    +card('Call OI',oiFmt(T.ceOi),'today '+oiSg(T.ceChg)+' &middot; vol '+oiFmt(T.ceVol))
+    +card('Put OI',oiFmt(T.peOi),'today '+oiSg(T.peChg)+' &middot; vol '+oiFmt(T.peVol))
+    +card('Most added today',(o.peAdd[0]?'<span class="up">'+o.peAdd[0].strike+' PE</span>':'')+(o.peAdd[0]&&o.ceAdd[0]?' / ':'')+(o.ceAdd[0]?'<span class="down">'+o.ceAdd[0].strike+' CE</span>':'')||'&mdash;',(o.peAdd[0]?oiSg(o.peAdd[0].v)+' puts':'')+(o.ceAdd[0]?' &middot; '+oiSg(o.ceAdd[0].v)+' calls':''))
+    +`</div>`;
+  // strike ladder: 10 strikes either side of the price
+  const st=o.strikes, ai=Math.max(0,st.findIndex(x=>x.strike===o.atm)), rows=st.slice(Math.max(0,ai-10),ai+11);
+  const mx=Math.max(1,...rows.map(x=>Math.max(x.ce.oi,x.pe.oi))), mc=Math.max(1,...rows.map(x=>Math.max(Math.abs(x.ce.chg||0),Math.abs(x.pe.chg||0))));
+  const bar=(v,m,col,right)=>`<div class="oi-bar${right?' r':''}"><span style="width:${Math.min(100,Math.abs(v||0)/m*100)}%;background:${col}"></span></div>`;
+  const ladder=`<div style="overflow-x:auto;"><table class="oi-tbl"><thead><tr><th colspan="3" style="text-align:center;" class="down">CALLS (resistance)</th><th></th><th colspan="3" style="text-align:center;" class="up">PUTS (support)</th></tr>
+    <tr><th>OI change</th><th>Open interest</th><th>LTP</th><th style="text-align:center;">Strike</th><th>LTP</th><th>Open interest</th><th>OI change</th></tr></thead><tbody>${rows.map(x=>{
+      const isA=x.strike===o.atm, itmC=sp!=null&&x.strike<sp, itmP=sp!=null&&x.strike>sp;
+      return `<tr class="${isA?'oi-atm':''}"><td class="${(x.ce.chg||0)>=0?'down':'up'}">${oiSg(x.ce.chg)}</td><td class="${itmC?'oi-itm':''}">${bar(x.ce.oi,mx,'rgba(239,83,80,.55)',true)}<span>${oiFmt(x.ce.oi)}</span></td><td>${x.ce.ltp!=null?fmt(x.ce.ltp,2):'&mdash;'}</td>
+        <td style="text-align:center;font-weight:700;">${x.strike}${isA?' <span class="metric-sub">ATM</span>':''}</td>
+        <td>${x.pe.ltp!=null?fmt(x.pe.ltp,2):'&mdash;'}</td><td class="${itmP?'oi-itm':''}">${bar(x.pe.oi,mx,'rgba(38,194,129,.55)')}<span>${oiFmt(x.pe.oi)}</span></td><td class="${(x.pe.chg||0)>=0?'up':'down'}">${oiSg(x.pe.chg)}</td></tr>`; }).join('')}</tbody></table></div>`;
+  box.innerHTML=cards+`<div class="oi-read">${read.map(x=>'<div>'+x+'</div>').join('')}</div>`+ladder
+    +`<div class="metric-sub" style="margin-top:8px;">Expiry ${esc0(o.expiry)}${o.lot?' &middot; lot '+o.lot:''} &middot; Upstox option chain${o.market!=='open'?' (market closed: last values)':''} &middot; OI change is against the previous day's close. Shaded cells are in the money. How option writers are positioned, not a prediction.</div>`;
 }
 
 function renderPeers(d){
@@ -2191,11 +2247,19 @@ function renderPeers(d){
   });
 }
 
-function renderNews(d){
+function newsAgo(iso){
+  const t=Date.parse(iso); if(!t) return '';
+  const m=Math.round((Date.now()-t)/60000);
+  if(m<1) return 'just now'; if(m<60) return m+' min ago'; if(m<1440) return Math.round(m/60)+' h ago';
+  if(m<10080) return Math.round(m/1440)+' d ago';
+  return new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+}
+function newsEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function renderNews(d,tries){
   const panel = document.getElementById('newsPanel');
   panel.innerHTML = '<div class="metric-sub">Loading latest news…</div>';
   fetch(`/api/news/${encodeURIComponent(d.symbol)}?name=${encodeURIComponent(d.name||'')}`, {cache:'no-store'})
-    .then(r=>r.json())
+    .then(r=>r.json().catch(()=>{ throw new Error('server answered HTTP '+r.status); }))
     .then(data=>{
       if(window.CURRENT!==d) return;
       if(!data.items || !data.items.length){ const f=(data.feeds||[]).map(x=>`${x.host}: ${x.status!=null?'HTTP '+x.status:(x.err||'no reply')}${x.status===200?' ('+x.n+' items)':''}`); panel.innerHTML='<div class="metric-sub">No headlines came back for this page.'+(f.length?'<br>Feed check: '+f.map(newsEsc).join(' &middot; '):' The server is probably still on an older version, wait for the redeploy and reload.')+' <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>'; return; }
@@ -2217,8 +2281,10 @@ function renderNews(d){
         + (mk.length?'<div class="metric-sub" style="margin:12px 0 2px;text-transform:uppercase;letter-spacing:.5px;">Latest market headlines</div>'+mk.map(row).join(''):'')
         + `<div class="metric-sub" style="margin-top:8px;">Live from Google News, Economic Times and Moneycontrol &middot; refreshed every 15 min</div>`;
     })
-    .catch(()=>{
-      panel.innerHTML = '<div class="metric-sub">Couldn\'t reach your dashboard server for news (network or server restarting). <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>';
+    .catch(e=>{
+      if(window.CURRENT!==d) return;
+      if((tries||0)<2){ panel.innerHTML='<div class="metric-sub">News is taking a moment, trying again&hellip;</div>'; setTimeout(()=>renderNews(d,(tries||0)+1),5000*((tries||0)+1)); return; }
+      panel.innerHTML = '<div class="metric-sub">News could not be loaded ('+newsEsc((e&&e.message)||'network')+'). <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>';
     });
 }
 
@@ -2447,7 +2513,7 @@ function renderScreener(){
       <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmtVol(d.volShares!=null?d.volShares:d.volumeCr*1e7)}</td>
       <td>${/buy|sell/.test(h.signal)?window.monBtn({source:'screener',symbol:d.symbol,side:/sell/.test(h.signal)?'SELL':'BUY',mode:displayHorizon==='intraday'?'intraday':'swing',label:'Screener '+h.signalLabel+' ('+displayHorizon+')',note:'Screener '+h.signalLabel+' on the '+displayHorizon+' view, score '+h.score+'.'},'+ Add'):''}</td></tr>`;
   }).join('');
-  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; tr.style.opacity='.5'; openStockChart(tr.dataset.symbol); }));
+  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')||e.target.closest('.xs-mw')) return; tr.style.opacity='.5'; openStockChart(tr.dataset.symbol); }));
   xsChipsRender();
   body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
   renderScreenerFocus();
@@ -2559,9 +2625,9 @@ const SEC_TAB={'sec-overview':'overview','sec-signal':'overview','sec-news':'ove
   'sec-chart':'chart','sec-patterns':'chart','sec-priceaction':'chart',
   'sec-fourpanel':'fundamentals','sec-compare':'fundamentals',
   'sec-verdict':'chart','sec-idxscan':'chart',
-  'sec-fno':'derivatives','sec-options':'derivatives',
+  'sec-oi':'derivatives','sec-options':'derivatives',
 };
-const SEC_VIEW={'sec-screener':'scan','sec-heatmap':'scan','sec-seasonality':'scan','moreBox':'scan',
+const SEC_VIEW={'sec-fno':'home','sec-screener':'scan','sec-heatmap':'scan','sec-seasonality':'scan','moreBox':'scan',
   'sec-watchlist':'portfolio','sec-positions':'portfolio','sec-portfolio':'portfolio','sec-alerts':'portfolio','sec-backtest':'portfolio'};
 const TAB_DONE={}; // tab -> symbol it was last rendered for
 function safe(fn){ try{ fn(); }catch(e){ console.error('tab render failed:',e); } }
@@ -2581,7 +2647,7 @@ function runTab(t,d,refresh){
       safe(()=>renderVerdict()); safe(()=>renderScreenerFocus()); safe(()=>renderIndexScan(d)); },
     fundamentals:()=>{ safe(()=>renderFourPanel(d)); if(!refresh){ safe(()=>renderSegments(d)); safe(()=>renderMacro(d)); safe(()=>renderPeers(d)); safe(()=>renderVolumeProfile(d)); } },
     screener:()=>{ safe(()=>renderScreener()); if(!window.SCREENER_SRC && !window.__scanning){ window.__scanning=true; scanScreenerLive().finally(()=>{window.__scanning=false;}); } if(!refresh){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
-    derivatives:()=>{ safe(()=>renderFno(d)); safe(()=>renderFnoIndices()); },
+    derivatives:()=>{ safe(()=>renderOI(d)); },
     portfolio:()=>{ safe(()=>renderBacktest(d)); safe(()=>renderPositions()); safe(()=>populateBacktestStockList()); safe(()=>populateAlertStockList()); safe(()=>renderPriceAlerts()); safe(()=>renderPortfolio()); safe(()=>renderWatchlist()); }
   };
   J[t]&&J[t](); TAB_DONE[t]=sym;
@@ -2602,7 +2668,7 @@ function showTab(t,opts){
 }
 function gotoSection(id){
   const v=SEC_VIEW[id];
-  if(v){ if(window.APP_VIEW!==v) showView(v); if(id==='sec-heatmap'||id==='sec-seasonality'){ const m=document.getElementById('moreBox'); if(m) m.open=true; } setTimeout(()=>{ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },60); return; }
+  if(v){ if(v==='home') showHome(); else if(window.APP_VIEW!==v) showView(v); if(id==='sec-heatmap'||id==='sec-seasonality'){ const m=document.getElementById('moreBox'); if(m) m.open=true; } setTimeout(()=>{ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },60); return; }
   if(window.IN_HOME_VIEW){ showStockView(); }
   const t=SEC_TAB[id];
   if(t && window.ACTIVE_VTAB!==t) showTab(t,{noScroll:true});
@@ -3131,6 +3197,7 @@ function showHome(){
 function showStockView(){ showView('stock'); }
 /* Home: the market at a glance + your trading day + where everything agrees. Real Upstox data only; one quote
    request for every stock and index, the Calls Monitor's own data for the trading day. */
+window.HOME_Q={};
 const HOME={q:{},qAt:0,mov:'gain',gate:null,calls:null,timer:null};
 const HOME_SECTORS=[['NIFTYIT','IT'],['BANKNIFTY','Bank'],['NIFTYAUTO','Auto'],['NIFTYMETAL','Metal'],['NIFTYENERGY','Energy'],['NIFTYPHARMA','Pharma'],['NIFTYFMCG','FMCG'],['NIFTYREALTY','Realty'],['NIFTYPSUBANK','PSU Bank'],['NIFTYINFRA','Infra']];
 const hSg=(v,d)=>v==null||!isFinite(v)?'&mdash;':(v>0?'+':'')+v.toFixed(d==null?2:d)+'%';
@@ -3161,6 +3228,10 @@ function renderHome(){
     <div class="hm-head"><h3>Where everything agrees</h3><span class="metric-sub" id="hmAgreeNote">screener + daily pattern + daily breakout &middot; <a href="#" data-goview="scan">open Scanner</a></span></div>
     <div class="hm-two" id="hmAgree"><div class="metric-sub">Waiting for the scan&hellip;</div></div>
   </section>
+  <section class="panel hm-panel" aria-label="F&amp;O indices" id="sec-fno">
+    <div class="hm-head"><h3>F&amp;O indices &mdash; option chain</h3><div style="display:flex;gap:8px;align-items:center;"><span class="metric-sub">nearest expiry &middot; click a row for its full OI</span><button class="btn" id="fnoScanBtn">&#8635; Refresh</button></div></div>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Index</th><th>Price</th><th>Change</th><th>PCR (OI)</th><th>Max pain</th><th>IV (ATM)</th><th>Put vs call OI</th></tr></thead><tbody id="fnoBody"><tr><td colspan="7" class="lbl">Loading the option chains&hellip;</td></tr></tbody></table></div>
+  </section>
   <div class="hm-row hm-two">
     <section class="panel hm-panel" aria-label="Sector strength"><div class="hm-head"><h3>Sector strength today</h3><span class="metric-sub">click to open the index</span></div><div id="hmSectors"></div></section>
     <section class="panel hm-panel" aria-label="Top movers"><div class="hm-head"><h3>Top movers</h3>
@@ -3178,7 +3249,8 @@ function renderHome(){
   el.querySelectorAll('[data-mov]').forEach(b=>b.onclick=()=>{ HOME.mov=b.dataset.mov; renderHomeMovers(); });
   if(window.CM_DATA) renderHomeDay(window.CM_DATA); else fetch('/api/calls/monitor',{cache:'no-store'}).then(r=>r.json()).then(d=>{ window.CM_DATA=d; renderHomeDay(d); }).catch(()=>{ const s=document.getElementById('hmDayStats'); if(s) s.innerHTML='<div class="metric-sub">Calls Monitor unavailable right now.</div>'; });
   renderHomePositions(); renderHomeAgree();
-  homeQuotes(true);
+  document.getElementById('fnoScanBtn').onclick=()=>renderFnoIndices();
+  homeQuotes(true).then(()=>{ if(window.APP_VIEW==='home') renderFnoIndices(); });
   clearInterval(HOME.timer); HOME.timer=setInterval(()=>{ if(window.APP_VIEW==='home'&&!document.hidden) homeQuotes(false); },60000);
 }
 document.addEventListener('cm:data',e=>{ if(window.APP_VIEW==='home') renderHomeDay(e.detail); });
@@ -3186,7 +3258,7 @@ async function homeQuotes(first){
   if(first && Date.now()-HOME.qAt<30000) { renderHomeQuotes(); }
   else {
     const syms=INDEX_LIST.map(r=>r[0]).concat(STOCKS.map(s=>s[0]));
-    try{ const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(syms.join(',')),{cache:'no-store'}); if(r.ok){ const m=await r.json(); if(Object.keys(m).length){ HOME.q=m; HOME.qAt=Date.now();
+    try{ const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(syms.join(',')),{cache:'no-store'}); if(r.ok){ const m=await r.json(); if(Object.keys(m).length){ HOME.q=m; window.HOME_Q=m; HOME.qAt=Date.now();
       Object.keys(m).forEach(k=>{ window.SCREENER_LIVE[k]={price:m[k].price,prevClose:m[k].prevClose,volume:m[k].volume}; }); } } }catch(e){}
     if(window.APP_VIEW!=='home') return;
     renderHomeQuotes();
@@ -3554,15 +3626,16 @@ async function renderFnoIndices(){
       if(!resp.ok || d.error) throw new Error(d.error||'failed');
       const pcr = d.pcr, maxPain = d.maxPain, iv = d.atmIv;
       const oiChgPct = d.totalCallOi>0 ? ((d.totalPutOi-d.totalCallOi)/d.totalCallOi*100) : 0;
-      row.innerHTML = `<td><strong>${name}</strong> <span class="signal-chip sig-buy" style="font-size:9px;">REAL</span></td><td>${fmt(d.spot,2)}</td><td class="lbl">&mdash;</td>
+      const q=(window.HOME_Q||{})[sym]; row.className='row-click'; row.onclick=()=>{ row.style.opacity='.6'; try{ localStorage.setItem('vtab','derivatives'); }catch(e){} openTab(sym); setTimeout(()=>showTab('derivatives'),0); };
+      row.innerHTML = `<td><strong>${name}</strong></td><td>${fmt(d.spot,2)}</td><td class="${q?(q.changePct>=0?'up':'down'):'lbl'}">${q?chgTxt(q.price,q.changePct):'&mdash;'}</td>
         <td>${fmt(pcr,2)}</td><td>${fmt(maxPain,0)}</td><td>${iv!=null?fmt(iv,1)+'%':'&ndash;'}</td>
         <td class="${oiChgPct>=0?'up':'down'}">${oiChgPct>=0?'+':''}${fmt(oiChgPct,1)}%</td>`;
     }catch(e){
-      row.innerHTML = `<td><strong>${name}</strong></td><td colspan="6" class="lbl" style="color:var(--amber)">Live option-chain data unavailable right now${e&&e.message?' ('+String(e.message).slice(0,60)+')':''} &mdash; press Refresh to retry.</td>`;
+      row.innerHTML = `<td><strong>${name}</strong></td><td colspan="6" class="lbl" style="color:var(--amber)">Option chain unavailable right now${e&&e.message?' ('+String(e.message).slice(0,70)+')':''}</td>`;
     }
   }));
 }
-document.getElementById('fnoScanBtn')?.addEventListener('click', renderFnoIndices);
+
 
 /* ============================================================
    PRICE ACTION STRATEGIES (5-EMA Breakout, Support/Resistance,
@@ -6875,7 +6948,7 @@ window.renderIndexScan=function(d){
       ${dRows.length?`<div><span class="lbl">Drivers</span> <b class="${dBull*2>=dRows.length?'up':'down'}">${dBull} of ${dRows.length} bullish</b>${M.weights?' <span class="metric-sub">('+dW.toFixed(0)+'% of the index)</span>':''}</div>`:''}</div>
     <div style="overflow-x:auto;"><table>${head}<tbody>${core.map(tr).join('')}</tbody></table></div>`
     +(oth.length?`<details style="margin-top:10px;"><summary style="cursor:pointer;">Other ${esc0(d.name.replace(/^Nifty /,''))} stocks (${oth.length})</summary><div style="overflow-x:auto;"><table>${head}<tbody>${oth.map(tr).join('')}</tbody></table></div></details>`:'');
-  box.querySelectorAll('tr[data-symbol]').forEach(t=>t.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; t.style.opacity='.5'; openStockChart(t.dataset.symbol); }));
+  box.querySelectorAll('tr[data-symbol]').forEach(t=>t.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')||e.target.closest('.xs-mw')) return; t.style.opacity='.5'; openStockChart(t.dataset.symbol); }));
 };
 document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closest('[data-goview]'); if(!a) return; e.preventDefault(); showView(a.dataset.goview); });
 

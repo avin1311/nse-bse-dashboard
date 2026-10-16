@@ -7,6 +7,7 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); 
 // 1. the page's scripts must parse, and the pattern engine must run
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].forEach((m, i) => { let e = null; try { new Function(m[1]); } catch (x) { e = x; } ok(!e, 'inline script #' + i + ' parses' + (e ? ': ' + e.message : '')); });
+ok(/function newsAgo\(/.test(html) && /function newsEsc\(/.test(html), 'news helpers defined');
 ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length === 4 && /id="scanView"/.test(html) && /id="portView"/.test(html), 'four stock tabs plus the Scanner and Portfolio pages');
 {
   const i = html.indexOf('const PatternEngine'), j = html.indexOf('CHART PATTERNS SECTION');

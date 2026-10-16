@@ -1112,7 +1112,8 @@ const STOCKS_RAW = [
 ["ASIANPAINT","Asian Paints Ltd","Consumer",2340],
 ["TITAN","Titan Company","Consumer",3390],
 ["MARUTI","Maruti Suzuki India","Auto",12450],
-["TATAMOTORS","Tata Motors Ltd","Auto",985],
+["TATAMOTORS","Tata Motors Passenger Vehicles (TMPV)","Auto",985],
+["JIOFIN","Jio Financial Services","Finance",300],
 ["M&M","Mahindra & Mahindra","Auto",2960],
 ["TVSMOTOR","TVS Motor Company","Auto",3626.80],
 ["HEROMOTOCO","Hero MotoCorp","Auto",5240],
@@ -6898,7 +6899,7 @@ const INDEX_INFO={
   NIFTYIT:{sectors:['IT'],src:NSE_SEP,w:{INFY:31.30,TCS:19.08,HCLTECH:11.81,TECHM:10.47,COFORGE:6.59,PERSISTENT:6.21,WIPRO:4.64,LTIM:4.06,MPHASIS:3.09,OFSS:2.75}},
   BANKNIFTY:{sectors:['Banking'],src:NSE_SEP,w:{HDFCBANK:18.61,ICICIBANK:14.18,KOTAKBANK:10.20,AXISBANK:10.06,SBIN:9.93,FEDERALBNK:6.56,INDUSINDBK:4.97,AUBANK:4.85,IDFCFIRSTB:4.54,BANKBARODA:3.59}},
   NIFTYFMCG:{sectors:['FMCG'],src:NSE_SEP,w:{ITC:27.65,HINDUNILVR:18.20,NESTLEIND:10.25,TATACONSUM:6.75,VBL:6.45,BRITANNIA:6.21,MARICO:4.55,UNITDSPR:4.37,RADICO:3.74,GODREJCP:3.73}},
-  NIFTY:{sectors:[],src:NSE_SEP+' (top 10 of 50)',w:{HDFCBANK:10.38,ICICIBANK:9.05,RELIANCE:7.58,BHARTIARTL:5.10,LT:4.20,SBIN:3.79,AXISBANK:3.37,INFY:3.35,KOTAKBANK:2.93,'M&M':2.52}},
+  NIFTY:{sectors:[],list:['HDFCBANK','ICICIBANK','RELIANCE','BHARTIARTL','LT','SBIN','AXISBANK','INFY','KOTAKBANK','M&M','ITC','TCS','BAJFINANCE','HINDUNILVR','SUNPHARMA','MARUTI','HCLTECH','NTPC','TITAN','ULTRACEMCO','TATAMOTORS','POWERGRID','BEL','TATASTEEL','ZOMATO','ADANIPORTS','TRENT','ONGC','ASIANPAINT','BAJAJFINSV','JSWSTEEL','HINDALCO','INDIGO','JIOFIN','GRASIM','COALINDIA','BAJAJ-AUTO','TECHM','SHRIRAMFIN','MAXHEALTH','ADANIENT','EICHERMOT','CIPLA','SBILIFE','HDFCLIFE','NESTLEIND','DRREDDY','TATACONSUM','APOLLOHOSP','BSE'],src:NSE_SEP+' (weights published for the top 10 of 50)',w:{HDFCBANK:10.38,ICICIBANK:9.05,RELIANCE:7.58,BHARTIARTL:5.10,LT:4.20,SBIN:3.79,AXISBANK:3.37,INFY:3.35,KOTAKBANK:2.93,'M&M':2.52}},
   NIFTYAUTO:{sectors:['Auto'],src:'approximate weights (research360), may be dated',w:{'M&M':21.79,MARUTI:14.87,TATAMOTORS:14.76,'BAJAJ-AUTO':9.35,HEROMOTOCO:6.04,EICHERMOT:5.89,TVSMOTOR:4.61,BHARATFORG:3.62,MOTHERSON:3.26,ASHOKLEY:2.93}},
   NIFTYPHARMA:{sectors:['Pharma']},
   NIFTYMETAL:{sectors:['Metals','Mining']},
@@ -6915,7 +6916,7 @@ const nameOf=s=>{const r=STOCKS.find(x=>x[0]===s); return r?r[1]:s;};
 function members(sym){
   const I=INDEX_INFO[sym]; if(!I) return null;
   const core=I.w?Object.keys(I.w):(I.list||[]);
-  const extra=STOCKS.filter(r=>I.sectors.includes(r[2])&&!core.includes(r[0])).map(r=>r[0]);
+  const extra=(I.w&&I.list?I.list.filter(s=>!core.includes(s)):[]).concat(STOCKS.filter(r=>I.sectors.includes(r[2])&&!core.includes(r[0])&&!(I.list||[]).includes(r[0])).map(r=>r[0]));
   // indices without published weights: the sector stocks are the members, ranked later by traded value
   return {core:I.w?core:core.concat(extra), others:I.w?extra:[], weights:I.w||null, src:I.src||null};
 }
@@ -6956,7 +6957,7 @@ window.renderIndexScan=function(d){
       <div><span class="lbl">Aligned</span> <b>${al.length}</b>${al.length?' <span class="metric-sub">('+al.map(r=>r.sym).join(', ')+')</span>':''}</div>
       ${dRows.length?`<div><span class="lbl">Drivers</span> <b class="${dBull*2>=dRows.length?'up':'down'}">${dBull} of ${dRows.length} bullish</b>${M.weights?' <span class="metric-sub">('+dW.toFixed(0)+'% of the index)</span>':''}</div>`:''}</div>
     <div style="overflow-x:auto;"><table>${head}<tbody>${core.map(tr).join('')}</tbody></table></div>`
-    +(oth.length?`<details style="margin-top:10px;"><summary style="cursor:pointer;">Other ${esc0(d.name.replace(/^Nifty /,''))} stocks (${oth.length})</summary><div style="overflow-x:auto;"><table>${head}<tbody>${oth.map(tr).join('')}</tbody></table></div></details>`:'');
+    +(oth.length?`<details style="margin-top:10px;"${d.symbol==='NIFTY'?' open':''}><summary style="cursor:pointer;">${d.symbol==='NIFTY'?'The other '+oth.length+' Nifty 50 stocks':'Other '+esc0(d.name.replace(/^Nifty /,''))+' stocks ('+oth.length+')'}</summary><div style="overflow-x:auto;"><table>${head}<tbody>${oth.map(tr).join('')}</tbody></table></div></details>`:'');
   box.querySelectorAll('tr[data-symbol]').forEach(t=>t.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')||e.target.closest('.xs-mw')) return; t.style.opacity='.5'; openStockChart(t.dataset.symbol); }));
 };
 document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closest('[data-goview]'); if(!a) return; e.preventDefault(); showView(a.dataset.goview); });
@@ -7005,7 +7006,7 @@ window.renderIndexPanel=async function(d){
   const sum=`<div class="ix-sum">
     <div><span class="lbl">Breadth</span> <b class="up">${up}▲</b> / <b class="down">${dn}▼</b> <span class="metric-sub">of ${have}</span></div>
     <div><span class="lbl">Drivers avg</span> ${pct(drvAvg)}</div>
-    ${M.weights&&prevLevel?`<div><span class="lbl">Listed stocks moved the index</span> ${pts(cSum)} pts <span class="metric-sub">(${cW.toFixed(0)}% of weight)</span></div>`:''}
+    ${M.weights&&prevLevel?`<div><span class="lbl">${M.others.length&&d.symbol==="NIFTY"?"Top 10 by weight moved the index":"Listed stocks moved the index"}</span> ${pts(cSum)} pts <span class="metric-sub">(${cW.toFixed(0)}% of weight)</span></div>`:''}
     ${top?`<div><span class="lbl">Biggest mover of the index</span> <b>${esc(top.s)}</b> ${pts(top.contrib)} pts</div>`:''}
   </div>`;
   const row=r=>`<tr class="row-click${drivers.has(r.s)?' ix-drv':''}" data-symbol="${esc(r.s)}">
@@ -7016,7 +7017,7 @@ window.renderIndexPanel=async function(d){
   const head=`<thead><tr><th>Stock</th><th>Price</th><th>Today</th>${M.weights?'<th>Index weight</th><th>Index pts today</th>':'<th>Traded today</th>'}</tr></thead>`;
   const othSorted=oth.sort((a,b)=>(b.chg??-99)-(a.chg??-99));
   box.innerHTML=sum+`<div style="overflow-x:auto;"><table class="ix-tbl">${head}<tbody>${core.map(row).join('')}</tbody></table></div>`
-    +(othSorted.length?`<details style="margin-top:10px;"><summary style="cursor:pointer;">Other ${esc(SECT_NAME[d.symbol]||'sector')} stocks (${othSorted.length}) &mdash; not in the top-10 weights</summary><div style="overflow-x:auto;"><table class="ix-tbl"><thead><tr><th>Stock</th><th>Price</th><th>Today</th><th></th><th></th></tr></thead><tbody>${othSorted.map(r=>row(Object.assign({},r,{w:null,contrib:null}))).join('')}</tbody></table></div></details>`:'')
+    +(othSorted.length?`<details style="margin-top:10px;"${d.symbol==='NIFTY'?' open':''}><summary style="cursor:pointer;">${d.symbol==='NIFTY'?'The other '+othSorted.length+' Nifty 50 stocks &mdash; NSE publishes weights only for the top 10':'Other '+esc(SECT_NAME[d.symbol]||'sector')+' stocks ('+othSorted.length+') &mdash; not in the top-10 weights'}</summary><div style="overflow-x:auto;"><table class="ix-tbl"><thead><tr><th>Stock</th><th>Price</th><th>Today</th><th></th><th></th></tr></thead><tbody>${othSorted.map(r=>row(Object.assign({},r,{w:null,contrib:null}))).join('')}</tbody></table></div></details>`:'')
     +`<div class="metric-sub" style="margin-top:8px;">Index pts = previous index level × weight × stock's move (approx.). DRIVER = weight ≥ 8% or top 5. Click a stock to open it.</div>`;
   box.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>{ tr.style.opacity='.5'; selectStock(tr.dataset.symbol); }));
 };

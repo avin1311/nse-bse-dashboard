@@ -94,6 +94,18 @@
   .btn:hover{border-color:var(--text3);}
 
   /* Grid / cards */
+  .ov-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start;}
+  .ov-main{min-width:0;}
+  .ov-main .cols-6{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));}
+  .ov-side{position:sticky;top:8px;min-width:0;}
+  .ov-side #sec-news{max-height:calc(100vh - 40px);overflow-y:auto;margin-bottom:0;}
+  @media(max-width:1000px){.ov-layout{grid-template-columns:1fr;} .ov-side{position:static;} .ov-side #sec-news{max-height:none;}}
+  .ix-tbl td,.ix-tbl th{padding:6px 8px;white-space:nowrap;}
+  .ix-tbl tr.ix-drv td:first-child{border-left:3px solid var(--accent,#3d8bfd);}
+  .ix-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;background:rgba(61,139,253,.18);color:#7fb2ff;margin-left:6px;vertical-align:1px;}
+  .ix-bar{height:6px;border-radius:3px;background:var(--border,#243049);overflow:hidden;min-width:60px;}
+  .ix-bar>span{display:block;height:100%;background:#3d8bfd;}
+  .ix-sum{display:flex;flex-wrap:wrap;gap:16px;margin:0 0 10px;font-size:13px;}
   .grid{display:grid;gap:12px;margin-bottom:14px;}
   .cols-6{grid-template-columns:repeat(6,1fr);}
   .cols-4{grid-template-columns:repeat(4,1fr);}
@@ -396,9 +408,15 @@
 <div class="view-tabs" id="viewTabs"><button class="vt-btn" data-vtab="overview">Overview</button><button class="vt-btn" data-vtab="chart">Scan &amp; charts</button><button class="vt-btn" data-vtab="fundamentals">Fundamentals</button><button class="vt-btn" data-vtab="derivatives">Derivatives</button><button class="vt-btn" data-vtab="portfolio">Portfolio &amp; tools</button></div>
 <div class="container">
 <div class="vtab-pane" id="vtab-overview" data-vtab="overview" style="display:none;">
+ <div class="ov-layout">
+ <div class="ov-main">
   <section id="sec-overview">
   <div class="grid cols-6" id="overviewGrid"></div>
   </section>
+    <section id="sec-index" class="panel" style="display:none;">
+      <div class="panel-head"><h3 id="idxTitle">Index constituents</h3><span class="metric-sub" id="idxSub"></span></div>
+      <div id="idxPanel"></div>
+    </section>
     <section id="sec-signal" class="panel">
       <div class="panel-head">
         <h3>Composite signal</h3>
@@ -407,10 +425,14 @@
       <div id="signalBody"></div>
       <div class="info-box" id="signalInfo"></div>
     </section>
+  </div>
+  <aside class="ov-side">
     <section id="sec-news" class="panel">
       <h3>News &amp; headlines</h3>
       <div id="newsPanel"></div>
     </section>
+  </aside>
+ </div>
 </div>
 <div class="vtab-pane" id="vtab-chart" data-vtab="chart" style="display:none;">
   <section id="sec-screener" class="panel">
@@ -605,12 +627,12 @@
   <div class="grid cols-4" id="fourPanel"></div>
   </section>
 
-    <div class="panel">
-      <h3>Sector peer comparison</h3>
-      <table>
-        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th></tr></thead>
+    <div class="panel" id="sec-peers">
+      <h3 id="peersTitle">Sector peer comparison</h3>
+      <div style="overflow-x:auto;"><table>
+        <thead id="peersHead"><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th></tr></thead>
         <tbody id="peersBody"></tbody>
-      </table>
+      </table></div>
     </div>
   <section id="sec-compare" class="panel">
     <div class="panel-head"><h3>Compare stocks</h3><span class="metric-sub">Pick up to 3 stocks to see every metric side by side</span></div>
@@ -2029,7 +2051,7 @@ function renderSegments(d){
 
 function fundCardInner(d){
   const f=window.FUND[d.symbol];
-  if(isIndexSym(d.symbol)) return `<div class="card-title">Fundamentals</div><div class="metric-sub">Company ratios don't apply to an index.</div>`;
+  if(isIndexSym(d.symbol)) return window.indexFundCard?indexFundCard(d):`<div class="card-title">Fundamentals</div><div class="metric-sub">Company ratios don't apply to an index.</div>`;
   if(f===undefined) return `<div class="card-title">Fundamentals</div><div class="metric-sub">Loading ratios&hellip;</div>`;
   if(f.error) return `<div class="card-title">Fundamentals</div><div class="metric-sub" style="color:var(--amber)">Ratios unavailable right now (${(f.error+'').slice(0,80)}).</div>`;
   const row=(l,v,sec)=>`<div class="row-flex"><span class="lbl">${l}</span><span>${v}${sec!=null?` <span class="metric-sub">(sector ${fmt(sec,l==='P/B ratio'?2:1)})</span>`:''}</span></div>`;
@@ -2071,8 +2093,9 @@ function renderFourPanel(d){
     <div class="card">${fundCardInner(d)}</div>
     <div class="card"><div class="card-title">Technical analysis ${T}</div>${technical}</div>
     <div class="card"><div class="card-title">Price performance ${T}</div>${performance}</div>
-    <div class="card"><div class="card-title">Shareholding</div><div class="metric-sub" id="shLoading">${isIndexSym(d.symbol)?'Not applicable to an index.':'Loading shareholding&hellip;'}</div></div>`;
+    ${isIndexSym(d.symbol)&&window.indexHeavyCard?`<div class="card">${indexHeavyCard(d)}</div>`:`<div class="card"><div class="card-title">Shareholding</div><div class="metric-sub" id="shLoading">${isIndexSym(d.symbol)?'Not applicable to an index.':'Loading shareholding&hellip;'}</div></div>`}`;
   if(!isIndexSym(d.symbol)){ loadFund(d.symbol).then(()=>{ if(window.CURRENT&&window.CURRENT.symbol===d.symbol) updateFundCard(d); }); }
+  else if(window.renderIndexFund) renderIndexFund(d);
   upgradeShareholding(d);
 }
 
@@ -2132,6 +2155,8 @@ function renderFno(d){
 }
 
 function renderPeers(d){
+  if(isIndexSym(d.symbol) && window.idxMembers && idxMembers(d.symbol)) return; // index: filled by renderIndexFund
+  { const h=document.getElementById('peersHead'), t=document.getElementById('peersTitle'); if(t) t.textContent='Sector peer comparison'; if(h) h.innerHTML='<tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th></tr>'; }
   const peers = STOCKS.filter(s=>s[2]===d.sector && s[0]!==d.symbol).slice(0,6);
   const body=document.getElementById('peersBody'); if(!body) return;
   body.innerHTML = peers.map(s=>`<tr class="row-click" data-symbol="${s[0]}"><td>${s[0]}</td><td id="pp-${s[0]}">&hellip;</td><td id="pc-${s[0]}">&hellip;</td><td id="pe-${s[0]}">&hellip;</td><td id="pb-${s[0]}">&hellip;</td><td id="pr-${s[0]}">&hellip;</td><td id="po-${s[0]}">&hellip;</td></tr>`).join('')
@@ -2508,7 +2533,7 @@ function currentTab(){
 function runTab(t,d,refresh){
   const sym=d.symbol;
   const J={
-    overview:()=>{ safe(()=>renderOverview(d)); safe(()=>renderSignal(d)); if(!refresh) safe(()=>renderNews(d)); },
+    overview:()=>{ safe(()=>renderOverview(d)); safe(()=>renderIndexPanel(d)); safe(()=>renderSignal(d)); if(!refresh) safe(()=>renderNews(d)); },
     chart:()=>{ if(!refresh){ safe(()=>renderPriceChart(d)); safe(()=>populatePaStockList()); }
       safe(()=>renderScreener()); safe(()=>renderVerdict()); if((!window.SCREENER_SRC || !Object.keys(window.XS||{}).length) && !window.__scanning){ window.__scanning=true; xsScanAll(true).finally(()=>{window.__scanning=false;}); }
       if(!refresh && document.getElementById('moreBox')?.open){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
@@ -2720,7 +2745,7 @@ window.cbtBtn=function(c){
     const pnlCls=c.pnlPct>0?'up':c.pnlPct<0?'down':'';
     const opt=c.kind==='option';
     const optBox=opt?`<div class="tc-an" style="margin:6px 0"><b>Contract:</b> ${esc(c.underlying)} ${c.strike} ${c.optType==='CE'?'Call':'Put'} · <b>Expiry ${esc(c.expiryLabel)}</b> (${c.dte} day${c.dte===1?'':'s'} left when called)${c.lotSize?' · lot '+c.lotSize:''}${c.delta?' · delta ~'+c.delta:''}<br><b>Why this expiry:</b> ${esc(c.expiryWhy)}<br><b>Index levels:</b> ${esc(c.underlying)} ${c.dir==='BUY'?'up':'down'} signal at ${Number(c.spot.entry).toLocaleString('en-IN')}; targets ${c.spot.targets.map(x=>Number(x).toLocaleString('en-IN')).join(' / ')}; <b>exit if it closes ${c.dir==='BUY'?'below':'above'} ${Number(c.spotSl).toLocaleString('en-IN')}</b>${c.mode==='intraday'?' · square off by 15:15':''}<br><span class="metric-sub">Prices above are the option premium (per unit${c.lotSize?', one lot = '+c.lotSize+' units':''}). Options can lose most of their value quickly; size so a full loss of the premium is acceptable.</span></div>`:'';
-    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span>${opt?`<span title="You buy the option; you never sell or write it">Option buy · ${c.optType==='CE'?'Call':'Put'}</span>`:''}<span>${c.mode==='intraday'?'Intraday':opt?`Multi-day · exit within ${c.holdDays||14} days`:'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span>${c.setup==='bounce'?'<span title="Oversold stock turning up while still below its 50 EMA. Short-lived; respect the stop.">Counter-trend bounce</span>':''}${({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout',vwap:'VWAP rejection / hold',trendday:'Trend day',x5:'5-min EMA 20/50 crossover',x15:'15-min EMA 20/50 crossover'})[c.setup]?'<span>'+({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout',vwap:'VWAP rejection / hold',trendday:'Trend day',x5:'5-min EMA 20/50 crossover',x15:'15-min EMA 20/50 crossover'})[c.setup]+'</span>':''}<span title="Checks passed out of 6">${c.score}/6 checks</span>${c.unproven?`<span style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">🧪 Unproven · paper only</span>`:''}${c.provenOn&&!c.unproven?`<span style="color:var(--green);border-color:var(--green)" title="This kind of call is proven only on this type of market day (by the index's move so far today, or its daily trend for multi-day)">Proven on ${({up:'up days',down:'down days',flat:'sideways days'})[c.provenOn]||c.provenOn}</span>`:''}</div>${c.params?`<div class="metric-sub">Rules: ${esc(c.params)}</div>`:''}</div>
+    return `<div class="tc-card ${cls}"><div class="tc-h"><div><div class="tc-sym">${esc(c.symbol)}</div><div class="tc-tags"><span class="${buy?'buy':'sell'}">${c.side}</span>${opt?`<span title="You buy the option; you never sell or write it">Option buy · ${c.optType==='CE'?'Call':'Put'}</span>`:''}<span>${c.mode==='intraday'?'Intraday':opt?`Multi-day · exit within ${c.holdDays||14} days`:'Swing · up to 1 month'}</span><span>Risk: ${c.riskLabel}</span>${c.setup==='bounce'?'<span title="Oversold stock turning up while still below its 50 EMA. Short-lived; respect the stop.">Counter-trend bounce</span>':''}${({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout',vwap:'VWAP rejection / hold',trendday:'Trend day',x5:'5-min EMA 20/50 crossover',x15:'15-min EMA 20/50 crossover',secmom:'Sector momentum'})[c.setup]?'<span>'+({orbvwap:'Opening-range break + VWAP',pdhl:'Previous-day high/low break',squeeze:'Tight-range breakout',vwap:'VWAP rejection / hold',trendday:'Trend day',x5:'5-min EMA 20/50 crossover',x15:'15-min EMA 20/50 crossover',secmom:'Sector momentum'})[c.setup]+'</span>':''}<span title="Checks passed out of 6">${c.score}/6 checks</span>${c.unproven?`<span style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">🧪 Unproven · paper only</span>`:''}${c.provenOn&&!c.unproven?`<span style="color:var(--green);border-color:var(--green)" title="This kind of call is proven only on this type of market day (by the index's move so far today, or its daily trend for multi-day)">Proven on ${({up:'up days',down:'down days',flat:'sideways days'})[c.provenOn]||c.provenOn}</span>`:''}</div>${c.params?`<div class="metric-sub">Rules: ${esc(c.params)}</div>`:''}</div>
       <div style="text-align:right"><span class="tc-tags"><span>${LABEL[c.status]||c.status}</span></span><div class="metric-sub">${when(c.t)}</div><div style="margin-top:4px">${window.cbtBtn(c)}</div></div></div>
       <div class="tc-grid"><div>ENTRY<b>${inr(c.entry)}</b></div><div>${c.closed?'EXIT':'LTP'}<b>${inr(c.closed?c.exit:c.ltp)}</b></div><div>ACTIVE SL${c.targetsHit?' (trailed)':''}<b>${inr(c.activeSl)}</b></div><div>${c.closed?'RESULT':'RUNNING P/L'}<b class="${pnlCls}">${c.pnlPct>0?'+':''}${c.pnlPct}%</b><span class="${pnlCls}" style="font-size:11px;">${ptsTxt(callPts(c))}${c.kind==='option'?' premium':''}</span></div></div>
       <div class="tc-ms">${ms}</div>
@@ -6699,6 +6724,137 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
   });
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',chips); else chips();
   window.BreakoutScanner={analyse,sigDW,sig15,TF,paceFrac,fwdRes,atrAt};
+})();
+</script>
+<script>
+/* ===== Index view: constituents, drivers, sector fundamentals ===== */
+(function(){
+const NSE_SEP='NSE factsheet, 30 Sep 2026';
+const INDEX_INFO={
+  NIFTYIT:{sectors:['IT'],src:NSE_SEP,w:{INFY:31.30,TCS:19.08,HCLTECH:11.81,TECHM:10.47,COFORGE:6.59,PERSISTENT:6.21,WIPRO:4.64,LTIM:4.06,MPHASIS:3.09,OFSS:2.75}},
+  BANKNIFTY:{sectors:['Banking'],src:NSE_SEP,w:{HDFCBANK:18.61,ICICIBANK:14.18,KOTAKBANK:10.20,AXISBANK:10.06,SBIN:9.93,FEDERALBNK:6.56,INDUSINDBK:4.97,AUBANK:4.85,IDFCFIRSTB:4.54,BANKBARODA:3.59}},
+  NIFTYFMCG:{sectors:['FMCG'],src:NSE_SEP,w:{ITC:27.65,HINDUNILVR:18.20,NESTLEIND:10.25,TATACONSUM:6.75,VBL:6.45,BRITANNIA:6.21,MARICO:4.55,UNITDSPR:4.37,RADICO:3.74,GODREJCP:3.73}},
+  NIFTY:{sectors:[],src:NSE_SEP+' (top 10 of 50)',w:{HDFCBANK:10.38,ICICIBANK:9.05,RELIANCE:7.58,BHARTIARTL:5.10,LT:4.20,SBIN:3.79,AXISBANK:3.37,INFY:3.35,KOTAKBANK:2.93,'M&M':2.52}},
+  NIFTYAUTO:{sectors:['Auto'],src:'approximate weights (research360), may be dated',w:{'M&M':21.79,MARUTI:14.87,TATAMOTORS:14.76,'BAJAJ-AUTO':9.35,HEROMOTOCO:6.04,EICHERMOT:5.89,TVSMOTOR:4.61,BHARATFORG:3.62,MOTHERSON:3.26,ASHOKLEY:2.93}},
+  NIFTYPHARMA:{sectors:['Pharma']},
+  NIFTYMETAL:{sectors:['Metals','Mining']},
+  NIFTYREALTY:{sectors:['Real Estate']},
+  NIFTYENERGY:{sectors:['Energy','Power']},
+  NIFTYINFRA:{sectors:['Infra','Cement','Telecom']},
+  NIFTYPSUBANK:{sectors:[],list:['SBIN','BANKBARODA','PNB','CANBK','UNIONBANK','INDIANB']},
+  SENSEX:{sectors:[],list:['HDFCBANK','ICICIBANK','RELIANCE','BHARTIARTL','INFY','LT','ITC','TCS','AXISBANK','SBIN','KOTAKBANK','M&M']}
+};
+window.INDEX_INFO=INDEX_INFO;
+const SECT_NAME={NIFTYIT:'IT',BANKNIFTY:'banking',NIFTYFMCG:'FMCG',NIFTY:'Nifty 50',NIFTYAUTO:'auto',NIFTYPHARMA:'pharma',NIFTYMETAL:'metal',NIFTYREALTY:'realty',NIFTYENERGY:'energy & power',NIFTYINFRA:'infra',NIFTYPSUBANK:'PSU bank',SENSEX:'Sensex'};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const nameOf=s=>{const r=STOCKS.find(x=>x[0]===s); return r?r[1]:s;};
+function members(sym){
+  const I=INDEX_INFO[sym]; if(!I) return null;
+  const core=I.w?Object.keys(I.w):(I.list||[]);
+  const extra=STOCKS.filter(r=>I.sectors.includes(r[2])&&!core.includes(r[0])).map(r=>r[0]);
+  // indices without published weights: the sector stocks are the members, ranked later by traded value
+  return {core:I.w?core:core.concat(extra), others:I.w?extra:[], weights:I.w||null, src:I.src||null};
+}
+window.idxMembers=members;
+const QC={}; // {key:{at,data}}
+async function quotes(syms){
+  const key=syms.join(','); const c=QC[key]; if(c&&Date.now()-c.at<30000) return c.data;
+  let data={};
+  try{ const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(key),{cache:'no-store'}); if(r.ok) data=await r.json(); }catch(e){}
+  QC[key]={at:Date.now(),data}; return data;
+}
+const pct=v=>v==null||!isFinite(v)?'&mdash;':`<span class="${v>=0?'up':'down'}">${v>=0?'+':''}${v.toFixed(2)}%</span>`;
+const pts=v=>v==null||!isFinite(v)?'&mdash;':`<span class="${v>=0?'up':'down'}">${v>=0?'+':''}${v.toFixed(1)}</span>`;
+
+function hideIdx(){ const s=document.getElementById('sec-index'); if(s) s.style.display='none'; }
+window.renderIndexPanel=async function(d){
+  const sec=document.getElementById('sec-index'), box=document.getElementById('idxPanel');
+  if(!sec||!box) return;
+  if(!isIndexSym(d.symbol)){ hideIdx(); return; }
+  const M=members(d.symbol);
+  if(!M||!M.core.length){ sec.style.display=''; document.getElementById('idxTitle').textContent=d.name+' constituents'; document.getElementById('idxSub').textContent='';
+    box.innerHTML='<div class="metric-sub">A constituent list isn\'t available for this index yet. Sector indices (IT, Bank, FMCG, Auto, Pharma, Metal, Realty, Energy, Infra, PSU Bank) and Nifty 50 / Sensex show their stocks here.</div>'; return; }
+  sec.style.display='';
+  document.getElementById('idxTitle').textContent=d.name+' — stocks & drivers';
+  document.getElementById('idxSub').textContent=M.weights?('weights: '+M.src):'no published weights — drivers estimated from today\'s traded value';
+  if(!box.dataset.sym||box.dataset.sym!==d.symbol) box.innerHTML='<div class="metric-sub">Loading live prices&hellip;</div>';
+  box.dataset.sym=d.symbol;
+  const all=M.core.concat(M.others);
+  const q=await quotes(all);
+  if(window.CURRENT?.symbol!==d.symbol) return;
+  const prevLevel=(d.price&&d.changePct!=null)?d.price/(1+d.changePct/100):null;
+  const rows=all.map(s=>{const x=q[s]||{}; const w=M.weights?M.weights[s]:null;
+    const tv=(x.price&&x.volume)?x.price*x.volume/1e7:null; // ₹ crore traded
+    const contrib=(w!=null&&prevLevel&&x.changePct!=null)?prevLevel*w/100*x.changePct/100:null;
+    return {s,w,price:x.price,chg:x.changePct,tv,contrib,core:M.core.includes(s)};});
+  const core=rows.filter(r=>r.core), oth=rows.filter(r=>!r.core);
+  let drivers;
+  if(M.weights){ drivers=new Set(core.filter(r=>r.w>=8).map(r=>r.s)); core.slice().sort((a,b)=>b.w-a.w).slice(0,5).forEach(r=>drivers.add(r.s)); core.sort((a,b)=>b.w-a.w); }
+  else { core.sort((a,b)=>(b.tv||0)-(a.tv||0)); drivers=new Set(core.slice(0,5).filter(r=>r.tv).map(r=>r.s)); }
+  const up=rows.filter(r=>r.chg>0).length, dn=rows.filter(r=>r.chg<0).length, have=rows.filter(r=>r.chg!=null).length;
+  const drvRows=core.filter(r=>drivers.has(r.s)&&r.chg!=null);
+  const drvAvg=drvRows.length?drvRows.reduce((a,r)=>a+(M.weights?r.w*r.chg:r.chg),0)/(M.weights?drvRows.reduce((a,r)=>a+r.w,0):drvRows.length):null;
+  const cSum=core.reduce((a,r)=>a+(r.contrib||0),0), cW=core.reduce((a,r)=>a+(r.contrib!=null?r.w:0),0);
+  const top=core.filter(r=>r.contrib!=null).sort((a,b)=>Math.abs(b.contrib)-Math.abs(a.contrib))[0];
+  const maxW=Math.max(1,...core.map(r=>r.w||0));
+  const sum=`<div class="ix-sum">
+    <div><span class="lbl">Breadth</span> <b class="up">${up}▲</b> / <b class="down">${dn}▼</b> <span class="metric-sub">of ${have}</span></div>
+    <div><span class="lbl">Drivers avg</span> ${pct(drvAvg)}</div>
+    ${M.weights&&prevLevel?`<div><span class="lbl">Listed stocks moved the index</span> ${pts(cSum)} pts <span class="metric-sub">(${cW.toFixed(0)}% of weight)</span></div>`:''}
+    ${top?`<div><span class="lbl">Biggest mover of the index</span> <b>${esc(top.s)}</b> ${pts(top.contrib)} pts</div>`:''}
+  </div>`;
+  const row=r=>`<tr class="row-click${drivers.has(r.s)?' ix-drv':''}" data-symbol="${esc(r.s)}">
+    <td><b>${esc(r.s)}</b>${drivers.has(r.s)?'<span class="ix-badge" title="Heavyweight: moves the index most">DRIVER</span>':''}<div class="metric-sub">${esc(nameOf(r.s))}</div></td>
+    <td>${r.price!=null?'&#8377;'+fmt(r.price,2):'&mdash;'}</td><td>${pct(r.chg)}</td>
+    ${M.weights?`<td>${r.w!=null?r.w.toFixed(2)+'%':'&mdash;'}<div class="ix-bar"><span style="width:${r.w!=null?r.w/maxW*100:0}%"></span></div></td><td>${pts(r.contrib)}</td>`:`<td>${r.tv!=null?'&#8377;'+fmt(r.tv,0)+' Cr':'&mdash;'}</td>`}
+  </tr>`;
+  const head=`<thead><tr><th>Stock</th><th>Price</th><th>Today</th>${M.weights?'<th>Index weight</th><th>Index pts today</th>':'<th>Traded today</th>'}</tr></thead>`;
+  const othSorted=oth.sort((a,b)=>(b.chg??-99)-(a.chg??-99));
+  box.innerHTML=sum+`<div style="overflow-x:auto;"><table class="ix-tbl">${head}<tbody>${core.map(row).join('')}</tbody></table></div>`
+    +(othSorted.length?`<details style="margin-top:10px;"><summary style="cursor:pointer;">Other ${esc(SECT_NAME[d.symbol]||'sector')} stocks (${othSorted.length}) &mdash; not in the top-10 weights</summary><div style="overflow-x:auto;"><table class="ix-tbl"><thead><tr><th>Stock</th><th>Price</th><th>Today</th><th></th><th></th></tr></thead><tbody>${othSorted.map(r=>row(Object.assign({},r,{w:null,contrib:null}))).join('')}</tbody></table></div></details>`:'')
+    +`<div class="metric-sub" style="margin-top:8px;">Index pts = previous index level × weight × stock's move (approx.). DRIVER = weight ≥ 8% or top 5. Click a stock to open it.</div>`;
+  box.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>{ tr.style.opacity='.5'; selectStock(tr.dataset.symbol); }));
+};
+
+/* Fundamentals tab: sector aggregates */
+function med(a){ a=a.filter(v=>v!=null&&isFinite(v)).sort((x,y)=>x-y); if(!a.length) return null; const m=a.length>>1; return a.length%2?a[m]:(a[m-1]+a[m])/2; }
+function wavg(rows,k){ let s=0,w=0; rows.forEach(r=>{const v=r.f&&r.f[k]; if(v!=null&&isFinite(v)&&r.w){s+=v*r.w;w+=r.w;}}); return w?s/w:null; }
+window.indexFundCard=function(d){
+  return `<div class="card-title">Sector fundamentals</div><div id="ixFundCard"><div class="metric-sub">Loading ratios for the index stocks&hellip;</div></div>`;
+};
+window.indexHeavyCard=function(d){
+  const M=members(d.symbol);
+  if(!M||!M.core.length) return `<div class="card-title">Heavyweights</div><div class="metric-sub">Constituent list not available for this index.</div>`;
+  const list=M.core.slice(0,6);
+  return `<div class="card-title">${M.weights?'Heavyweights (index weight)':'Largest sector stocks'}</div>`+list.map(s=>`<div class="row-flex"><span class="lbl">${esc(s)}</span><span>${M.weights?M.weights[s].toFixed(1)+'%':''} <span id="ixh-${esc(s).replace(/[^A-Z0-9]/gi,'_')}"></span></span></div>`).join('')
+    +`<div class="metric-sub" style="margin-top:6px;">${M.weights?esc(M.src):'Estimated: no published weights'}</div>`;
+};
+window.renderIndexFund=async function(d){
+  const M=members(d.symbol); if(!M) return;
+  const all=M.core.concat(M.others).slice(0,30);
+  const q=await quotes(M.core.concat(M.others));
+  if(window.CURRENT?.symbol!==d.symbol) return;
+  M.core.slice(0,6).forEach(s=>{const e=document.getElementById('ixh-'+s.replace(/[^A-Z0-9]/gi,'_')); if(e&&q[s]) e.innerHTML=pct(q[s].changePct);});
+  const fs=await Promise.all(all.map(s=>loadFund(s).catch(()=>null)));
+  if(window.CURRENT?.symbol!==d.symbol) return;
+  const rows=all.map((s,i)=>({s,f:(fs[i]&&!fs[i].error)?fs[i]:null,w:M.weights?M.weights[s]:null,q:q[s]}));
+  const ok=rows.filter(r=>r.f);
+  const card=document.getElementById('ixFundCard');
+  if(card){
+    if(!ok.length) card.innerHTML='<div class="metric-sub" style="color:var(--amber)">Ratios unavailable right now.</div>';
+    else { const line=(l,k,dec,suf)=>{ const m=med(ok.map(r=>r.f[k])), w=M.weights?wavg(ok,k):null; return `<div class="row-flex"><span class="lbl">${l}</span><span>${m==null?'&mdash;':fmt(m,dec)+(suf||'')}${w!=null?` <span class="metric-sub">(wtd ${fmt(w,dec)}${suf||''})</span>`:''}</span></div>`; };
+      card.innerHTML=line('P/E (median)','pe',1)+line('P/B (median)','pb',2)+line('ROE (median)','roe',1,'%')+line('ROCE (median)','roce',1,'%')+line('EV/EBITDA (median)','evEbitda',1)+line('Div. yield (median)','dividendYield',2,'%')
+        +`<div class="metric-sub" style="margin-top:6px;">${ok.length} of ${all.length} ${esc(SECT_NAME[d.symbol]||'')} stocks &middot; Upstox key ratios${M.weights?' &middot; wtd = index-weighted (top 10)':''}</div>`; }
+  }
+  // per-stock table in the peers panel
+  const head=document.getElementById('peersHead'), body=document.getElementById('peersBody'), t=document.getElementById('peersTitle');
+  if(head&&body){
+    if(t) t.textContent=`${d.name} — stock fundamentals`;
+    head.innerHTML='<tr><th>Stock</th><th>Price</th><th>Change</th>'+(M.weights?'<th>Weight</th>':'')+'<th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th><th>EV/EBITDA</th></tr>';
+    body.innerHTML=rows.map(r=>{const f=r.f||{}; const x=r.q||{}; return `<tr class="row-click" data-symbol="${esc(r.s)}"><td><b>${esc(r.s)}</b>${M.weights&&r.w>=8?'<span class="ix-badge">DRIVER</span>':''}</td><td>${x.price!=null?'&#8377;'+fmt(x.price,2):'&mdash;'}</td><td>${pct(x.changePct)}</td>${M.weights?`<td>${r.w!=null?r.w.toFixed(2)+'%':'&mdash;'}</td>`:''}<td>${fvl(f.pe,1)}</td><td>${fvl(f.pb,2)}</td><td>${fvl(f.roe,1,'%')}</td><td>${fvl(f.roce,1,'%')}</td><td>${fvl(f.evEbitda,1)}</td></tr>`;}).join('');
+    body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>{ tr.style.opacity='.5'; selectStock(tr.dataset.symbol); }));
+  }
+};
 })();
 </script>
 </body>

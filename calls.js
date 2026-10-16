@@ -264,8 +264,13 @@ function breadthAt(map, t, prevDayOnly) { // breadth of the day of t (swing, sig
   return null;
 }
 // regime param: 'any' | 'b50' | 'b60'. Buys need breadth >= threshold, sells need breadth <= 100 - threshold.
-function regimeOk(side, pct, regime) {
+// 'b50s': like b50, but a stock whose sector index is strongly with the trade today (1.5%+ and on the right side of its
+// open) may trade even when market breadth is against it — a sector rally inside a weak market.
+const SEC_STRONG = 1.5;
+function secStrong(side, sec) { return !!sec && sec.pct != null && (side === 'BUY' ? sec.pct >= SEC_STRONG && sec.aboveOpen !== false : sec.pct <= -SEC_STRONG && sec.aboveOpen !== true); }
+function regimeOk(side, pct, regime, sec) {
   if (!regime || regime === 'any' || pct == null) return true;
+  if (regime === 'b50s' && secStrong(side, sec)) return true;
   const thr = regime === 'b60' ? 60 : 50;
   return side === 'BUY' ? pct >= thr : pct <= 100 - thr;
 }
@@ -741,6 +746,37 @@ function evalVwapIntra(P, n, opts = {}) {
   return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: best.score, checks: best.chk, setup: 'vwap', engine: 'v4', rs: rs == null ? null : f(rs),
     riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
 }
+// ---- SECTOR MOMENTUM (stock intraday): on a day its sector index runs hard (secK%+ and holding above its open; mirror
+// for sells), buy a stock that leads that sector when it clears its opening range (first 30 minutes) — 'brk' — or holds
+// a pullback to that range / VWAP after clearing it — 'pull'. Bars that close 9:45 to 11:00 only. Stop below the opening
+// range or stopK ATR, whichever is nearer; targets by exitI.
+function evalSecMom(P, n, opts = {}) {
+  const { bars, c, h, l, o, A, R, vwap, dayFirst } = P, sec = opts.sec, secK = opts.secK || 1.5;
+  const a = A[n], first = dayFirst[n]; if (a == null || !sec || sec.pct == null || first < 1) return null;
+  const k = n - first; if (k < 2) return null; // the opening range (two 15-minute bars) must be complete
+  const m = Math.floor(((bars[n].t + 19800) % 86400) / 60); if (m < 570 || m > 645) return null; // bar starts 9:30 .. 10:45 (closes 9:45 .. 11:00)
+  const orH = Math.max(h[first], h[first + 1]), orL = Math.min(l[first], l[first + 1]), px = c[n], prevClose = c[first - 1];
+  const dayPct = (px / prevClose - 1) * 100, volR = slotVolRatio(bars, n), vw = vwap[n];
+  let side = null; if (sec.pct >= secK && sec.aboveOpen !== false) side = 'BUY'; else if (sec.pct <= -secK && sec.aboveOpen !== true) side = 'SELL';
+  if (!side || (opts.side && opts.side !== side)) return null;
+  const up = side === 'BUY', sgn = up ? 1 : -1;
+  if (up ? dayPct < sec.pct : dayPct > sec.pct) return null;                // must lead its sector
+  if (opts.volK && !(volR != null && volR >= opts.volK)) return null;
+  let trig = false;
+  const clearedBefore = (lvl) => { for (let j = first + 2; j < n; j++) if (up ? c[j] > lvl : c[j] < lvl) return true; return false; };
+  if ((opts.entry || 'brk') === 'brk') trig = (up ? px > orH && c[n - 1] <= orH : px < orL && c[n - 1] >= orL);
+  else { const lvl = up ? Math.max(orH, vw || orH) : Math.min(orL, vw || orL);
+    trig = clearedBefore(up ? orH : orL) && (up ? l[n] <= lvl + 0.25 * a && px > lvl && c[n] > o[n] : h[n] >= lvl - 0.25 * a && px < lvl && c[n] < o[n]); }
+  if (!trig) return null;
+  const sk = opts.stopK || 1;
+  let stopDist = Math.min(sk * a * 1.5, up ? px - orL : orH - px); stopDist = Math.max(stopDist, 0.004 * px); stopDist = Math.min(stopDist, 0.03 * px);
+  const entry = tick(px), sl = tick(entry - sgn * stopDist), rr = EXITS[opts.exitI] || EXITS.A, targets = rr.map(x => tick(entry + sgn * stopDist * x)), risk = stopDist / px * 100, f = x => r2(x);
+  const why = [`Sector index ${up ? 'up' : 'down'} ${f(Math.abs(sec.pct))}% and ${up ? 'above' : 'below'} its open`, `${f(dayPct)}% on the day, leading its sector`,
+    (opts.entry || 'brk') === 'brk' ? `Cleared the opening range ${up ? 'high' : 'low'} (${f(up ? orH : orL)})` : `Held a pullback to the opening range / VWAP after clearing it`,
+    volR != null ? `Volume ${f(volR)}x the usual for this time of day` : '', R[n] != null ? `RSI ${f(R[n])}` : ''].filter(Boolean);
+  return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6, checks: { sector: true, lead: true, trigger: true, vol: volR == null ? null : volR >= 1 },
+    setup: 'secmom', engine: 'v4', rs: null, riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+}
 // ---- Stock swing "squeeze" breakout: after an inside day or the narrowest range of 7 days, a close at a fresh 20-day high
 // on volume. Buy only.
 function evalSqueeze(P, n, opts = {}) {
@@ -825,9 +861,9 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
       const m = dayMove(I, t);
       if (m) { todayPct = m.pct; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; }
     }
-    const ev = evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
-    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     const sm = dayMove(opts.secBars15 || I, t); // the stock's sector index (Nifty when it has none)
+    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
+    if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime, sm) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     if (opts.safety === true && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue; // the lab normally applies it as a filter instead
     const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
     const st = track(call, bars, far);
@@ -853,11 +889,13 @@ const LAB_GRID = {
   // trimmed to what earlier runs actually chose (5-6 checks, tighter stops, nearer targets) so the lab fits the server's small CPU
   // 'index must agree' was never chosen in earlier runs, so it is dropped to make room for the VWAP setup (built-in index check)
   // EMA 20/50 crossover on 5- and 15-minute index bars (run once per timeframe; the setup key says which)
+  // sector momentum (stock intraday): sector strength needed, entry style, volume, stop, targets
+  stock_secmom: product({ setup: ['secmom'], secK: [1, 1.5], entry: ['brk', 'pull'], volK: [0, 1.5], stopK: [0.75, 1], exitI: ['S', 'A'], regime: ['any'] }),
   index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
   // agree: must the stock's side agree with Nifty ('index') or with its sector index ('sector') on the day? Applied as a
   // filter on one replay, so the extra choices cost almost no lab time
   // safety: block sells while the sector is up 0.7%+ above its open (mirror for buys) — tested, not assumed
-  stock_intraday: product({ safety: [false, true], agree: ['none', 'index', 'sector'], regime: ['any', 'b50'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
+  stock_intraday: product({ safety: [false, true], agree: ['none', 'index', 'sector'], regime: ['any', 'b50', 'b50s'], setup: ['trend', 'orbvwap', 'pdhl', 'vwap'], minScore: [5, 6], stopK: [0.75, 1], exitI: ['S', 'A'] }),
 };
 function summarizeTrades(trades) {
   const done = trades.filter(x => x.closed);
@@ -865,4 +903,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { evalSecMom, secStrong, SEC_STRONG, dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

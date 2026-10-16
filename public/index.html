@@ -51,7 +51,7 @@
   .tc-ms{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin:6px 0;} .tc-ms span.hit{color:var(--green);font-weight:700;}
   .tc-an{font-size:12px;color:var(--text2);line-height:1.5;} .tc-disc{font-size:11px;color:var(--text2);margin-top:12px;border-top:1px dashed var(--border);padding-top:8px;}
   @media(max-width:560px){.tc-stats,.tc-grid{grid-template-columns:repeat(2,1fr);}}
-  .cm{position:fixed;inset:0;z-index:8900;background:var(--bg,#0b0f17);overflow:auto;padding:14px 16px 40px;}
+  .cm{position:fixed;inset:0;left:196px;z-index:8900;background:var(--bg,#0b0f17);overflow:auto;padding:14px 16px 40px;}
   .cm-in{max-width:1180px;margin:0 auto;} .cm-top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:10px;} .cm-top h3{margin:0;font-size:20px;}
   .cm-live{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;} .cm-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;} .cm-dot.off{background:var(--text2);}
   .cm-cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:14px;align-items:start;} @media(max-width:900px){.cm-cols{grid-template-columns:1fr;}}
@@ -236,20 +236,80 @@
   .chart-wrap{position:relative;width:100%;}
   ::-webkit-scrollbar{height:6px;width:6px;} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
 
-  /* Left icon sidebar */
-  body{padding-left:56px;transition:padding-left .2s ease;}
-  .rail{position:fixed;top:0;left:0;bottom:0;width:56px;background:var(--panel2);border-right:1px solid var(--border);
-    display:flex;flex-direction:column;align-items:center;padding:14px 0;z-index:100;transition:transform .2s ease;}
-  .rail-btn{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;
-    color:var(--text2);cursor:pointer;margin-bottom:6px;background:transparent;border:none;}
-  .rail-btn svg{width:19px;height:19px;}
+  @media(max-width:700px){
+    .header>div:last-child{flex-wrap:wrap;}
+    .pf-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;}
+    .order-grid>div{min-width:0;} .order-grid select,.order-grid input{width:100%;min-width:0;box-sizing:border-box;}
+    .bt-controls>div{min-width:0;} .bt-controls select,.bt-controls input{min-width:0;}
+    .container{padding-left:10px;padding-right:10px;}
+    .hm-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;} .hm-cards>.card:last-child{grid-column:1/-1;} .hm-big{font-size:18px;} .hm-idx .hm-top .metric-sub{display:none;}
+  }
+  /* Home */
+  .hm-row{margin-bottom:14px;}
+  .hm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;}
+  .hm-idx{display:block;color:var(--text);text-decoration:none;}
+  .hm-top{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--text2);}
+  .hm-big{font-size:22px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .hm-chg{font-size:13px;margin-top:2px;}
+  .hm-bar{display:flex;height:7px;border-radius:4px;overflow:hidden;background:var(--border);margin:8px 0 6px;}
+  .hm-vix{display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:8px;padding-top:8px;font-size:13px;}
+  .hm-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px;}
+  .hm-two>.panel{margin-bottom:0;}
+  .hm-panel{min-width:0;}
+  .hm-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px 12px;flex-wrap:wrap;margin-bottom:10px;}
+  .hm-head h3{margin:0;}
+  .hm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:10px;}
+  .hm-stats b{font-size:18px;}
+  .hm-list{display:flex;flex-direction:column;}
+  .hm-li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-top:1px solid var(--border);color:var(--text);text-decoration:none;font-size:13px;min-height:24px;}
+  a.hm-li:hover{background:var(--panel2);}
+  .hm-al{border-radius:8px;border-top:0;margin-bottom:6px;padding:10px 12px;}
+  .hm-up{background:rgba(38,194,129,.08);} .hm-dn{background:rgba(239,83,80,.08);}
+  .hm-sub{font-size:13px;font-weight:600;margin-bottom:6px;}
+  .hm-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+  .hm-primary{background:var(--blue)!important;color:#08101e!important;border-color:var(--blue)!important;font-weight:600;}
+  .hm-sec{display:grid;grid-template-columns:110px minmax(0,1fr) 64px;gap:10px;align-items:center;padding:6px 0;font-size:13px;color:var(--text);text-decoration:none;}
+  .hm-sec>span:last-child{text-align:right;font-variant-numeric:tabular-nums;}
+  .hm-secbar{position:relative;height:9px;background:var(--panel2);border-radius:5px;}
+  .hm-secbar>span{position:absolute;top:0;bottom:0;border-radius:5px;}
+  .hm-seg{display:flex;gap:6px;}
+  .hm-seg button{min-height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text2);font:inherit;font-size:12.5px;cursor:pointer;}
+  .hm-seg button.on{border-color:var(--blue);color:var(--blue);background:rgba(61,139,253,.12);}
+  /* Left sidebar: market-wide pages only (the open stock's views are the tabs under its name) */
+  body{padding-left:196px;transition:padding-left .2s ease;}
+  .rail{position:fixed;top:0;left:0;bottom:0;width:196px;box-sizing:border-box;background:var(--panel2);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;align-items:stretch;padding:14px 10px;gap:4px;z-index:100;transition:transform .2s ease;}
+  .rail-brand{font-weight:700;font-size:14px;padding:2px 10px 12px;color:var(--text);letter-spacing:.02em;}
+  .rail-btn{position:relative;min-height:44px;border-radius:10px;display:flex;align-items:center;gap:12px;padding:0 10px;
+    color:var(--text2);cursor:pointer;background:transparent;border:none;font:inherit;font-size:13.5px;font-weight:500;text-align:left;}
+  .rail-btn svg{width:19px;height:19px;flex:0 0 19px;}
   .rail-btn:hover{background:var(--panel);color:var(--text);}
   .rail-btn.active{background:rgba(61,139,253,.15);color:var(--blue);}
+  .rail-badge{margin-left:auto;font-size:11px;font-weight:700;background:var(--green);color:#08110c;border-radius:9px;padding:1px 7px;}
   .rail-spacer{flex:1;}
-  .rail-btn[data-tip]{position:relative;}
-  .rail-btn[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:46px;top:50%;transform:translateY(-50%);
-    background:var(--panel);border:1px solid var(--border);padding:4px 8px;border-radius:5px;font-size:11px;
-    white-space:nowrap;color:var(--text);pointer-events:none;}
+  .page-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 14px;margin:4px 0 14px;}
+  .page-head h2{margin:0;font-size:22px;}
+  @media(max-width:1100px){
+    body{padding-left:64px;}
+    .rail{width:64px;padding:12px 6px;align-items:center;}
+    .rail-brand{display:none;}
+    .rail-btn{flex-direction:column;justify-content:center;gap:3px;width:56px;min-height:54px;padding:4px 0;font-size:10px;text-align:center;}
+    .rail-btn .rail-lbl{line-height:1.1;}
+    .rail-badge{position:absolute;top:2px;right:4px;margin:0;padding:0 5px;font-size:10px;}
+  }
+  @media(max-width:700px){
+    body{padding-left:0!important;padding-bottom:62px;}
+    .rail{top:auto;bottom:0;right:0;width:auto;height:60px;flex-direction:row;justify-content:space-around;padding:4px 6px;border-right:0;border-top:1px solid var(--border);transform:none!important;}
+    .rail-spacer,.rail-collapse{display:none;}
+    .rail-btn{width:auto;flex:1 1 0;max-width:90px;}
+  }
+  @media(max-width:1100px){ .cm{left:64px;} }
+  @media(max-width:700px){ .cm{left:0;bottom:60px;} }
+  body.rail-collapsed .cm{left:0;}
+  body.rail-collapsed{padding-left:0;}
+  body.rail-collapsed .rail{transform:translateX(-100%);}
+  .rail-reopen{display:none;position:fixed;left:6px;bottom:10px;z-index:101;}
+  body.rail-collapsed .rail-reopen{display:block;}
 
   .live-dot{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--green);font-weight:600;padding:3px 8px;background:rgba(38,194,129,.12);border-radius:5px;}
   .live-dot .pulse{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 1.4s infinite;}
@@ -315,66 +375,17 @@
 </head>
 <body>
 
-<nav class="rail" id="rail">
-  <button class="rail-btn home-tab" id="homeBtn" data-tip="Home">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
-  </button>
-  <button class="rail-btn active" data-target="sec-overview" data-tip="Overview">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-chart" data-tip="Chart">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-signal" data-tip="Signal">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3 8 4-16 3 8h6"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-fourpanel" data-tip="Fundamentals">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-screener" data-tip="Screener">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-fno" data-tip="F&amp;O">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-backtest" data-tip="Backtest">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-positions" data-tip="Positions">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-news" data-tip="News">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h13v16l-3-2-3 2-3-2-4 2V4z"/><path d="M8 8h6M8 12h6"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-watchlist" data-tip="Watchlist">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 6.5 7 1-5 5 1.5 7L12 18l-6.5 3.5L7 14.5l-5-5 7-1z"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-heatmap" data-tip="Sector heatmap">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="5"/><rect x="10" y="3" width="5" height="5"/><rect x="17" y="3" width="4" height="5"/><rect x="3" y="10" width="5" height="5"/><rect x="10" y="10" width="5" height="5"/><rect x="3" y="17" width="5" height="4"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-alerts" data-tip="Price alerts">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-portfolio" data-tip="Portfolio">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-compare" data-tip="Compare stocks">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="10" rx="1"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-options" data-tip="Options &amp; futures">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-priceaction" data-tip="Price action">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l4-8 4 4 6-10 4 6"/></svg>
-  </button>
-  <button class="rail-btn" data-target="sec-patterns" data-tip="Chart patterns">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18l5-9 4 5 3-7 6 11"/><path d="M3 21h18"/></svg>
-  </button>
+<nav class="rail" id="rail" aria-label="Main">
+  <div class="rail-brand">NSE + BSE</div>
+  <button class="rail-btn" id="homeBtn" data-view="home" data-tip="Home" aria-label="Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg><span class="rail-lbl">Home</span></button>
+  <button class="rail-btn" id="scanNavBtn" data-view="scan" data-tip="Scanner" aria-label="Scanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6M11 8v6"/></svg><span class="rail-lbl">Scanner</span></button>
+  <button class="rail-btn" id="callsNavBtn" data-view="calls" data-tip="Calls" aria-label="Calls"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 18l5-6 4 3 7-9"/><path d="M15 6h5v5"/></svg><span class="rail-lbl">Calls</span><span class="rail-badge" id="railCallsBadge" style="display:none"></span></button>
+  <button class="rail-btn" id="portNavBtn" data-view="portfolio" data-tip="Portfolio &amp; tools" aria-label="Portfolio &amp; tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span class="rail-lbl">Portfolio &amp; tools</span></button>
   <div class="rail-spacer"></div>
-  <button class="rail-btn" id="collapseBtn" data-tip="Collapse">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
-  </button>
+  <button class="rail-btn" id="statusNavBtn" data-view="status" data-tip="Status" aria-label="Status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12h4l3 8 4-16 3 8h6"/></svg><span class="rail-lbl">Status</span></button>
+  <button class="rail-btn rail-collapse" id="collapseBtn" data-tip="Collapse" aria-label="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg><span class="rail-lbl">Collapse</span></button>
 </nav>
+<button class="btn rail-reopen" id="railReopen" aria-label="Show the sidebar">&#9776; Menu</button>
 
 <div id="tabBar" class="tabbar"></div>
 <div id="alertHost"></div>
@@ -393,48 +404,16 @@
       <span id="upstoxConnectLabel">Connect Upstox</span>
     </a>
     <span class="mkt-badge" id="mktBadge" title="Market hours: Mon–Fri 9:15–15:30 IST (exchange holidays are not tracked)">&hellip;</span>
-    <button class="btn" id="monBtn" title="Live monitor for all trade calls, alerts and end-of-day summary">Calls Monitor</button>
-    <button class="btn" id="callsBtn" title="Rule-based trade calls with entry, stop loss and targets">Trade Calls</button>
-    <button class="btn" id="statusBtn" title="Connection health, Telegram test">Status</button>
+    <button class="btn" style="display:none" id="monBtn" title="Live monitor for all trade calls, alerts and end-of-day summary">Calls Monitor</button>
+    <button class="btn" style="display:none" id="callsBtn" title="Rule-based trade calls with entry, stop loss and targets">Trade Calls</button>
+    <button class="btn" style="display:none" id="statusBtn" title="Connection health, Telegram test">Status</button>
     <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
   </div>
 </div>
 
 <div id="homeView" class="container" style="display:none;"></div>
-
-<div id="stockView">
-<div class="stock-head" id="stockHead"></div>
-
-<div class="view-tabs" id="viewTabs"><button class="vt-btn" data-vtab="overview">Overview</button><button class="vt-btn" data-vtab="chart">Scan &amp; charts</button><button class="vt-btn" data-vtab="fundamentals">Fundamentals</button><button class="vt-btn" data-vtab="derivatives">Derivatives</button><button class="vt-btn" data-vtab="portfolio">Portfolio &amp; tools</button></div>
-<div class="container">
-<div class="vtab-pane" id="vtab-overview" data-vtab="overview" style="display:none;">
- <div class="ov-layout">
- <div class="ov-main">
-  <section id="sec-overview">
-  <div class="grid cols-6" id="overviewGrid"></div>
-  </section>
-    <section id="sec-index" class="panel" style="display:none;">
-      <div class="panel-head"><h3 id="idxTitle">Index constituents</h3><span class="metric-sub" id="idxSub"></span></div>
-      <div id="idxPanel"></div>
-    </section>
-    <section id="sec-signal" class="panel">
-      <div class="panel-head">
-        <h3>Composite signal</h3>
-        <button class="btn" onclick="toggleInfo('signalInfo')">Why this signal?</button>
-      </div>
-      <div id="signalBody"></div>
-      <div class="info-box" id="signalInfo"></div>
-    </section>
-  </div>
-  <aside class="ov-side">
-    <section id="sec-news" class="panel">
-      <h3>News &amp; headlines</h3>
-      <div id="newsPanel"></div>
-    </section>
-  </aside>
- </div>
-</div>
-<div class="vtab-pane" id="vtab-chart" data-vtab="chart" style="display:none;">
+<div id="scanView" class="container" style="display:none;">
+  <div class="page-head"><h2>Scanner</h2><span class="metric-sub">Whole market &mdash; the same whichever stock you have open. Click a stock to open its chart.</span></div>
   <section id="sec-screener" class="panel">
     <div class="panel-head"><h3>All-stocks scan</h3><span class="metric-sub">screener + chart patterns + breakouts, one scan &middot; <span id="screenerCount"></span></span></div>
         <div class="filters">
@@ -516,6 +495,167 @@
     </div>
     <details class="cm-box" id="xsReplayBox" style="margin-top:10px;"><summary style="cursor:pointer"><b>Does agreement help?</b> <span class="metric-sub">replays the same three checks on past daily candles and compares with doing nothing</span></summary><div id="xsReplay" style="margin-top:6px;"><button class="btn" id="xsReplayBtn">Measure now (about a minute)</button></div></details>
   </section>
+  <details class="panel" id="moreBox"><summary style="cursor:pointer;font-weight:600;">Sector heatmap &middot; seasonality <span class="metric-sub" style="font-weight:400;">(loads when opened)</span></summary>
+<section id="sec-heatmap" class="panel">
+    <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
+    <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+      <h3 style="margin:0 0 4px;">Seasonality explorer</h3>
+      <p class="desc" style="margin-bottom:8px;">Click any <b>index tile</b> above, or pick any index/stock here, for its month-by-month, quarterly and yearly returns over past years (e.g. does it rise every Feb&ndash;Mar?).</p>
+      <div class="filters" style="margin-bottom:10px;"><select id="seasPick" style="min-width:220px;"></select><button class="btn scan-btn" id="seasOpenBtn">Open seasonality</button><button class="btn" id="seasSectorBtn">Sector / index seasonality</button><button class="btn" id="seasPicksBtn">Seasonal picks (this &amp; next month)</button></div>
+      <div id="seasSectorBox"></div>
+      <div id="seasPicksBox" style="margin-top:10px;"></div>
+    </div>
+  </section>
+  <section id="sec-seasonality" class="panel">
+    <div class="panel-head"><h3>Seasonality</h3><span class="metric-sub">Month / quarter / year returns across past years &middot; real data</span></div>
+    <div id="seasStockBody"></div>
+  </section>
+</details>
+</div>
+<div id="portView" class="container" style="display:none;">
+  <div class="page-head"><h2>Portfolio &amp; tools</h2><span class="metric-sub">Watchlist, paper positions, price alerts, backtest and compare &mdash; not tied to the open stock</span></div>
+  <section id="sec-watchlist" class="panel">
+    <div class="panel-head"><h3>Watchlist</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="metric-sub">Click the &#9734; next to any stock's price to add it here</span>
+        <button class="btn" id="exportWatchlistBtn">Export CSV</button>
+      </div>
+    </div>
+    <div id="watchlistBody" class="metric-sub">No stocks watched yet.</div>
+  </section>
+  <section id="sec-positions" class="panel">
+    <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
+    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup. Each position also gets an automatic one-time <strong>deviation warning</strong> (amber ⚠️) at the halfway point between entry and stop-loss, as an early heads-up before the hard stop actually hits.</p>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
+      <tbody id="positionsBody"></tbody>
+    </table>
+    </div>
+  </section>
+  <section id="sec-portfolio" class="panel">
+    <div class="panel-head"><h3>Portfolio</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="metric-sub">Your real holdings &mdash; separate from the paper-trading Positions above</span>
+        <button class="btn" id="exportPortfolioBtn">Export CSV</button>
+      </div>
+    </div>
+    <div class="order-form" style="margin-top:0;">
+      <div class="order-grid pf-grid" style="grid-template-columns:1fr 1fr 1fr 1fr auto;">
+        <div><label>Stock</label><select id="pfStock"></select></div>
+        <div><label>Quantity</label><input id="pfQty" type="number" step="1" placeholder="e.g. 10"></div>
+        <div><label>Avg. buy price (&#8377;)</label><input id="pfBuyPrice" type="number" step="0.01" placeholder="e.g. 1450"></div>
+        <div><label>Buy date (optional)</label><input id="pfBuyDate" type="date"></div>
+        <div style="display:flex;align-items:end;"><button class="btn" id="pfAddBtn" style="width:100%;">Add holding</button></div>
+      </div>
+    </div>
+    <div class="grid cols-4" id="portfolioSummary" style="margin-top:14px;"></div>
+    <div class="grid cols-2" style="margin-top:0;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Stock</th><th>Qty</th><th>Avg. buy</th><th>LTP</th><th>Invested</th><th>Current value</th><th>P&amp;L</th><th></th></tr></thead>
+          <tbody id="portfolioBody"></tbody>
+        </table>
+      </div>
+      <div>
+        <div class="card-title" style="margin-bottom:8px;">Sector allocation</div>
+        <div class="chart-wrap" style="height:220px;"><canvas id="portfolioAllocChart"></canvas></div>
+      </div>
+    </div>
+  </section>
+  <section id="sec-alerts" class="panel">
+    <div class="panel-head"><h3>Price alerts</h3><span class="metric-sub">Simpler than a paper position &mdash; just get notified when a price level is crossed, no target/SL required</span></div>
+    <div class="order-form" style="margin-top:0;">
+      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr auto;">
+        <div><label>Stock</label><select id="alertStock"></select></div>
+        <div><label>Condition</label><select id="alertCondition"><option value="above">Price goes above</option><option value="below">Price goes below</option></select></div>
+        <div><label>Price (&#8377;)</label><input id="alertPrice" type="number" step="0.01" placeholder="e.g. 1500"></div>
+        <div style="display:flex;align-items:end;"><button class="btn" id="addAlertBtn" style="width:100%;">Add alert</button></div>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table style="margin-top:14px;">
+      <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
+      <tbody id="alertsBody"></tbody>
+    </table>
+    </div>
+  </section>
+  <section id="sec-backtest" class="panel">
+    <h3>Backtest a strategy</h3>
+    <p class="desc">Runs against real daily closing prices via the local proxy when it's reachable (up to 2 years), otherwise a synthetic extended series. See the chat for a summary of what published backtests report for each strategy, and read the caveat about overfitting before trusting any win rate &mdash; including this tool's.</p>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr auto;">
+      <div><label>Stock</label><select id="btStock"></select></div>
+      <div><label>Lookback</label><select id="btRange"><option value="6mo">6 months</option><option value="1y" selected>1 year</option><option value="2y">2 years</option></select></div>
+      <div><button class="btn" id="btRun" style="width:100%;padding:9px;">Run backtest</button></div>
+    </div>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 2fr;">
+      <div><label>Charges per side (%)</label><input id="btCost" type="number" step="0.01" min="0" max="2" value="0.12"></div>
+      <div><label>Slippage per side (%)</label><input id="btSlip" type="number" step="0.01" min="0" max="2" value="0.05"></div>
+      <div class="metric-sub" style="padding-bottom:8px;">Results are <b>net of costs</b>: brokerage, STT, exchange fees, stamp duty and GST &asymp; 0.12% per side for delivery trades, plus slippage. Set both to 0 for gross results.</div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;">Strategies &mdash; check one or more to add them</label>
+      <div id="btStrategyList" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="rsi" checked> RSI Mean Reversion</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="macd"> MACD Crossover</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="emarsi"> EMA + RSI Combined</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="supertrend"> Supertrend Following</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="macross"> MA Crossover (50/200)</label>
+        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="bollinger"> Bollinger Breakout</label>
+      </div>
+      <div style="display:flex;gap:16px;align-items:center;">
+        <label class="toggle-mini"><input type="radio" name="btMode" value="compare" checked> Compare separately</label>
+        <label class="toggle-mini"><input type="radio" name="btMode" value="combined"> Combined (only trade when all checked strategies agree)</label>
+      </div>
+    </div>
+    <div class="strategy-desc" id="btStrategyDesc"></div>
+    <div class="bt-results" id="btResults" style="display:none;"></div>
+    <div style="overflow-x:auto;">
+    <button class="btn" id="exportBtBtn" style="margin-bottom:8px;display:none;">Export CSV</button>
+    <table id="btCompareTable" style="display:none;margin-bottom:14px;">
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
+      <tbody id="btCompareBody"></tbody>
+    </table></div>
+    <div class="chart-wrap" style="height:220px;display:none;" id="btChartWrap"><canvas id="btChart"></canvas></div>
+    <div class="legend" id="btChartLegend"></div>
+    <div id="btStatus" class="metric-sub"></div>
+  </section>
+</div>
+
+<div id="stockView">
+<div class="stock-head" id="stockHead"></div>
+
+<div class="view-tabs" id="viewTabs"><button class="vt-btn" data-vtab="overview">Overview</button><button class="vt-btn" data-vtab="chart">Chart</button><button class="vt-btn" data-vtab="fundamentals">Fundamentals</button><button class="vt-btn" data-vtab="derivatives">Derivatives</button></div>
+<div class="container">
+<div class="vtab-pane" id="vtab-overview" data-vtab="overview" style="display:none;">
+ <div class="ov-layout">
+ <div class="ov-main">
+  <section id="sec-overview">
+  <div class="grid cols-6" id="overviewGrid"></div>
+  </section>
+    <section id="sec-index" class="panel" style="display:none;">
+      <div class="panel-head"><h3 id="idxTitle">Index constituents</h3><span class="metric-sub" id="idxSub"></span></div>
+      <div id="idxPanel"></div>
+    </section>
+    <section id="sec-signal" class="panel">
+      <div class="panel-head">
+        <h3>Composite signal</h3>
+        <button class="btn" onclick="toggleInfo('signalInfo')">Why this signal?</button>
+      </div>
+      <div id="signalBody"></div>
+      <div class="info-box" id="signalInfo"></div>
+    </section>
+  </div>
+  <aside class="ov-side">
+    <section id="sec-news" class="panel">
+      <h3>News &amp; headlines</h3>
+      <div id="newsPanel"></div>
+    </section>
+  </aside>
+ </div>
+</div>
+<div class="vtab-pane" id="vtab-chart" data-vtab="chart" style="display:none;">
   <div class="grid cols-2" style="grid-template-columns:1fr;">    <section id="sec-chart" class="panel">
       <div class="panel-head"><h3>Chart</h3>
         <label class="toggle-mini" title="Draw the open stock's breakout level and its pattern trigger / stop / target on this chart"><input type="checkbox" id="chartLinesToggle" checked> Pattern &amp; breakout lines</label>
@@ -528,6 +668,10 @@
     <div class="panel-head"><h3>Verdict</h3><span class="metric-sub">screener, chart pattern and breakout for the open stock, side by side</span></div>
     <div id="verdictStrip" class="vd-strip"><div class="metric-sub">Loading the open stock…</div></div>
     <div id="screenerFocus"></div>
+  </section>
+  <section id="sec-idxscan" class="panel" style="display:none;">
+    <div class="panel-head"><h3 id="idxScanTitle">Index stocks</h3><span class="metric-sub" id="idxScanSub"></span></div>
+    <div id="idxScanBody"></div>
   </section>
   <section id="sec-patterns" class="panel">
     <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">4 timeframes at once &middot; 17 classic patterns &middot; real Upstox candles</span></div>
@@ -574,23 +718,6 @@
     <div id="patHitStatus" class="metric-sub" style="margin:6px 0;"></div>
     <div id="patHitOut" style="overflow-x:auto;"></div>
   </section>
-  <details class="panel" id="moreBox"><summary style="cursor:pointer;font-weight:600;">More: sector heatmap &middot; seasonality <span class="metric-sub" style="font-weight:400;">(loads when opened)</span></summary>
-<section id="sec-heatmap" class="panel">
-    <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
-    <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
-    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
-      <h3 style="margin:0 0 4px;">Seasonality explorer</h3>
-      <p class="desc" style="margin-bottom:8px;">Click any <b>index tile</b> above, or pick any index/stock here, for its month-by-month, quarterly and yearly returns over past years (e.g. does it rise every Feb&ndash;Mar?).</p>
-      <div class="filters" style="margin-bottom:10px;"><select id="seasPick" style="min-width:220px;"></select><button class="btn scan-btn" id="seasOpenBtn">Open seasonality</button><button class="btn" id="seasSectorBtn">Sector / index seasonality</button><button class="btn" id="seasPicksBtn">Seasonal picks (this &amp; next month)</button></div>
-      <div id="seasSectorBox"></div>
-      <div id="seasPicksBox" style="margin-top:10px;"></div>
-    </div>
-  </section>
-  <section id="sec-seasonality" class="panel">
-    <div class="panel-head"><h3>Seasonality</h3><span class="metric-sub">Month / quarter / year returns across past years &middot; real data</span></div>
-    <div id="seasStockBody"></div>
-  </section>
-</details>
   <section id="sec-priceaction" class="panel">
     <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
     <p class="desc">Pattern-based signals using real intraday OHLC data. All three strategies run on the currently selected stock. <strong>Signal</strong> shows the latest bar's reading. <strong>Backtest</strong> walks all historical bars forward individually without look-ahead — entries on confirmed closes, exits on stop-loss or target. Composite signal fires when at least 2 of 3 strategies agree.</p>
@@ -686,114 +813,6 @@
       <thead><tr><th>Strike</th><th>CE LTP</th><th>CE OI</th><th>CE Signal</th><th></th><th>PE LTP</th><th>PE OI</th><th>PE Signal</th><th></th></tr></thead>
       <tbody id="optBody"></tbody>
     </table></div>
-  </section>
-</div>
-<div class="vtab-pane" id="vtab-portfolio" data-vtab="portfolio" style="display:none;">
-  <section id="sec-watchlist" class="panel">
-    <div class="panel-head"><h3>Watchlist</h3>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span class="metric-sub">Click the &#9734; next to any stock's price to add it here</span>
-        <button class="btn" id="exportWatchlistBtn">Export CSV</button>
-      </div>
-    </div>
-    <div id="watchlistBody" class="metric-sub">No stocks watched yet.</div>
-  </section>
-  <section id="sec-positions" class="panel">
-    <div class="panel-head"><h3>Positions</h3><span class="metric-sub" id="positionsSummary"></span></div>
-    <p class="desc">Paper positions only &mdash; nothing here places a real order. While this tab is open, targets/stop-losses are checked every few seconds and trigger the banner at the top of the page. They're also checked server-side on a schedule (independent of your browser) and sent to Telegram if configured &mdash; see the README for setup. Each position also gets an automatic one-time <strong>deviation warning</strong> (amber ⚠️) at the halfway point between entry and stop-loss, as an early heads-up before the hard stop actually hits.</p>
-    <div style="overflow-x:auto;">
-    <table>
-      <thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>LTP</th><th>P&amp;L</th><th>Target</th><th>Stop-loss</th><th>Status</th><th></th></tr></thead>
-      <tbody id="positionsBody"></tbody>
-    </table>
-    </div>
-  </section>
-  <section id="sec-portfolio" class="panel">
-    <div class="panel-head"><h3>Portfolio</h3>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span class="metric-sub">Your real holdings &mdash; separate from the paper-trading Positions above</span>
-        <button class="btn" id="exportPortfolioBtn">Export CSV</button>
-      </div>
-    </div>
-    <div class="order-form" style="margin-top:0;">
-      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr 1fr auto;">
-        <div><label>Stock</label><select id="pfStock"></select></div>
-        <div><label>Quantity</label><input id="pfQty" type="number" step="1" placeholder="e.g. 10"></div>
-        <div><label>Avg. buy price (&#8377;)</label><input id="pfBuyPrice" type="number" step="0.01" placeholder="e.g. 1450"></div>
-        <div><label>Buy date (optional)</label><input id="pfBuyDate" type="date"></div>
-        <div style="display:flex;align-items:end;"><button class="btn" id="pfAddBtn" style="width:100%;">Add holding</button></div>
-      </div>
-    </div>
-    <div class="grid cols-4" id="portfolioSummary" style="margin-top:14px;"></div>
-    <div class="grid cols-2" style="margin-top:0;">
-      <div style="overflow-x:auto;">
-        <table>
-          <thead><tr><th>Stock</th><th>Qty</th><th>Avg. buy</th><th>LTP</th><th>Invested</th><th>Current value</th><th>P&amp;L</th><th></th></tr></thead>
-          <tbody id="portfolioBody"></tbody>
-        </table>
-      </div>
-      <div>
-        <div class="card-title" style="margin-bottom:8px;">Sector allocation</div>
-        <div class="chart-wrap" style="height:220px;"><canvas id="portfolioAllocChart"></canvas></div>
-      </div>
-    </div>
-  </section>
-  <section id="sec-alerts" class="panel">
-    <div class="panel-head"><h3>Price alerts</h3><span class="metric-sub">Simpler than a paper position &mdash; just get notified when a price level is crossed, no target/SL required</span></div>
-    <div class="order-form" style="margin-top:0;">
-      <div class="order-grid" style="grid-template-columns:1fr 1fr 1fr auto;">
-        <div><label>Stock</label><select id="alertStock"></select></div>
-        <div><label>Condition</label><select id="alertCondition"><option value="above">Price goes above</option><option value="below">Price goes below</option></select></div>
-        <div><label>Price (&#8377;)</label><input id="alertPrice" type="number" step="0.01" placeholder="e.g. 1500"></div>
-        <div style="display:flex;align-items:end;"><button class="btn" id="addAlertBtn" style="width:100%;">Add alert</button></div>
-      </div>
-    </div>
-    <div style="overflow-x:auto;">
-    <table style="margin-top:14px;">
-      <thead><tr><th>Stock</th><th>Condition</th><th>Level</th><th>Current</th><th>Status</th><th></th></tr></thead>
-      <tbody id="alertsBody"></tbody>
-    </table>
-    </div>
-  </section>
-  <section id="sec-backtest" class="panel">
-    <h3>Backtest a strategy</h3>
-    <p class="desc">Runs against real daily closing prices via the local proxy when it's reachable (up to 2 years), otherwise a synthetic extended series. See the chat for a summary of what published backtests report for each strategy, and read the caveat about overfitting before trusting any win rate &mdash; including this tool's.</p>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr auto;">
-      <div><label>Stock</label><select id="btStock"></select></div>
-      <div><label>Lookback</label><select id="btRange"><option value="6mo">6 months</option><option value="1y" selected>1 year</option><option value="2y">2 years</option></select></div>
-      <div><button class="btn" id="btRun" style="width:100%;padding:9px;">Run backtest</button></div>
-    </div>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr 2fr;">
-      <div><label>Charges per side (%)</label><input id="btCost" type="number" step="0.01" min="0" max="2" value="0.12"></div>
-      <div><label>Slippage per side (%)</label><input id="btSlip" type="number" step="0.01" min="0" max="2" value="0.05"></div>
-      <div class="metric-sub" style="padding-bottom:8px;">Results are <b>net of costs</b>: brokerage, STT, exchange fees, stamp duty and GST &asymp; 0.12% per side for delivery trades, plus slippage. Set both to 0 for gross results.</div>
-    </div>
-    <div style="margin-bottom:14px;">
-      <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:6px;">Strategies &mdash; check one or more to add them</label>
-      <div id="btStrategyList" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
-        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="rsi" checked> RSI Mean Reversion</label>
-        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="macd"> MACD Crossover</label>
-        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="emarsi"> EMA + RSI Combined</label>
-        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="supertrend"> Supertrend Following</label>
-        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="macross"> MA Crossover (50/200)</label>
-        <label class="toggle-mini"><input type="checkbox" class="bt-strat-cb" value="bollinger"> Bollinger Breakout</label>
-      </div>
-      <div style="display:flex;gap:16px;align-items:center;">
-        <label class="toggle-mini"><input type="radio" name="btMode" value="compare" checked> Compare separately</label>
-        <label class="toggle-mini"><input type="radio" name="btMode" value="combined"> Combined (only trade when all checked strategies agree)</label>
-      </div>
-    </div>
-    <div class="strategy-desc" id="btStrategyDesc"></div>
-    <div class="bt-results" id="btResults" style="display:none;"></div>
-    <div style="overflow-x:auto;">
-    <button class="btn" id="exportBtBtn" style="margin-bottom:8px;display:none;">Export CSV</button>
-    <table id="btCompareTable" style="display:none;margin-bottom:14px;">
-      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
-      <tbody id="btCompareBody"></tbody>
-    </table></div>
-    <div class="chart-wrap" style="height:220px;display:none;" id="btChartWrap"><canvas id="btChart"></canvas></div>
-    <div class="legend" id="btChartLegend"></div>
-    <div id="btStatus" class="metric-sub"></div>
   </section>
 </div>
   <div class="footer-note">NSE + BSE Analytics Dashboard &mdash; prices, candles, signals, patterns, shareholding and key ratios come from Upstox; news from Google News / ET / Moneycontrol. Cards marked <span class="sim-tag">SAMPLE</span> are illustrative placeholders, not market data. Educational use only &mdash; not investment advice.</div>
@@ -915,7 +934,7 @@ async function xsScanAll(quiet){
     const n=Object.keys(window.XS).length, al=STOCKS.concat(INDEX_ROWS_LIST).filter(s=>{ const d=window.XS[s[0]]; return d; }).length;
     say('Scanned '+new Date().toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+' · '+al+' stocks and indices on daily candles'+(tfs.length?' + '+tfs.map(t=>t==='1W'?'weekly':t==='1h'?'hourly':'15-min').join(', ')+' (shown rows)':'')+' · prices refresh every 60 s, the full scan only when you press Scan all');
   }catch(e){ say('Scan failed: '+e.message); }
-  finally{ xsBusy=false; if(btn) btn.disabled=false; try{ renderScreener(); renderVerdict(); }catch(e){} }
+  finally{ xsBusy=false; window.__xsDone=Date.now(); if(btn) btn.disabled=false; try{ renderScreener(); renderVerdict(); }catch(e){} try{ if(window.CURRENT&&window.ACTIVE_VTAB==='chart') renderIndexScan(window.CURRENT); }catch(e){} try{ if(window.APP_VIEW==='home') renderHomeAgree(); }catch(e){} }
 }
 /* ---------- the open stock: verdict strip + lines on the main chart ---------- */
 async function xsWeekly(sym){
@@ -967,7 +986,7 @@ setInterval(()=>{ if(window.ACTIVE_VTAB==='chart') xsApplyLines(false); },1500);
 document.addEventListener('change',e=>{ if(e.target&&e.target.id==='chartLinesToggle') xsApplyLines(true); });
 window.addEventListener('pat:loaded',e=>{ const D=e.detail||{}; window.__PATZ={sym:D.sym,z:D.zone}; if(window.CURRENT&&window.CURRENT.symbol===D.sym&&xsLineData&&xsLineData.sym===D.sym){ xsLineData.zone=D.zone; xsApplyLines(true); } });
 // "More" section loads only when opened
-document.addEventListener('toggle',e=>{ if(e.target&&e.target.id==='moreBox'&&e.target.open&&window.CURRENT){ try{ renderHeatmap(); renderSeasonalityInto(document.getElementById('seasStockBody'),window.CURRENT.symbol,window.CURRENT.name); }catch(x){} } },true);
+document.addEventListener('toggle',e=>{ if(e.target&&e.target.id==='moreBox'&&e.target.open){ try{ renderHeatmap(); if(window.CURRENT) renderSeasonalityInto(document.getElementById('seasStockBody'),window.CURRENT.symbol,window.CURRENT.name); }catch(x){} } },true);
 /* ---------- does agreement help? replay on past daily candles ---------- */
 async function xsReplay(){
   const box=document.getElementById('xsReplay'); if(!box||!window.BreakoutScanner) return;
@@ -1811,9 +1830,7 @@ function selectStock(symbol){
   const d = generateStockData(row[0],row[1],row[2],row[3]);
   window.CURRENT = d;
   window.ACTIVE_HORIZON = window.ACTIVE_HORIZON || 'swing';
-  window.IN_HOME_VIEW = false;
-  document.getElementById('homeView').style.display='none';
-  document.getElementById('stockView').style.display='block';
+  showView('stock');
   if(!window.OPEN_TABS.includes(row[0])){ window.OPEN_TABS.push(row[0]); persistTabs(); }
   renderTabBar();
   try{ history.replaceState(null,'','?symbol='+encodeURIComponent(row[0])); }catch(e){}
@@ -2281,8 +2298,9 @@ async function fetchScanHistory(symbols){ // symbols = app symbols (RELIANCE, NI
 
 function fmtVol(n){ if(n==null||isNaN(n)) return '\u2014'; if(n>=1e7) return (n/1e7).toFixed(2)+' Cr sh'; if(n>=1e5) return (n/1e5).toFixed(2)+' L sh'; return Math.round(n/1e3)+' K sh'; }
 window.SCREENER_LIVE = window.SCREENER_LIVE || {}; // symbol -> {price, prevClose}
-function signalCounts(){
-  return STOCKS.concat(INDEX_ROWS_LIST).map(s=>{
+function signalCounts(){ return STOCKS.concat(INDEX_ROWS_LIST).map(screenerRow); }
+function screenerRow(s){
+  {
     const d = generateStockData(s[0],s[1],s[2],s[3]);
     let live = window.SCREENER_LIVE[s[0]];
     if(window.CURRENT && window.CURRENT.symbol===s[0] && window.CURRENT.price && live) live={...live,price:window.CURRENT.price};
@@ -2297,7 +2315,7 @@ function signalCounts(){
       if(live.prevClose) d.changePct = (d.price/live.prevClose-1)*100;
     }
     return d;
-  });
+  }
 }
 
 async function scanScreenerLive(){
@@ -2428,7 +2446,7 @@ function renderScreener(){
       <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmtVol(d.volShares!=null?d.volShares:d.volumeCr*1e7)}</td>
       <td>${/buy|sell/.test(h.signal)?window.monBtn({source:'screener',symbol:d.symbol,side:/sell/.test(h.signal)?'SELL':'BUY',mode:displayHorizon==='intraday'?'intraday':'swing',label:'Screener '+h.signalLabel+' ('+displayHorizon+')',note:'Screener '+h.signalLabel+' on the '+displayHorizon+' view, score '+h.score+'.'},'+ Add'):''}</td></tr>`;
   }).join('');
-  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; selectStock(tr.dataset.symbol); try{ document.getElementById('sec-chart').scrollIntoView({behavior:'smooth',block:'start'}); }catch(x){} }));
+  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; tr.style.opacity='.5'; openStockChart(tr.dataset.symbol); }));
   xsChipsRender();
   body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
   renderScreenerFocus();
@@ -2449,7 +2467,7 @@ function renderScreenerFocus(){
     <div class="sf-cols"><div><div class="metric-sub" style="font-weight:600;">PUSHING IT UP</div><ul class="sf-list">${pros.map(li).join('')||'<li class="metric-sub">Nothing positive</li>'}</ul></div>
     <div><div class="metric-sub" style="font-weight:600;">HOLDING IT BACK</div><ul class="sf-list">${cons.map(li).join('')||'<li class="metric-sub">Nothing negative</li>'}</ul></div></div>
     <details><summary class="metric-sub" style="cursor:pointer;">Full score breakdown</summary>${scoreBreakdownHtml(h)}</details>
-    <div class="metric-sub" style="margin-top:6px;">Click any row in the table below to open that stock; this panel then explains its signal. The view (Intraday / Swing / Long-term) follows the horizon picker.</div></div>`;
+    <div class="metric-sub" style="margin-top:6px;">The Intraday / Swing / Long-term view follows the horizon picker in the Scanner.</div></div>`;
 }
 { const _rs=renderSignal; renderSignal=function(d){ _rs(d); try{ renderScreenerFocus(); }catch(e){} try{ if(window.ACTIVE_VTAB==='chart') renderVerdict(); }catch(e){} }; }
 document.getElementById('screenerHorizon')?.addEventListener('change', renderScreener);
@@ -2487,22 +2505,44 @@ searchResults.addEventListener('click',(e)=>{
   if(item) selectStock(item.dataset.symbol);
 });
 
-/* Sidebar navigation */
+/* Sidebar navigation: market-wide pages (Home, Scanner, Portfolio) plus Calls and Status, which open their own screens */
+const APP_VIEWS={home:'homeView',scan:'scanView',portfolio:'portView',stock:'stockView'};
+function showView(v){
+  if(!APP_VIEWS[v]) v='home';
+  window.APP_VIEW=v; window.IN_HOME_VIEW=(v!=='stock');
+  Object.entries(APP_VIEWS).forEach(([k,id])=>{ const el=document.getElementById(id); if(el) el.style.display=(k===v)?'block':'none'; });
+  document.querySelectorAll('#rail .rail-btn[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  if(v!=='stock'){ try{ stopLiveFeed(); }catch(e){} setTabActive(null); try{ history.replaceState(null,'','?view='+v); }catch(e){} }
+  else if(window.CURRENT){ setTabActive(window.CURRENT.symbol); try{ if(typeof startLiveFeed==='function') startLiveFeed(window.CURRENT); }catch(e){} }
+  if(v==='scan') renderScanView();
+  if(v==='portfolio') renderPortView();
+  window.scrollTo(0,0);
+}
+// open a stock on its Chart tab (from the Scanner, Home or an index's stock list)
+function openStockChart(sym){ try{ localStorage.setItem('vtab','chart'); }catch(e){} openTab(sym); setTimeout(()=>{ try{ showTab('chart'); }catch(e){} },0); }
+function renderScanView(){
+  try{ renderScreener(); }catch(e){}
+  if((!window.SCREENER_SRC || !Object.keys(window.XS||{}).length) && !window.__scanning){ window.__scanning=true; xsScanAll(true).finally(()=>{ window.__scanning=false; }); }
+  if(document.getElementById('moreBox')?.open){ try{ renderHeatmap(); }catch(e){} }
+}
+function renderPortView(){
+  const d=window.CURRENT||generateStockData(STOCKS[0][0],STOCKS[0][1],STOCKS[0][2],STOCKS[0][3]);
+  [()=>renderBacktest(d),()=>renderPositions(),()=>populateBacktestStockList(),()=>populateAlertStockList(),()=>renderPriceAlerts(),()=>renderPortfolio(),()=>renderWatchlist()].forEach(f=>{ try{ f(); }catch(e){ console.warn(e); } });
+}
 document.getElementById('rail').addEventListener('click',(e)=>{
   const btn=e.target.closest('.rail-btn');
   if(!btn) return;
-  if(btn.id==='collapseBtn'){
-    document.getElementById('rail').classList.toggle('collapsed');
-    document.body.style.paddingLeft = document.getElementById('rail').classList.contains('collapsed') ? '0' : '56px';
-    document.getElementById('rail').style.transform = document.getElementById('rail').classList.contains('collapsed') ? 'translateX(-56px)' : 'none';
-    return;
-  }
-  document.querySelectorAll('.rail-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  if(btn.id==='homeBtn'){ showHome(); return; }
-  if(window.IN_HOME_VIEW){ showStockView(); }
-  gotoSection(btn.dataset.target);
+  if(btn.id==='collapseBtn'){ document.body.classList.add('rail-collapsed'); return; }
+  const v=btn.dataset.view;
+  if(v==='calls'){ document.getElementById('monBtn')?.click(); document.querySelectorAll('#rail .rail-btn[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view==='calls')); return; }
+  if(v!=='status') document.getElementById('cmClose')?.click();
+  if(v==='home'){ showHome(); return; }
+  if(v==='status'){ document.getElementById('statusBtn')?.click(); return; }
+  showView(v);
 });
+document.addEventListener('cm:closed',()=>{ document.querySelectorAll('#rail .rail-btn[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===window.APP_VIEW)); });
+document.addEventListener('cm:data',e=>{ const d=e.detail||{}, n=(d.active||[]).length, b=document.getElementById('railCallsBadge'); if(b){ b.textContent=n; b.style.display=n?'':'none'; b.title=n+' open'; } });
+document.getElementById('railReopen')?.addEventListener('click',()=>document.body.classList.remove('rail-collapsed'));
 
 /* ============================================================
    HOME VIEW
@@ -2513,12 +2553,14 @@ document.getElementById('rail').addEventListener('click',(e)=>{
    VIEW TABS — each group of panels renders only when its tab is
    opened (once per symbol), so nothing off-screen is fetched/drawn.
    ============================================================ */
-const VTABS=['overview','chart','fundamentals','derivatives','portfolio'];
+const VTABS=['overview','chart','fundamentals','derivatives'];
 const SEC_TAB={'sec-overview':'overview','sec-signal':'overview','sec-news':'overview',
   'sec-chart':'chart','sec-patterns':'chart','sec-priceaction':'chart',
   'sec-fourpanel':'fundamentals','sec-compare':'fundamentals',
-  'sec-screener':'chart','sec-heatmap':'chart','sec-seasonality':'chart','sec-verdict':'chart',
+  'sec-verdict':'chart','sec-idxscan':'chart',
   'sec-fno':'derivatives','sec-options':'derivatives',
+};
+const SEC_VIEW={'sec-screener':'scan','sec-heatmap':'scan','sec-seasonality':'scan','moreBox':'scan',
   'sec-watchlist':'portfolio','sec-positions':'portfolio','sec-portfolio':'portfolio','sec-alerts':'portfolio','sec-backtest':'portfolio'};
 const TAB_DONE={}; // tab -> symbol it was last rendered for
 function safe(fn){ try{ fn(); }catch(e){ console.error('tab render failed:',e); } }
@@ -2527,7 +2569,7 @@ function currentTab(){
   let t=null;
   try{ const m=/[#&]tab=(\w+)/.exec(location.hash); if(m) t=m[1]; }catch(e){}
   if(!t){ try{ t=localStorage.getItem('vtab'); }catch(e){} }
-  if(t==='screener') t='chart'; // merged into Scan & charts
+  if(t==='screener') t='chart';
   return VTABS.includes(t)?t:(window.ACTIVE_VTAB||'overview');
 }
 function runTab(t,d,refresh){
@@ -2535,8 +2577,7 @@ function runTab(t,d,refresh){
   const J={
     overview:()=>{ safe(()=>renderOverview(d)); safe(()=>renderIndexPanel(d)); safe(()=>renderSignal(d)); if(!refresh) safe(()=>renderNews(d)); },
     chart:()=>{ if(!refresh){ safe(()=>renderPriceChart(d)); safe(()=>populatePaStockList()); }
-      safe(()=>renderScreener()); safe(()=>renderVerdict()); if((!window.SCREENER_SRC || !Object.keys(window.XS||{}).length) && !window.__scanning){ window.__scanning=true; xsScanAll(true).finally(()=>{window.__scanning=false;}); }
-      if(!refresh && document.getElementById('moreBox')?.open){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
+      safe(()=>renderVerdict()); safe(()=>renderScreenerFocus()); safe(()=>renderIndexScan(d)); },
     fundamentals:()=>{ safe(()=>renderFourPanel(d)); if(!refresh){ safe(()=>renderSegments(d)); safe(()=>renderMacro(d)); safe(()=>renderPeers(d)); safe(()=>renderVolumeProfile(d)); } },
     screener:()=>{ safe(()=>renderScreener()); if(!window.SCREENER_SRC && !window.__scanning){ window.__scanning=true; scanScreenerLive().finally(()=>{window.__scanning=false;}); } if(!refresh){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
     derivatives:()=>{ safe(()=>renderFno(d)); safe(()=>renderFnoIndices()); },
@@ -2559,6 +2600,8 @@ function showTab(t,opts){
   if(!opts.noScroll) window.scrollTo(0,0);
 }
 function gotoSection(id){
+  const v=SEC_VIEW[id];
+  if(v){ if(window.APP_VIEW!==v) showView(v); if(id==='sec-heatmap'||id==='sec-seasonality'){ const m=document.getElementById('moreBox'); if(m) m.open=true; } setTimeout(()=>{ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },60); return; }
   if(window.IN_HOME_VIEW){ showStockView(); }
   const t=SEC_TAB[id];
   if(t && window.ACTIVE_VTAB!==t) showTab(t,{noScroll:true});
@@ -2612,7 +2655,7 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
   function ago(ts){ if(!ts) return 'never'; const m=Math.round((Date.now()-new Date(ts))/60000); return m<1?'just now':m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':Math.round(m/1440)+' d ago'; }
   async function openStatus(){
     const ov=document.createElement('div'); ov.className='ov';
-    ov.innerHTML='<div class="ov-card"><h3>System status</h3><div id="stBody" class="metric-sub">Checking…</div><div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"><button class="btn" id="stTest">Send test Telegram message</button><button class="btn" id="stLogout" style="display:none;">Log out</button><button class="btn" id="stClose" style="margin-left:auto;">Close</button></div><div id="stMsg" class="metric-sub" style="margin-top:8px;"></div></div>';
+    ov.innerHTML='<div class="ov-card"><h3>System status</h3><div id="stBody" class="metric-sub">Checking…</div><div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"><a class="btn" href="/upstox-login" target="_blank" rel="noopener" style="text-decoration:none;border-color:var(--blue);color:var(--blue);">Connect / reconnect Upstox</a><button class="btn" id="stTest">Send test Telegram message</button><button class="btn" id="stLogout" style="display:none;">Log out</button><button class="btn" id="stClose" style="margin-left:auto;">Close</button></div><div id="stMsg" class="metric-sub" style="margin-top:8px;"></div></div>';
     document.body.appendChild(ov);
     ov.addEventListener('click',e=>{ if(e.target===ov||e.target.id==='stClose') ov.remove(); });
     if(window.AUTH_REQUIRED) ov.querySelector('#stLogout').style.display='';
@@ -2877,7 +2920,7 @@ window.cbtBtn=function(c){
   const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
   let data=null, view=null, timer=null, sound=LS.get('cmSound',false), actx=null, inited=false, srcF=LS.get('cmSrc','all'), typF=LS.get('cmType','all');
   const kindOf=c=>c.kind==='option'?'option':'stock', TYP={stock:'Stocks',option:'Index options'};
-  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scan & charts'}, srcOf=c=>c.source||'calls';
+  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scanner'}, srcOf=c=>c.source||'calls';
   const pickSum=x=>!x?null:srcF==='all'?x:(x.bySource?x.bySource[srcF]:(srcF==='calls'?x:null));
   // ---- sound (Web Audio; needs one click to unlock) ----
   function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
@@ -2901,6 +2944,7 @@ window.cbtBtn=function(c){
     if(document.hidden&&!LS.get('cmBg',true)) return;
     try{ const r=await fetch('/api/calls/monitor',{cache:'no-store'}); if(!r.ok) throw 0; data=await r.json();
       (data.active||[]).forEach(c=>addToWatchlist(c.symbol)); handleNew(data.events||[]); }catch(e){ if(data) data.stale=true; }
+    window.CM_DATA=data; try{ document.dispatchEvent(new CustomEvent('cm:data',{detail:data})); }catch(e){}
     if(view) draw();
   }
   function schedule(){ clearInterval(timer); timer=setInterval(poll, (data&&data.market==='open')?15000:60000); }
@@ -3005,7 +3049,7 @@ window.cbtBtn=function(c){
     const pn=act.reduce((s,c)=>s+(c.pnlPct||0),0), K=wlb(shut), spl=splitTxt(shut);
     const sec=(a,f)=>a.filter(f);
     b.innerHTML=`
-      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scan &amp; charts')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
+      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scanner')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><button class="btn" data-cmcopy="text" style="font-size:12px;padding:5px 10px;">📋 Copy summary as text</button><button class="btn" data-cmcopy="image" style="font-size:12px;padding:5px 10px;">🖼 Copy summary as image</button><span class="metric-sub" id="cmCopyMsg">${srcF==='all'?'Copies everything shown below':'Copies the '+SRC[srcF]+' view'}</span></div>
       <div class="cm-kpis cm-k5" style="margin-bottom:12px;"><div>Watching<b>${act.length}</b></div><div>Closed today<b>${shut.length} <span style="font-size:11px;font-weight:400">(${K.w}W / ${K.l}L / ${K.be} BE, ${sg(K.net)})</span></b>${spl?`<div class="cm-sub" style="font-size:10.5px;">${spl}</div>`:''}</div><div>In profit<b class="cm-b">${sec(act,c=>c.pnlPct>0.05).length}</b></div><div>In loss<b class="cm-s">${sec(act,c=>c.pnlPct<-0.05).length}</b></div><div>Combined running<b class="${pn>0?'cm-b':pn<0?'cm-s':''}">${sg(Math.round(pn*100)/100)}</b></div></div>
       <div class="cm-cols"><div>
@@ -3035,9 +3079,10 @@ window.cbtBtn=function(c){
   }
   function open(){
     if(view) return; view=document.createElement('div'); view.className='cm';
-    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔇 Sound off</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
+    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔇 Sound off</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmCalls" style="border-color:var(--blue);color:var(--blue);" title="Every trade call with entry, stop, targets, the strategy lab and backtests">Trade Calls</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
     document.body.appendChild(view);
-    view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; };
+    view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; document.dispatchEvent(new Event('cm:closed')); };
+    view.querySelector('#cmCalls').onclick=()=>document.getElementById('callsBtn')?.click();
     view.querySelector('#cmSnd').onclick=()=>{ sound=!sound; LS.set('cmSound',sound); if(sound){ ensureAudio(); beep('info'); } draw(); };
     view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k); };
     view.querySelector('#cmNote').onclick=async()=>{ try{ const r=await Notification.requestPermission(); alert(r==='granted'?'Browser alerts on: you will get a pop-up when this tab is in the background.':'Browser alerts were not allowed.'); }catch(e){ alert('This browser does not support alerts.'); } };
@@ -3069,128 +3114,151 @@ window.cbtBtn=function(c){
 })();
 
 function showHome(){
-  window.IN_HOME_VIEW = true;
-  stopLiveFeed();
-  try{ history.replaceState(null,'','?'); }catch(e){}
-  document.getElementById('homeView').style.display='block';
-  document.getElementById('stockView').style.display='none';
+  showView('home');
   renderHome();
-  setTabActive(null);
 }
-function showStockView(){
-  window.IN_HOME_VIEW = false;
-  document.getElementById('homeView').style.display='none';
-  document.getElementById('stockView').style.display='block';
-}
+function showStockView(){ showView('stock'); }
+/* Home: the market at a glance + your trading day + where everything agrees. Real Upstox data only; one quote
+   request for every stock and index, the Calls Monitor's own data for the trading day. */
+const HOME={q:{},qAt:0,mov:'gain',gate:null,calls:null,timer:null};
+const HOME_SECTORS=[['NIFTYIT','IT'],['BANKNIFTY','Bank'],['NIFTYAUTO','Auto'],['NIFTYMETAL','Metal'],['NIFTYENERGY','Energy'],['NIFTYPHARMA','Pharma'],['NIFTYFMCG','FMCG'],['NIFTYREALTY','Realty'],['NIFTYPSUBANK','PSU Bank'],['NIFTYINFRA','Infra']];
+const hSg=(v,d)=>v==null||!isFinite(v)?'&mdash;':(v>0?'+':'')+v.toFixed(d==null?2:d)+'%';
+const hCls=v=>v==null?'':v>0?'up':v<0?'down':'';
 function renderHome(){
-  const openPositions = (window.POSITIONS||[]).filter(p=>p.status==='open');
-  // Show simulated data immediately, then upgrade to real data async
-  const all = STOCKS.map(s=>generateStockData(s[0],s[1],s[2],s[3]));
-  let advancers = all.filter(d=>d.changePct>0).length;
-  let decliners = all.filter(d=>d.changePct<0).length;
-  document.getElementById('homeView').innerHTML = `
-    <div class="home-hero">
-      <h2>Market overview</h2>
-      <p>Live index snapshot + real-time movers across ${STOCKS.length} covered stocks. Pick any stock from the search bar, screener, or the movers below.</p>
-    </div>
-    <div class="grid cols-4" id="homeIndexCards" style="margin-bottom:0;">
-      <div class="card" id="idx-NIFTY50"><div class="card-title">Nifty 50</div><div class="metric-val" id="idx-val-NIFTY50">—</div><div class="metric-sub" id="idx-chg-NIFTY50">Loading…</div></div>
-      <div class="card" id="idx-BANKNIFTY"><div class="card-title">Bank Nifty</div><div class="metric-val" id="idx-val-BANKNIFTY">—</div><div class="metric-sub" id="idx-chg-BANKNIFTY">Loading…</div></div>
-      <div class="card" id="idx-SENSEX"><div class="card-title">Sensex</div><div class="metric-val" id="idx-val-SENSEX">—</div><div class="metric-sub" id="idx-chg-SENSEX">Loading…</div></div>
-      <div class="card"><div class="card-title">Market breadth (${STOCKS.length} stocks)</div>
-        <div class="metric-val" style="font-size:16px;" id="home-breadth-val"><span class="up">▲ ${advancers}</span> &nbsp; <span class="down">▼ ${decliners}</span></div>
-        <div class="metric-sub" id="home-breadth-pct">${((advancers/STOCKS.length)*100).toFixed(0)}% advancing</div>
-      </div>
-    </div>
-    <div class="grid cols-2b" style="margin-top:0;">
-      <div class="panel">
-        <h3 style="color:var(--green);">Top gainers <span class="metric-sub" id="gainers-status" style="font-size:11px;">updating…</span></h3>
-        <div id="gainers-list">
-          ${[...all].sort((a,b)=>b.changePct-a.changePct).slice(0,5).map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">${chgTxt(d.price,d.changePct)}</span></div>`).join('')}
-        </div>
-      </div>
-      <div class="panel">
-        <h3 style="color:var(--red);">Top losers <span class="metric-sub" id="losers-status" style="font-size:11px;">updating…</span></h3>
-        <div id="losers-list">
-          ${[...all].sort((a,b)=>a.changePct-b.changePct).slice(0,5).map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="down">${chgTxt(d.price,d.changePct)}</span></div>`).join('')}
-        </div>
-      </div>
-    </div>
-    <div class="panel">
-      <h3>Open positions</h3>
-      ${openPositions.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Stock</th><th>Side</th><th>Entry</th><th>Target</th><th>Stop-loss</th></tr></thead><tbody>
-        ${openPositions.map(p=>`<tr class="row-click" data-symbol="${p.symbol}"><td>${p.symbol}</td><td class="${p.side==='buy'?'up':'down'}">${p.side.toUpperCase()}</td><td>&#8377;${fmt(p.entryPrice,2)}</td><td>&#8377;${fmt(p.target,2)}</td><td>&#8377;${fmt(p.stopLoss,2)}</td></tr>`).join('')}
-        </tbody></table></div>` : '<div class="metric-sub">No open positions. Open a stock and click Buy or Sell to paper-trade it.</div>'}
-    </div>`;
-  document.querySelectorAll('#homeView [data-symbol]').forEach(el=>el.addEventListener('click',()=>{ openTab(el.dataset.symbol); }));
-
-  // Fetch live index data
-  const indices = [
-    {id:'NIFTY50', yahoo:'^NSEI'},
-    {id:'BANKNIFTY', yahoo:'^NSEBANK'},
-    {id:'SENSEX', yahoo:'^BSESN'}
-  ];
-  indices.forEach(async ({id, yahoo})=>{
-    try{
-      const resp = await fetch(`/api/quote/${encodeURIComponent(yahoo)}`, {cache:'no-store'});
-      const data = await resp.json();
-      if(data.error) throw new Error(data.error);
-      const valEl = document.getElementById('idx-val-'+id);
-      const chgEl = document.getElementById('idx-chg-'+id);
-      if(valEl) valEl.textContent = fmt(data.price, 2);
-      if(chgEl){
-        chgEl.className = 'metric-sub ' + (data.changePct>=0?'up':'down');
-        chgEl.textContent = chgTxt(data.price, data.changePct);
-      }
-    }catch(e){
-      const chgEl = document.getElementById('idx-chg-'+id);
-      if(chgEl) chgEl.textContent = 'Unavailable';
-    }
-  });
-
-  // Fetch real daily change for all stocks in batches and update movers
-  (async ()=>{
-    const liveData = []; // {symbol, sector, changePct}
-    // Batch into groups of 5 to avoid hammering Yahoo too hard
-    const batches = [];
-    for(let i=0;i<STOCKS.length;i+=5) batches.push(STOCKS.slice(i,i+5));
-    for(const batch of batches){
-      if(!document.getElementById('gainers-list')) return; // user navigated away
-      await Promise.all(batch.map(async s=>{
-        try{
-          const resp = await fetch(`/api/quote/${encodeURIComponent(s[0])}`, {cache:'no-store'});
-          const q = await resp.json();
-          if(q.price && !q.error) liveData.push({symbol:s[0], sector:s[2], changePct:q.changePct||0, price:q.price});
-        }catch(e){ /* skip this stock this refresh */ }
-      }));
-      // Update UI after each batch so it fills in progressively
-      if(liveData.length>=5){
-        const sorted = [...liveData].sort((a,b)=>b.changePct-a.changePct);
-        const topGainers = sorted.slice(0,5);
-        const topLosers = sorted.slice(-5).reverse();
-        const adv = liveData.filter(d=>d.changePct>0).length;
-        const dec = liveData.filter(d=>d.changePct<0).length;
-        const gEl=document.getElementById('gainers-list');
-        const lEl=document.getElementById('losers-list');
-        const bEl=document.getElementById('home-breadth-val');
-        const bpEl=document.getElementById('home-breadth-pct');
-        const gsEl=document.getElementById('gainers-status');
-        const lsEl=document.getElementById('losers-status');
-        if(gEl) gEl.innerHTML=topGainers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="up">${chgTxt(d.price,d.changePct)}</span></div>`).join('');
-        if(lEl) lEl.innerHTML=topLosers.map(d=>`<div class="mover-row" data-symbol="${d.symbol}"><span>${d.symbol} <span class="lbl">${d.sector}</span></span><span class="down">${chgTxt(d.price,d.changePct)}</span></div>`).join('');
-        if(bEl) bEl.innerHTML=`<span class="up">▲ ${adv}</span> &nbsp; <span class="down">▼ ${dec}</span>`;
-        if(bpEl) bpEl.textContent=`${((adv/liveData.length)*100).toFixed(0)}% advancing (${liveData.length}/${STOCKS.length} loaded)`;
-        if(gsEl) gsEl.textContent=`${liveData.length}/${STOCKS.length} loaded`;
-        if(lsEl) lsEl.textContent=`${liveData.length}/${STOCKS.length} loaded`;
-        // Re-wire click handlers for dynamically added rows
-        document.querySelectorAll('#gainers-list [data-symbol], #losers-list [data-symbol]').forEach(el=>el.addEventListener('click',()=>openTab(el.dataset.symbol)));
-      }
-    }
-    const gsEl=document.getElementById('gainers-status');
-    const lsEl=document.getElementById('losers-status');
-    if(gsEl) gsEl.textContent='live';
-    if(lsEl) lsEl.textContent='live';
-  })();
+  const el=document.getElementById('homeView'); if(!el) return;
+  el.innerHTML=`
+  <section class="hm-row hm-cards" aria-label="Today at a glance">
+    ${[['NIFTY','Nifty 50'],['BANKNIFTY','Bank Nifty'],['SENSEX','Sensex']].map(([s,n])=>`<a href="#" class="card hm-idx" data-open="${s}"><div class="hm-top"><span>${n}</span><span class="metric-sub">open chart &rarr;</span></div><div class="hm-big" id="hmv-${s}">&hellip;</div><div class="hm-chg" id="hmc-${s}"></div></a>`).join('')}
+    <div class="card"><div class="hm-top"><span>Market breadth</span><span class="metric-sub" id="hmBreadthN"></span></div>
+      <div class="hm-big" id="hmBreadth">&hellip;</div><div class="hm-bar" id="hmBreadthBar"></div>
+      <div class="metric-sub" id="hmBreadthSub"></div>
+      <div class="hm-vix"><span class="metric-sub">India VIX</span><span id="hmVix">&mdash;</span></div></div>
+  </section>
+  <div class="hm-row hm-two">
+    <section class="panel hm-panel" aria-label="Your trading day">
+      <div class="hm-head"><h3>Your trading day</h3><span class="metric-sub" id="hmDayNote"></span></div>
+      <div class="hm-stats" id="hmDayStats"><div class="metric-sub">Loading&hellip;</div></div>
+      <div class="hm-list" id="hmDayList"></div>
+      <div class="hm-btns"><button class="btn hm-primary" data-hm="monitor">Open Calls Monitor</button><button class="btn" data-hm="calls">Trade Calls</button></div>
+    </section>
+    <section class="panel hm-panel" aria-label="What the system can call today">
+      <div class="hm-head"><h3>Live today</h3><span class="metric-sub" id="hmDayType"></span></div>
+      <div id="hmLive" class="hm-list"><div class="metric-sub">Loading the strategy lab&hellip;</div></div>
+    </section>
+  </div>
+  <section class="panel hm-panel" aria-label="Where everything agrees">
+    <div class="hm-head"><h3>Where everything agrees</h3><span class="metric-sub" id="hmAgreeNote">screener + daily pattern + daily breakout &middot; <a href="#" data-goview="scan">open Scanner</a></span></div>
+    <div class="hm-two" id="hmAgree"><div class="metric-sub">Waiting for the scan&hellip;</div></div>
+  </section>
+  <div class="hm-row hm-two">
+    <section class="panel hm-panel" aria-label="Sector strength"><div class="hm-head"><h3>Sector strength today</h3><span class="metric-sub">click to open the index</span></div><div id="hmSectors"></div></section>
+    <section class="panel hm-panel" aria-label="Top movers"><div class="hm-head"><h3>Top movers</h3>
+      <div class="hm-seg" role="group" aria-label="Movers"><button data-mov="gain">Gainers</button><button data-mov="lose">Losers</button><button data-mov="val">Most traded</button></div></div>
+      <div id="hmMovers"></div></section>
+  </div>
+  <div class="hm-row hm-two">
+    <section class="panel hm-panel" aria-label="Watchlist"><div class="hm-head"><h3>Watchlist</h3><a href="#" class="metric-sub" data-goview="portfolio">manage</a></div><div id="hmWatch"></div></section>
+    <section class="panel hm-panel" aria-label="Paper positions"><div class="hm-head"><h3>Paper positions</h3><a href="#" class="metric-sub" data-goview="portfolio">all positions</a></div><div id="hmPos"></div></section>
+  </div>
+  <div class="metric-sub" style="margin:4px 0 20px;">Real Upstox data &middot; rule-based screens measured on past data &middot; not investment advice</div>`;
+  el.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); a.style.opacity='.6'; openStockChart(a.dataset.open); }));
+  el.querySelector('[data-hm="monitor"]').onclick=()=>document.getElementById('callsNavBtn')?.click();
+  el.querySelector('[data-hm="calls"]').onclick=()=>document.getElementById('callsBtn')?.click();
+  el.querySelectorAll('[data-mov]').forEach(b=>b.onclick=()=>{ HOME.mov=b.dataset.mov; renderHomeMovers(); });
+  if(window.CM_DATA) renderHomeDay(window.CM_DATA); else fetch('/api/calls/monitor',{cache:'no-store'}).then(r=>r.json()).then(d=>{ window.CM_DATA=d; renderHomeDay(d); }).catch(()=>{ const s=document.getElementById('hmDayStats'); if(s) s.innerHTML='<div class="metric-sub">Calls Monitor unavailable right now.</div>'; });
+  renderHomePositions(); renderHomeAgree();
+  homeQuotes(true);
+  clearInterval(HOME.timer); HOME.timer=setInterval(()=>{ if(window.APP_VIEW==='home'&&!document.hidden) homeQuotes(false); },60000);
+}
+document.addEventListener('cm:data',e=>{ if(window.APP_VIEW==='home') renderHomeDay(e.detail); });
+async function homeQuotes(first){
+  if(first && Date.now()-HOME.qAt<30000) { renderHomeQuotes(); }
+  else {
+    const syms=INDEX_LIST.map(r=>r[0]).concat(STOCKS.map(s=>s[0]));
+    try{ const r=await fetch('/api/quotes-live?symbols='+encodeURIComponent(syms.join(',')),{cache:'no-store'}); if(r.ok){ const m=await r.json(); if(Object.keys(m).length){ HOME.q=m; HOME.qAt=Date.now();
+      Object.keys(m).forEach(k=>{ window.SCREENER_LIVE[k]={price:m[k].price,prevClose:m[k].prevClose,volume:m[k].volume}; }); } } }catch(e){}
+    if(window.APP_VIEW!=='home') return;
+    renderHomeQuotes();
+  }
+  if(first){ try{ HOME.calls=await fetch('/api/calls',{cache:'no-store'}).then(r=>r.json()); }catch(e){} try{ HOME.gate=await fetch('/api/calls/gate',{cache:'no-store'}).then(r=>r.json()); }catch(e){} if(window.APP_VIEW==='home'){ renderHomeLive(); renderHomeQuotes(); } }
+  if(first && (!window.SCREENER_SRC||!Object.keys(window.XS||{}).length) && !window.__scanning){ window.__scanning=true; setTimeout(()=>xsScanAll(true).finally(()=>{ window.__scanning=false; }),800); }
+}
+function renderHomeQuotes(){
+  const q=HOME.q, set=(id,h)=>{ const e=document.getElementById(id); if(e) e.innerHTML=h; };
+  if(!Object.keys(q).length){ ['NIFTY','BANKNIFTY','SENSEX'].forEach(s=>set('hmv-'+s,'&mdash;')); set('hmBreadth','<span class="metric-sub" style="font-size:13px;">Prices unavailable (is Upstox connected? see Status)</span>'); return; }
+  ['NIFTY','BANKNIFTY','SENSEX'].forEach(s=>{ const x=q[s]; if(!x) return; set('hmv-'+s,x.price.toLocaleString('en-IN',{maximumFractionDigits:2})); set('hmc-'+s,`<span class="${hCls(x.changePct)}">${chgTxt(x.price,x.changePct)}</span>`); });
+  const st=STOCKS.map(s=>q[s[0]]).filter(Boolean), up=st.filter(x=>x.changePct>0).length, dn=st.filter(x=>x.changePct<0).length;
+  set('hmBreadth',`<span class="up">&#9650; ${up}</span> <span class="metric-sub">/</span> <span class="down">&#9660; ${dn}</span>`);
+  set('hmBreadthN',st.length+' stocks');
+  const pu=st.length?up/st.length*100:0; set('hmBreadthBar',`<span style="width:${pu}%;background:var(--green)"></span><span style="width:${st.length?dn/st.length*100:0}%;background:var(--red)"></span>`);
+  const b50=HOME.calls&&HOME.calls.scan&&HOME.calls.scan.breadthPct;
+  set('hmBreadthSub',`${pu.toFixed(0)}% advancing${b50!=null?' &middot; '+Math.round(b50)+'% of F&amp;O stocks above their 50-day average':''}`);
+  const v=q.INDIAVIX; if(v) set('hmVix',`${fmt(v.price,2)} <span class="${hCls(-v.changePct)} metric-sub">(${hSg(v.changePct)})</span>`);
+  const n=q.NIFTY&&q.NIFTY.changePct, dt=n==null?null:n>=0.4?'up':n<=-0.4?'down':'flat';
+  set('hmDayType',n==null?'':`Market type now: <b class="${dt==='up'?'up':dt==='down'?'down':''}">${({up:'up day',down:'down day',flat:'sideways'})[dt]}</b> (Nifty ${hSg(n)})`);
+  // sector strength
+  const sec=HOME_SECTORS.map(([s,nm])=>({s,nm,c:q[s]?q[s].changePct:null})).filter(x=>x.c!=null).sort((a,b)=>b.c-a.c);
+  const mx=Math.max(1,...sec.map(x=>Math.abs(x.c)));
+  set('hmSectors',sec.length?sec.map(x=>`<a href="#" class="hm-sec" data-open="${x.s}"><span>Nifty ${x.nm}</span><span class="hm-secbar"><span style="${x.c>=0?'left:50%':'right:50%'};width:${Math.abs(x.c)/mx*50}%;background:${x.c>=0?'var(--green)':'var(--red)'}"></span></span><span class="${hCls(x.c)}">${hSg(x.c)}</span></a>`).join(''):'<div class="metric-sub">&mdash;</div>');
+  document.querySelectorAll('#hmSectors [data-open]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); a.style.opacity='.6'; openStockChart(a.dataset.open); }));
+  renderHomeMovers(); renderHomeWatch(); if(HOME.gate) renderHomeLive();
+}
+function renderHomeMovers(){
+  const box=document.getElementById('hmMovers'); if(!box) return;
+  document.querySelectorAll('[data-mov]').forEach(b=>b.classList.toggle('on',b.dataset.mov===HOME.mov));
+  const q=HOME.q; let L=STOCKS.filter(s=>q[s[0]]).map(s=>({s:s[0],sec:s[2],p:q[s[0]].price,c:q[s[0]].changePct,v:q[s[0]].volume?q[s[0]].price*q[s[0]].volume/1e7:0}));
+  if(!L.length){ box.innerHTML='<div class="metric-sub">&mdash;</div>'; return; }
+  L.sort(HOME.mov==='gain'?(a,b)=>b.c-a.c:HOME.mov==='lose'?(a,b)=>a.c-b.c:(a,b)=>b.v-a.v);
+  box.innerHTML=L.slice(0,6).map(x=>`<a href="#" class="hm-li" data-open="${x.s}"><span><b>${x.s}</b> <span class="metric-sub">${x.sec}</span></span><span>${HOME.mov==='val'?'<span class="metric-sub">&#8377;'+fmt(x.v,0)+' Cr</span> ':''}<span class="${hCls(x.c)}">${hSg(x.c)}</span></span></a>`).join('');
+  box.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); a.style.opacity='.6'; openStockChart(a.dataset.open); }));
+}
+function renderHomeDay(d){
+  const S=document.getElementById('hmDayStats'), Ls=document.getElementById('hmDayList'), N=document.getElementById('hmDayNote'); if(!S||!d) return;
+  const t=d.today||{}, cl=t.closed||{}, ac=t.active||{}, bt=t.byType||{};
+  const st=bt.stocks||{}, op=bt.options||{};
+  S.innerHTML=`<div><div class="metric-sub">Open now</div><b>${ac.total||0}</b><div class="metric-sub">${ac.total?'running <span class="'+hCls(ac.openPnlPct)+'">'+hSg(ac.openPnlPct)+'</span>':'&nbsp;'}</div></div>
+    <div><div class="metric-sub">Closed today</div><b>${cl.wins||0}W / ${cl.losses||0}L / ${cl.flat||0}BE</b><div class="metric-sub">${cl.winRate!=null?'win rate '+Math.round(cl.winRate)+'%':'&nbsp;'}</div></div>
+    <div><div class="metric-sub">Net closed &middot; stocks</div><b class="${hCls(st.netPct)}">${st.closed?hSg(st.netPct):'&mdash;'}</b><div class="metric-sub">${st.closed||0} closed</div></div>
+    <div><div class="metric-sub">Net closed &middot; index options</div><b class="${hCls(op.netPct)}">${op.closed?hSg(op.netPct):'&mdash;'}</b><div class="metric-sub">% of premium &middot; ${op.closed||0} closed</div></div>`;
+  const evs=(d.events||[]).filter(e=>e.kind!=='NEW').slice(0,4);
+  Ls.innerHTML=evs.length?evs.map(e=>`<div class="hm-li"><span>${esc0(String(e.text||'').replace(/<[^>]+>/g,''))}</span><span class="metric-sub">${new Date(e.t*1000).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})}</span></div>`).join(''):'<div class="metric-sub">No exits or targets yet today.</div>';
+  if(N) N.textContent=d.market==='open'?'market open · checks run even with this page closed':'market closed';
+}
+function renderHomeLive(){
+  const box=document.getElementById('hmLive'); const g=HOME.gate; if(!box) return;
+  if(!g||!g.kinds){ box.innerHTML='<div class="metric-sub">Strategy lab unavailable right now.</div>'; return; }
+  if(!g.built&&!g.kinds.length){ box.innerHTML='<div class="metric-sub">Strategy lab is running '+(g.progress?'('+esc0(g.progress)+')':'')+'. Calls follow it once it finishes.</div>'; return; }
+  const n=HOME.q.NIFTY&&HOME.q.NIFTY.changePct, dt=n==null?null:n>=0.4?'up':n<=-0.4?'down':'flat';
+  const all=g.kinds.filter(k=>!k.retired&&k.pass).map(k=>({k,day:null}));
+  if(dt) g.kinds.forEach(k=>{ const x=(k.byDay||{})[dt]; if(!k.pass&&x&&x.pass&&!x.retired) all.push({k:x,day:dt,label:k.label}); });
+  const rows=all.map(({k,day,label})=>`<div class="hm-li"><span><b class="up">PROVEN</b> ${esc0(label||k.label)}${day?' <span class="metric-sub">on '+({up:'up days',down:'down days',flat:'sideways days'})[day]+'</span>':''}</span><span class="metric-sub">${k.n} trades${k.from&&window.periodTxt?' &middot; '+periodTxt(k):''}</span></div>`);
+  const rest=g.kinds.length-all.length;
+  box.innerHTML=(rows.length?rows.join(''):'<div class="metric-sub">No kind of call is proven for today\'s market type, so no calls go live.</div>')
+    +`<div class="hm-li metric-sub"><span>${rest} more kinds paper-only or paused</span><a href="#" data-hm2="calls">see the strategy lab</a></div>`;
+  box.querySelector('[data-hm2]')?.addEventListener('click',e=>{ e.preventDefault(); document.getElementById('callsBtn')?.click(); });
+}
+function renderHomeAgree(){
+  const box=document.getElementById('hmAgree'); if(!box) return;
+  if(!Object.keys(window.XS||{}).length||!window.SCREENER_SRC){ box.innerHTML='<div class="metric-sub">Scanning every stock in the background&hellip; results appear here when it finishes (about a minute).</div>'; return; }
+  const rows=STOCKS.filter(s=>window.XS[s[0]]).map(s=>{ const d=screenerRow(s), h=d.horizons.swing, ag=xsAgree(d,h,window.XS[s[0]]); return ag?{d,h,ag,x:window.XS[s[0]]}:null; }).filter(r=>r&&Math.abs(r.ag.a)>=3);
+  const pick=dir=>rows.filter(r=>Math.sign(r.ag.a)===dir).sort((a,b)=>Math.abs(b.ag.a)-Math.abs(a.ag.a)||(dir>0?b.h.score-a.h.score:a.h.score-b.h.score)).slice(0,5);
+  const li=r=>`<a href="#" class="hm-li hm-al ${r.ag.a>0?'hm-up':'hm-dn'}" data-open="${r.d.symbol}"><span><b>${r.d.symbol}</b> <span class="metric-sub">${esc0(r.h.signalLabel)}${r.x.pat?' &middot; '+esc0(r.x.pat.name):''}${r.x.bk&&r.x.bk.type==='break'?' &middot; broke '+esc0(r.x.bk.name):''}</span></span><span><span class="${hCls(r.d.changePct)}">${hSg(r.d.changePct)}</span></span></a>`;
+  const U=pick(1), D=pick(-1);
+  box.innerHTML=`<div><div class="up hm-sub">&#9650;&#9650;&#9650; Aligned up (${rows.filter(r=>r.ag.a>0).length})</div>${U.map(li).join('')||'<div class="metric-sub">None right now.</div>'}</div>
+    <div><div class="down hm-sub">&#9660;&#9660;&#9660; Aligned down (${rows.filter(r=>r.ag.a<0).length})</div>${D.map(li).join('')||'<div class="metric-sub">None right now.</div>'}</div>`;
+  box.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); a.style.opacity='.6'; openStockChart(a.dataset.open); }));
+  const n=document.getElementById('hmAgreeNote'); if(n&&window.SCREENER_SRC) n.innerHTML='from the last scan ('+new Date(window.SCREENER_SRC.t).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+') &middot; screener + daily pattern + daily breakout &middot; <a href="#" data-goview="scan">open Scanner</a>';
+}
+function renderHomeWatch(){
+  const box=document.getElementById('hmWatch'); if(!box) return; const W=(window.WATCHLIST||[]).slice(0,10), q=HOME.q;
+  if(!W.length){ box.innerHTML='<div class="metric-sub">Star a stock (&#9734; next to its price) to keep it here.</div>'; return; }
+  box.innerHTML=W.map(s=>{ const x=q[s]; return `<a href="#" class="hm-li" data-open="${s}"><b>${s}</b><span>${x?'<span class="metric-sub">'+fmt(x.price,2)+'</span> <span class="'+hCls(x.changePct)+'">'+hSg(x.changePct)+'</span>':'<span class="metric-sub">&mdash;</span>'}</span></a>`; }).join('')+((window.WATCHLIST||[]).length>10?'<div class="metric-sub">+'+((window.WATCHLIST||[]).length-10)+' more</div>':'');
+  box.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); a.style.opacity='.6'; openStockChart(a.dataset.open); }));
+}
+function renderHomePositions(){
+  const box=document.getElementById('hmPos'); if(!box) return; const P=(window.POSITIONS||[]).filter(p=>p.status==='open');
+  box.innerHTML=P.length?P.map(p=>`<a href="#" class="hm-li" data-open="${p.symbol}"><span><b>${p.symbol}</b> <span class="${p.side==='buy'?'up':'down'}">${p.side.toUpperCase()}</span></span><span class="metric-sub">entry &#8377;${fmt(p.entryPrice,2)} &middot; SL &#8377;${fmt(p.stopLoss,2)} &middot; T &#8377;${fmt(p.target,2)}</span></a>`).join(''):'<div class="metric-sub">No open paper positions. Open a stock and press Buy or Sell to paper-trade it.</div>';
+  box.querySelectorAll('[data-open]').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); openStockChart(a.dataset.open); }));
 }
 
 /* ============================================================
@@ -4531,19 +4599,19 @@ renderPositions();
       if(!btn||!label) return;
       if(data.streamerConnected){
         btn.style.background='rgba(38,194,129,.15)'; btn.style.borderColor='rgba(38,194,129,.5)'; btn.style.color='var(--green)';
-        label.textContent='⚡ Upstox Live';
+        label.textContent='⚡ Upstox Live'; btn.style.display='none';
         btn.title='1-second live feed active via Upstox WebSocket';
       } else if(data.tokenValid){
         btn.style.background='rgba(38,194,129,.15)'; btn.style.borderColor='rgba(38,194,129,.5)'; btn.style.color='var(--green)';
-        label.textContent='✓ Upstox Connected';
+        label.textContent='✓ Upstox Connected'; btn.style.display='none';
         btn.title='Upstox login active (1-second stream starts when you open a stock)';
       } else if(data.upstoxTokenSet){
         btn.style.background='rgba(240,169,58,.15)'; btn.style.borderColor='rgba(240,169,58,.4)'; btn.style.color='var(--amber)';
-        label.textContent='↻ Reconnect Upstox';
+        label.textContent='↻ Reconnect Upstox'; btn.style.display='inline-flex';
         btn.title='Token set but WebSocket disconnected — click to re-authenticate';
       } else {
         btn.style.background='rgba(61,139,253,.15)'; btn.style.borderColor='rgba(61,139,253,.4)'; btn.style.color='#3d8bfd';
-        label.textContent='Connect Upstox';
+        label.textContent='Connect Upstox'; btn.style.display='inline-flex';
         btn.title='Click to connect Upstox for 1-second live feed';
       }
     }catch(e){}
@@ -4592,10 +4660,12 @@ updateStrategyDesc();
   await universeLoadPromise;
   const params = new URLSearchParams(location.search);
   const requested = (params.get('symbol')||'').toUpperCase();
-  const match = STOCKS.find(s=>s[0]===requested);
-  if(match){ selectStock(match[0]); }
-  else if(window.OPEN_TABS.length){ selectStock(window.OPEN_TABS[window.OPEN_TABS.length-1]); }
-  else { selectStock('NIFTY'); }  // default page: Nifty 50 so no panel is ever blank
+  const match = STOCKS.find(s=>s[0]===requested) || INDEX_ROWS[requested] || (window.FULL_UNIVERSE||[]).find(x=>x.symbol===requested);
+  const view = params.get('view');
+  renderTabBar();
+  if(requested && match){ selectStock(requested); }
+  else if(view==='scan'||view==='portfolio'){ showView(view); }
+  else { showHome(); }  // landing page: Home (market + your trading day); open stocks stay in the tab bar
 })();
 
 /* ============================================================
@@ -6757,6 +6827,47 @@ function members(sym){
   return {core:I.w?core:core.concat(extra), others:I.w?extra:[], weights:I.w||null, src:I.src||null};
 }
 window.idxMembers=members;
+/* Index Chart tab: scan results for only this index's stocks, heaviest first */
+window.renderIndexScan=function(d){
+  const sec=document.getElementById('sec-idxscan'), box=document.getElementById('idxScanBody'); if(!sec||!box) return;
+  const M=(isIndexSym(d.symbol)&&window.idxMembers)?idxMembers(d.symbol):null;
+  if(!M||!M.core.length){ sec.style.display='none'; return; }
+  sec.style.display='';
+  document.getElementById('idxScanTitle').textContent=d.name+' stocks — scan results';
+  const scanned=Object.keys(window.XS||{}).length>0 && window.SCREENER_SRC;
+  document.getElementById('idxScanSub').innerHTML='only this index\'s stocks'+(M.weights?' &middot; heaviest first':'')+' &middot; from the same scan as the <a href="#" data-goview="scan">Scanner</a>';
+  if(!scanned){
+    if(window.__xsDone&&!window.__scanning){ box.innerHTML='<div class="metric-sub">No scan results yet (price history did not load). Open the <a href="#" data-goview="scan">Scanner</a> and press Scan all.</div>'; return; }
+    box.innerHTML='<div class="metric-sub">Loading the scan for these stocks&hellip;</div>';
+    if(!window.__scanning&&typeof xsScanAll==='function'){ window.__scanning=true; xsScanAll(true).finally(()=>{ window.__scanning=false; }); }
+    return;
+  }
+  const rowOf=sym=>{ const r=STOCKS.find(x=>x[0]===sym); return r?screenerRow(r):null; };
+  const mk=(sym,isCore)=>{ const dd=rowOf(sym); if(!dd) return null; const h=dd.horizons.swing, x=window.XS[sym]||null, ag=xsAgree(dd,h,x); return {sym,dd,h,x,ag,w:M.weights?M.weights[sym]:null,isCore}; };
+  const core=M.core.map(s=>mk(s,true)).filter(Boolean), oth=M.others.map(s=>mk(s,false)).filter(Boolean);
+  if(!M.weights) core.sort((a,b)=>(b.ag?Math.abs(b.ag.a):0)-(a.ag?Math.abs(a.ag.a):0));
+  oth.sort((a,b)=>(b.ag?Math.abs(b.ag.a):0)-(a.ag?Math.abs(a.ag.a):0));
+  const drv=new Set(M.weights?core.filter(r=>r.w>=8).map(r=>r.sym).concat(core.slice().sort((a,b)=>b.w-a.w).slice(0,5).map(r=>r.sym)):[]);
+  const bull=core.filter(r=>r.ag&&r.ag.a>0).length, bear=core.filter(r=>r.ag&&r.ag.a<0).length, al=core.filter(r=>r.ag&&Math.abs(r.ag.a)>=3);
+  const dRows=core.filter(r=>drv.has(r.sym)), dBull=dRows.filter(r=>r.ag&&r.ag.a>0).length, dW=dRows.reduce((a,r)=>a+(r.w||0),0);
+  const tr=r=>`<tr class="row-click${r.ag&&Math.abs(r.ag.a)>=3?(r.ag.a>0?' xs-al-up':' xs-al-dn'):''}" data-symbol="${r.sym}">
+    <td><strong>${r.sym}</strong>${drv.has(r.sym)?'<span class="ix-badge">DRIVER</span>':''}<div class="metric-sub">${esc0(r.dd.name)}</div></td>
+    ${M.weights?`<td>${r.w!=null?r.w.toFixed(1)+'%':'&mdash;'}</td>`:''}
+    <td>${r.ag?xsAgreeHtml(r.ag):'<span class="metric-sub">&mdash;</span>'}</td>
+    <td class="${r.dd.changePct>=0?'up':'down'}">${chgTxt(r.dd.price,r.dd.changePct)}</td>
+    <td><span class="signal-chip sig-${r.h.signal}">${r.h.signalLabel}</span><div class="metric-sub">${r.h.score}/100</div></td>
+    <td>${xsPatHtml(r.x)}</td><td>${xsBkHtml(r.x)}</td>
+    <td>${/buy|sell/.test(r.h.signal)?window.monBtn({source:'screener',symbol:r.sym,side:/sell/.test(r.h.signal)?'SELL':'BUY',mode:'swing',label:'Screener '+r.h.signalLabel+' (swing)',note:'Screener '+r.h.signalLabel+' on the swing view, score '+r.h.score+'.'},'+ Add'):''}</td></tr>`;
+  const head=`<thead><tr><th>Stock</th>${M.weights?'<th>Weight</th>':''}<th>Agreement</th><th>Today</th><th>Signal (swing)</th><th>Chart pattern</th><th>Breakout / level</th><th>Monitor</th></tr></thead>`;
+  box.innerHTML=`<div class="ix-sum"><div><span class="lbl">Its stocks</span> <b class="up">${bull} bullish</b> &middot; <b class="down">${bear} bearish</b> <span class="metric-sub">of ${core.length}</span></div>
+      <div><span class="lbl">Aligned</span> <b>${al.length}</b>${al.length?' <span class="metric-sub">('+al.map(r=>r.sym).join(', ')+')</span>':''}</div>
+      ${dRows.length?`<div><span class="lbl">Drivers</span> <b class="${dBull*2>=dRows.length?'up':'down'}">${dBull} of ${dRows.length} bullish</b>${M.weights?' <span class="metric-sub">('+dW.toFixed(0)+'% of the index)</span>':''}</div>`:''}</div>
+    <div style="overflow-x:auto;"><table>${head}<tbody>${core.map(tr).join('')}</tbody></table></div>`
+    +(oth.length?`<details style="margin-top:10px;"><summary style="cursor:pointer;">Other ${esc0(d.name.replace(/^Nifty /,''))} stocks (${oth.length})</summary><div style="overflow-x:auto;"><table>${head}<tbody>${oth.map(tr).join('')}</tbody></table></div></details>`:'');
+  box.querySelectorAll('tr[data-symbol]').forEach(t=>t.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; t.style.opacity='.5'; openStockChart(t.dataset.symbol); }));
+};
+document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closest('[data-goview]'); if(!a) return; e.preventDefault(); showView(a.dataset.goview); });
+
 const QC={}; // {key:{at,data}}
 async function quotes(syms){
   const key=syms.join(','); const c=QC[key]; if(c&&Date.now()-c.at<30000) return c.data;

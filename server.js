@@ -2258,7 +2258,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-16-r37 (Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
+const BUILD = '2026-10-16-r38 (new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

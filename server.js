@@ -2258,7 +2258,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-16-r36 (lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
+const BUILD = '2026-10-16-r37 (Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2803,6 +2803,24 @@ app.post('/api/calls/monitor/remove', async (req, res) => {
   if (i < 0) return res.status(404).json({ error: 'not found' });
   if (!db[i].manual && !db[i].restored) return res.status(400).json({ error: 'Trade Calls are tracked automatically and cannot be removed' });
   db.splice(i, 1); await saveCalls(); res.json({ ok: true });
+});
+// Manual exit: close a Monitor item you added yourself at the live price; it counts in results and summaries like any exit.
+app.post('/api/calls/monitor/exit', async (req, res) => {
+  try {
+    const db = await loadCalls(); const id = req.body && req.body.id; const c = db.find(x => x.id === id);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    if (!c.manual && !c.restored) return res.status(400).json({ error: 'Trade Calls run to their stop, targets or time exit' });
+    if (c.closed) return res.status(400).json({ error: 'already closed' });
+    if (c.watchOnly || c.status === 'WATCH') return res.status(400).json({ error: 'not triggered yet; use Remove' });
+    let price = null;
+    try { const q = await getUpstoxLTPC(c.instrumentKey || await dataKeyFor(c.symbol)); if (q && q.price > 0) price = q.price; } catch (e) {}
+    if (!(price > 0)) return res.status(503).json({ error: 'live price unavailable right now; try again' });
+    const now = Math.floor(Date.now() / 1000), sg = c.side === 'BUY' ? 1 : -1, cost = c.costPct != null ? c.costPct : Calls.costPct(c.mode), gross = sg * (price - c.entry) / c.entry * 100;
+    Object.assign(c, { status: 'MANUAL_EXIT', closed: true, exit: Math.round(price * 100) / 100, ltp: Math.round(price * 100) / 100, exitT: now, closedAt: now, grossPct: Math.round(gross * 100) / 100, pnlPct: Math.round((gross - cost) * 100) / 100 });
+    await saveCalls();
+    try { await emitEvent({ id: c.id + ':MANUAL', callId: c.id, source: srcOf(c), symbol: c.symbol, side: c.side, mode: c.mode, kind: 'MANUAL', level: 'info', t: now, price: c.exit, pnlPct: c.pnlPct, text: `✋ Manual exit: ${c.side} ${c.symbol} at ₹${c.exit} (${c.pnlPct > 0 ? '+' : ''}${c.pnlPct}%)` }, true); } catch (e) {}
+    res.json({ ok: true, exit: c.exit, pnlPct: c.pnlPct });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/calls/eod/run', async (req, res) => {
   try { const day = istDateKey(Math.floor(Date.now() / 1000)); const x = await runEod(day, true); res.json({ ok: true, summary: x }); } catch (e) { res.status(500).json({ error: e.message }); }

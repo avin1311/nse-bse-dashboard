@@ -264,7 +264,7 @@ async function fetchFeed(url, source, diag) {
 const bing = q => `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss&setmkt=en-IN&qft=sortbydate%3d%221%22`;
 const yfeed = ys => `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ys)}&region=IN&lang=en-IN`;
 const INDEX_YF = { NIFTY: '^NSEI', BANKNIFTY: '^NSEBANK', SENSEX: '^BSESN' };
-const gnews = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q + ' when:7d')}&hl=en-IN&gl=IN&ceid=IN:en`;
+const gnews = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q + ' when:4d')}&hl=en-IN&gl=IN&ceid=IN:en`;
 const NEWS_FEEDS_GENERAL = [
   ['https://economictimes.indiatimes.com/markets/stocks/news/rssfeeds/2146842.cms', 'Economic Times'],
   ['https://www.moneycontrol.com/rss/latestnews.xml', 'Moneycontrol'],
@@ -292,6 +292,126 @@ const INDEX_NEWS = {
   NIFTYNXT50: { q: ['Nifty Next 50 today', 'Nifty Next 50 stocks', 'Sensex Nifty market news'], kw: ['next 50','nifty','market'], broad: true },
   INDIAVIX: { q: ['India VIX today', 'India VIX volatility market', 'Sensex Nifty market news'], kw: ['vix','volatility','nifty','market'], broad: true },
 };
+// ---- News freshness. Feed times are not publish times: Google / Bing re-list old articles when a site re-saves them, so a
+// March story can show as "4 h ago". Every headline is checked before it is shown:
+//  1. a date written in the headline or in the article's address that is more than 3 days old drops it;
+//  2. the article page's own published time (meta tags / JSON-LD) replaces the feed time (Google News links are first
+//     resolved to the real article); older than the limit drops it;
+//  3. a headline about today's Nifty / Sensex / Bank Nifty move that contradicts today's actual move drops it.
+const NEWS_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+function istNow() { return new Date(Date.now() + 19800000); }
+function dateFromText(t) {
+  const s = String(t || '');
+  const mk = (y, mo, d) => { const now = istNow(); let yr = y ? +y : now.getUTCFullYear(); let ts = Date.UTC(yr, mo, +d) - 19800000; if (!y && ts > Date.now() + 2 * 86400000) ts = Date.UTC(yr - 1, mo, +d) - 19800000; return ts; };
+  const mon = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  let m = s.match(new RegExp('\\b' + mon + '\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(20\\d\\d))?\\b', 'i'));
+  if (m) return mk(m[3], MONTHS[m[1].toLowerCase().slice(0, m[1].toLowerCase().startsWith('sept') ? 4 : 3)] ?? MONTHS[m[1].toLowerCase().slice(0, 3)], m[2]);
+  m = s.match(new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+' + mon + '\\.?(?:,?\\s+(20\\d\\d))?\\b', 'i'));
+  if (m) return mk(m[3], MONTHS[m[2].toLowerCase().slice(0, 3)], m[1]);
+  return null;
+}
+function dateFromUrl(u) {
+  const s = String(u || '');
+  let m = s.match(/\/(20\d\d)\/(\d{1,2})\/(\d{1,2})\//) || s.match(/[\/_-](20\d\d)-(\d{2})-(\d{2})(?:[\/_.-]|$)/);
+  if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31) return Date.UTC(+m[1], +m[2] - 1, +m[3]) - 19800000;
+  m = s.match(/[\/_-]((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)-(\d{1,2})-(20\d\d)(?:[\/_.-]|$)/i);
+  if (m) return Date.UTC(+m[3], MONTHS[m[1].toLowerCase().slice(0, 3)], +m[2]) - 19800000;
+  return null;
+}
+const realUrlCache = new Map(); // google article id -> real url ('' when it could not be resolved)
+async function resolveNewsUrl(link) {
+  try {
+    const u = new URL(link);
+    if (/bing\.com$/.test(u.hostname)) { const r = u.searchParams.get('url'); return r || link; }
+    if (!/news\.google\.com$/.test(u.hostname)) return link;
+    const id = (u.pathname.match(/\/articles\/([^/?]+)/) || [])[1]; if (!id) return null;
+    if (realUrlCache.has(id)) return realUrlCache.get(id) || null;
+    // old-style ids carry the address in plain text
+    try { const raw = Buffer.from(id.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('latin1'); const h = raw.match(/https?:\/\/[\x21-\x7e]+/); if (h && !/^https?:\/\/news\.google/.test(h[0])) { realUrlCache.set(id, h[0]); return h[0]; } } catch (e) {}
+    // new-style ids: ask Google for the address (same request its own page makes)
+    const page = await fetch('https://news.google.com/rss/articles/' + id, { headers: { 'User-Agent': NEWS_UA }, signal: AbortSignal.timeout(5000) }).then(r => r.text());
+    const sg = (page.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (page.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+    if (!sg || !ts) { realUrlCache.set(id, ''); return null; }
+    const inner = JSON.stringify(['garturlreq', [['X', 'X', ['X', 'X'], null, null, 1, 1, 'US:en', null, 1, null, null, null, null, null, 0, 1], 'X', 'X', 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, +ts, sg]);
+    const body = 'f.req=' + encodeURIComponent(JSON.stringify([[['Fbv4je', inner, null, 'generic']]]));
+    const txt = await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'User-Agent': NEWS_UA }, body, signal: AbortSignal.timeout(5000) }).then(r => r.text());
+    const part = txt.split('\n\n')[1]; const arr = JSON.parse(part); const url = JSON.parse(arr[0][2])[1];
+    realUrlCache.set(id, url || ''); if (realUrlCache.size > 3000) realUrlCache.delete(realUrlCache.keys().next().value);
+    return url || null;
+  } catch (e) { return null; }
+}
+const pubTimeCache = new Map(); // real url -> {ts|null}
+async function articlePublished(url) {
+  if (!url) return null;
+  if (pubTimeCache.has(url)) return pubTimeCache.get(url);
+  let ts = null;
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': NEWS_UA, 'Accept': 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(6000) });
+    if (r.ok) {
+      let html = ''; const rd = r.body.getReader(); const dec = new TextDecoder();
+      while (html.length < 400000) { const { done, value } = await rd.read(); if (done) break; html += dec.decode(value, { stream: true }); if (/<\/head>/i.test(html) && /datePublished|published_time/i.test(html)) break; }
+      try { rd.cancel(); } catch (e) {}
+      const pats = [/property=["'](?:og:)?article:published_time["'][^>]*content=["']([^"']+)/i, /content=["']([^"']+)["'][^>]*property=["'](?:og:)?article:published_time/i,
+        /"datePublished"\s*:\s*"([^"]+)"/i, /itemprop=["']datePublished["'][^>]*content=["']([^"']+)/i, /name=["'](?:publish-date|pubdate|publishdate|PublishDate|article_date_original|date)["'][^>]*content=["']([^"']+)/i,
+        /"dateCreated"\s*:\s*"([^"]+)"/i, /<time[^>]*datetime=["']([^"']+)/i];
+      const found = []; for (const p of pats) { const m = html.match(p); if (m) { const t = Date.parse(m[1]); if (t && t < Date.now() + 3600000 && t > Date.UTC(2015, 0, 1)) found.push(t); } }
+      if (found.length) ts = Math.min(...found);
+    }
+  } catch (e) {}
+  pubTimeCache.set(url, ts); if (pubTimeCache.size > 4000) pubTimeCache.delete(pubTimeCache.keys().next().value);
+  return ts;
+}
+let idxMoveCache = { t: 0, v: null };
+async function todaysIndexMoves() {
+  if (Date.now() - idxMoveCache.t < 120000) return idxMoveCache.v;
+  const v = {};
+  if (upstoxTokens().length) await Promise.all([['nifty', 'NSE_INDEX|Nifty 50'], ['sensex', 'BSE_INDEX|SENSEX'], ['bank nifty', 'NSE_INDEX|Nifty Bank']].map(async ([n, k]) => { try { const q = await getUpstoxLTPC(k); if (q && q.price) v[n] = { pct: q.changePct, pts: q.price - q.prevClose }; } catch (e) {} }));
+  idxMoveCache = { t: Date.now(), v }; return v;
+}
+const DOWN_W = /\b(crash\w*|falls?|fell|tank\w*|slump\w*|plung\w*|sinks?|sank|bloodbath|tumbl\w*|slides?|declin\w*|drops?|dropped|down|bleed\w*|nosediv\w*|selloff|sell-off|lower)\b/i;
+const UP_W = /\b(rall\w*|jumps?|jumped|surg\w*|soar\w*|gains?|gained|climbs?|climbed|up|zooms?|higher|spurts?|rebounds?|strong)\b/i;
+function contradictsToday(title, mv) {
+  const t = String(title || '');
+  for (const n of ['bank nifty', 'nifty', 'sensex']) {
+    const x = mv[n]; if (!x) continue;
+    const re = new RegExp('\\b' + n + '(?! ?(it|pharma|auto|fmcg|metal|realty|bank|midcap|smallcap|next|financial|psu))\\b', 'i'); if (!re.test(t)) continue;
+    const seg = t.slice(Math.max(0, t.search(re))).slice(0, 70);
+    const dn = DOWN_W.test(seg), up = UP_W.test(seg);
+    if (dn && !up && x.pct > 0.3) return true;
+    if (up && !dn && x.pct < -0.3) return true;
+    const pc = seg.match(/(\d+(?:\.\d+)?)\s?%/), pt = seg.match(/(\d{3,4}(?:,\d{3})?)\s?(?:pts|points)/i);
+    if (pc && Math.abs(+pc[1]) > Math.abs(x.pct) * 2 + 0.6) return true;
+    if (pt && +pt[1].replace(/,/g, '') > Math.abs(x.pts) * 2 + 80) return true;
+    return false;
+  }
+  return false;
+}
+// items: [{title, link, ts, ...}] newest first; returns the fresh ones (with ts set to the article's own time when known)
+async function freshNews(items, maxAgeH, want) {
+  const now = Date.now(), lim = now - maxAgeH * 3600000;
+  const mv = await todaysIndexMoves().catch(() => ({}));
+  const todayIst = istNow().toISOString().slice(0, 10);
+  const pre = items.filter(it => {
+    if (!it.ts || it.ts < lim || it.ts > now + 3600000) return false;
+    const td = dateFromText(it.title); if (td != null && td < now - 3 * 86400000) return false;
+    const ud = dateFromUrl(it.link); if (ud != null && ud < now - 3 * 86400000) return false;
+    return true;
+  });
+  // verify the newest candidates against the article page (in parallel, cached); stop once enough are confirmed
+  const cand = pre.slice(0, Math.max(want * 2, 14));
+  await Promise.all(cand.map(async it => {
+    const real = await resolveNewsUrl(it.link);
+    if (real) { it.realLink = real; const ud = dateFromUrl(real); if (ud != null && ud < now - 3 * 86400000) { it.stale = true; return; } }
+    const pub = real ? await articlePublished(real) : null;
+    if (pub) { it.verified = true; if (pub < lim) it.stale = true; else it.ts = Math.min(it.ts, pub); }
+  }));
+  const out = cand.filter(it => !it.stale).filter(it => {
+    const sameDay = new Date(it.ts + 19800000).toISOString().slice(0, 10) === todayIst;
+    return !(sameDay && contradictsToday(it.title, mv));
+  });
+  return out.sort((a, b) => b.ts - a.ts).map(it => ({ ...it, link: it.realLink || it.link, realLink: undefined }));
+}
 app.get('/api/news/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const name = String(req.query.name || '').replace(/[^\w &.\-]/g, '').trim().slice(0, 60);
@@ -309,8 +429,8 @@ app.get('/api/news/:symbol', async (req, res) => {
       ]);
       const seen = new Set();
       const uniq = arr => arr.filter(it => { const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
-      const spec = uniq(specific).sort((a, b) => b.ts - a.ts);
-      const gen = uniq(general).sort((a, b) => b.ts - a.ts);
+      const spec = await freshNews(uniq(specific).sort((a, b) => b.ts - a.ts), 72, 15);
+      const gen = await freshNews(uniq(general).sort((a, b) => b.ts - a.ts), 36, 10);
       const rel = gen.filter(it => { const t = (it.title + ' ' + it.description).toLowerCase(); return idx.kw.some(w => t.includes(w)); });
       items = [...spec, ...(idx.broad ? gen : rel)].sort((a, b) => b.ts - a.ts).slice(0, 25).map(i => ({ ...i, scope: 'stock' }));
       if (items.length < 8) items = items.concat(gen.filter(g => !items.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
@@ -325,14 +445,14 @@ app.get('/api/news/:symbol', async (req, res) => {
     const mentions = it => { const t = (it.title + ' ' + it.description).toLowerCase(); return words.some(w => t.includes(w)); };
     const seen = new Set();
     const uniq = arr => arr.filter(it => { const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
-    const spec = uniq(specific).sort((a, b) => b.ts - a.ts);
-    const gen = uniq(general).sort((a, b) => b.ts - a.ts);
+    const spec = await freshNews(uniq(specific).sort((a, b) => b.ts - a.ts), 96, 12);
+    const gen = await freshNews(uniq(general).sort((a, b) => b.ts - a.ts), 36, 10);
     const genRel = gen.filter(mentions);
     items = [...spec, ...genRel].sort((a, b) => b.ts - a.ts).slice(0, 15).map(i => ({ ...i, scope: 'stock' }));
     if (items.length < 8) items = items.concat(gen.filter(g => !genRel.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
     }
-    items = items.map(i => ({ ...i, pubDate: i.ts ? new Date(i.ts).toISOString() : '', sentiment: getSentiment(i.title + ' ' + i.description) }));
-    const result = { symbol, items, fetchedAt: new Date().toISOString(), feeds: diag, build: 'news-r2' };
+    items = items.map(i => ({ ...i, verified: !!i.verified, pubDate: i.ts ? new Date(i.ts).toISOString() : '', sentiment: getSentiment(i.title + ' ' + i.description) }));
+    const result = { symbol, items, fetchedAt: new Date().toISOString(), feeds: diag, build: 'news-r3' };
     if (items.length) newsCache[key] = { data: result, time: now };
     res.json(result);
   } catch (e) {
@@ -2312,7 +2432,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-16-r40 (news fixed; OI analysis on Derivatives; F&O indices on Home; fundamentals keep last good values; scanner shows every pattern; alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
+const BUILD = '2026-10-16-r41 (news: only fresh stories, dates checked on the article page; news fixed; OI analysis on Derivatives; F&O indices on Home; fundamentals keep last good values; scanner shows every pattern; alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

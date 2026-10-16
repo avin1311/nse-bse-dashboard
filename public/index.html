@@ -2272,14 +2272,14 @@ function renderNews(d,tries){
           ${n.description?`<div class="metric-sub" style="margin:0 0 4px;line-height:1.4;">${newsEsc(n.description)}</div>`:''}
           <div class="news-meta">
             <span>${newsEsc(n.source||'News')}</span>&middot;
-            <span>${newsAgo(n.pubDate)||'Today'}</span>&middot;
+            <span title="${n.pubDate?new Date(n.pubDate).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+(n.verified?' (checked on the article page)':' (time from the news feed; the article page gave none)'):''}">${n.verified?'':'listed '}${newsAgo(n.pubDate)||'Today'}</span>&middot;
             <span class="signal-chip ${n.sentiment==='Positive'?'sig-buy':n.sentiment==='Negative'?'sig-sell':'sig-hold'}" title="Rough keyword-based tone of the headline">${n.sentiment||'Neutral'}</span>
           </div>
         </div>`;
       const st=data.items.filter(n=>n.scope!=='market'), mk=data.items.filter(n=>n.scope==='market');
       panel.innerHTML = (st.length?st.map(row).join(''):'<div class="metric-sub">No recent headlines mention this stock.</div>')
         + (mk.length?'<div class="metric-sub" style="margin:12px 0 2px;text-transform:uppercase;letter-spacing:.5px;">Latest market headlines</div>'+mk.map(row).join(''):'')
-        + `<div class="metric-sub" style="margin-top:8px;">Live from Google News, Economic Times and Moneycontrol &middot; refreshed every 15 min</div>`;
+        + `<div class="metric-sub" style="margin-top:8px;">Google News, Bing, Economic Times, Moneycontrol, Mint, Business Standard &middot; only stories published in the last few days: each one's date is checked on the article itself, old stories re-listed by the feeds are dropped &middot; refreshed every 15 min</div>`;
     })
     .catch(e=>{
       if(window.CURRENT!==d) return;

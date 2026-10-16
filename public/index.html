@@ -413,64 +413,6 @@
     </section>
 </div>
 <div class="vtab-pane" id="vtab-chart" data-vtab="chart" style="display:none;">
-<div class="grid cols-2" style="grid-template-columns:1fr;">    <section id="sec-chart" class="panel">
-      <div class="panel-head"><h3>Chart</h3>
-        <label class="toggle-mini" title="Draw the open stock's breakout level and its pattern trigger / stop / target on this chart"><input type="checkbox" id="chartLinesToggle" checked> Pattern &amp; breakout lines</label>
-        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Upstox real data: drawing tools, indicators, strategies, backtest">Upstox chart</button><button class="pc-btn" data-mode="tv" title="Embedded TradingView chart">TradingView</button><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="Open the full TradingView chart in a new tab (works for every NSE/BSE symbol)" style="text-decoration:none;">Open on tradingview.com ↗</a></div>
-      </div>
-      <div id="proChartRoot"></div>
-      <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
-    </section></div>
-  <section id="sec-verdict" class="panel">
-    <div class="panel-head"><h3>Verdict</h3><span class="metric-sub">screener, chart pattern and breakout for the open stock, side by side</span></div>
-    <div id="verdictStrip" class="vd-strip"><div class="metric-sub">Loading the open stock…</div></div>
-    <div id="screenerFocus"></div>
-  </section>
-  <section id="sec-patterns" class="panel">
-    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">4 timeframes at once &middot; 17 classic patterns &middot; real Upstox candles</span></div>
-    <p class="desc">The same stock on <b>Intraday (15-min)</b>, <b>Hourly</b>, <b>Daily</b> and <b>Weekly</b> charts. By default only <b>recent</b> formations are shown (forming now, or broken out in the last few bars), each with how old it is, how far price is from the trigger, and how this pattern has played out before on this chart. Patterns that agree across timeframes are highlighted and explained at the top. Click a pattern to see it drawn on the big chart with the full logic and price-action checks.</p>
-    <div class="pg-controls">
-      <div class="pg-sym"><input id="patSym" placeholder="Symbol, e.g. RELIANCE, NIFTY" autocomplete="off"><button class="btn" id="patGo">Analyse</button></div>
-      <div class="pg-seg" id="pgShow" title="Recent hides patterns that broke out long ago"><button data-v="recent" class="on">Recent</button><button data-v="all">All</button></div>
-      <div class="pg-seg" id="pgBias"><button data-v="all" class="on">All</button><button data-v="bullish">Bullish</button><button data-v="bearish">Bearish</button></div>
-      <select id="patFilter" title="Pattern type"><option value="all">All types</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select>
-      <button class="btn" id="patScanBtn" style="display:none" title="Moved: use Scan all in the all-stocks scan below">Scan all stocks</button>
-    </div>
-    <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
-    <div id="pgMtf"></div>
-    <div id="pgZone"></div>
-    <div id="pgLevels"></div>
-    <div id="pgGrid" class="pg-grid"></div>
-    <div class="pg-detail">
-      <div class="pg-detail-head"><h4 style="margin:0;">Detailed view</h4><div class="pg-seg" id="pgDtf"><button data-v="15m">Intraday</button><button data-v="1h">Hourly</button><button data-v="1D" class="on">Daily</button><button data-v="1W">Weekly</button></div></div>
-      <div id="patChart" style="width:100%;height:360px;border:1px solid var(--border);border-radius:8px;margin:8px 0 10px;overflow:hidden;"></div>
-      <div id="patSummary" style="margin-bottom:6px;"></div>
-      <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status &amp; age</th><th>Price action</th><th>Confidence</th><th>Levels &amp; distance</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
-      <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume, trend alignment and the price-action checks &mdash; a ranking aid, not a probability of profit. Points = price move in rupees (index points for indices).</div>
-    </div>
-    <div id="patPlan" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
-      <h4 style="margin:0 0 4px;">Trade planner <span class="metric-sub">stop, targets, timeline and expiry view for any price</span></h4>
-      <div class="metric-sub" style="margin-bottom:8px;">A pattern's entry is the breakout price from when it confirmed. Type the price you would actually trade at (or leave it empty for the live price) and press <b>Analyse price</b> to get a fresh stop-loss, targets, how long they may take, and whether the monthly futures &amp; options expiry gives enough time.</div>
-      <div class="pat-controls" style="grid-template-columns:1fr 1fr 1.6fr auto;">
-        <div><label>Price to analyse <a href="#" id="tpLive" style="font-size:10px;">use live price</a></label><input id="tpPx" type="number" step="0.05" min="0" placeholder="live price"></div>
-        <div><label>Direction</label><select id="tpDir"><option value="auto">Auto (from pattern / trend)</option><option value="long">Long / Buy</option><option value="short">Short / Sell</option></select></div>
-        <div><label>Based on</label><select id="tpPat"><option value="-1">Volatility only (no pattern)</option></select></div>
-        <button class="btn" id="tpGo" style="padding:9px;">Analyse price</button>
-      </div>
-      <div id="tpOut"></div>
-    </div>
-    <h4 style="margin:16px 0 4px;">Scan across all stocks <span class="metric-sub">recent patterns on Daily and Hourly; stocks where both agree come first</span></h4>
-    <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
-    <div id="patScanOut" style="overflow-x:auto;"></div>
-    <h4 style="margin:18px 0 4px;">Historical hit rates <span class="metric-sub">how past signals actually played out</span></h4>
-    <div class="metric-sub" style="margin-bottom:8px;">Replays up to ~5 years of real daily candles: at each step the engine sees only the past, and every freshly confirmed pattern is followed forward up to 40 bars &mdash; did price reach the target or the stop first? Costs are not included. Small samples (under 20 signals) are unreliable.</div>
-    <div class="pat-controls" style="grid-template-columns:200px auto 1fr;">
-      <div><label>Stocks to test</label><select id="patHitN"><option value="15">15 (about 1 min)</option><option value="30" selected>30 (about 2 min)</option><option value="60">60 (about 4 min)</option></select></div>
-      <button class="btn" id="patHitBtn" style="padding:9px;">Run hit-rate test</button><span></span>
-    </div>
-    <div id="patHitStatus" class="metric-sub" style="margin:6px 0;"></div>
-    <div id="patHitOut" style="overflow-x:auto;"></div>
-  </section>
   <section id="sec-screener" class="panel">
     <div class="panel-head"><h3>All-stocks scan</h3><span class="metric-sub">screener + chart patterns + breakouts, one scan &middot; <span id="screenerCount"></span></span></div>
         <div class="filters">
@@ -552,7 +494,65 @@
     </div>
     <details class="cm-box" id="xsReplayBox" style="margin-top:10px;"><summary style="cursor:pointer"><b>Does agreement help?</b> <span class="metric-sub">replays the same three checks on past daily candles and compares with doing nothing</span></summary><div id="xsReplay" style="margin-top:6px;"><button class="btn" id="xsReplayBtn">Measure now (about a minute)</button></div></details>
   </section>
-    <details class="panel" id="moreBox"><summary style="cursor:pointer;font-weight:600;">More: sector heatmap &middot; seasonality <span class="metric-sub" style="font-weight:400;">(loads when opened)</span></summary>
+  <div class="grid cols-2" style="grid-template-columns:1fr;">    <section id="sec-chart" class="panel">
+      <div class="panel-head"><h3>Chart</h3>
+        <label class="toggle-mini" title="Draw the open stock's breakout level and its pattern trigger / stop / target on this chart"><input type="checkbox" id="chartLinesToggle" checked> Pattern &amp; breakout lines</label>
+        <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Upstox real data: drawing tools, indicators, strategies, backtest">Upstox chart</button><button class="pc-btn" data-mode="tv" title="Embedded TradingView chart">TradingView</button><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="Open the full TradingView chart in a new tab (works for every NSE/BSE symbol)" style="text-decoration:none;">Open on tradingview.com ↗</a></div>
+      </div>
+      <div id="proChartRoot"></div>
+      <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
+    </section></div>
+  <section id="sec-verdict" class="panel">
+    <div class="panel-head"><h3>Verdict</h3><span class="metric-sub">screener, chart pattern and breakout for the open stock, side by side</span></div>
+    <div id="verdictStrip" class="vd-strip"><div class="metric-sub">Loading the open stock…</div></div>
+    <div id="screenerFocus"></div>
+  </section>
+  <section id="sec-patterns" class="panel">
+    <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">4 timeframes at once &middot; 17 classic patterns &middot; real Upstox candles</span></div>
+    <p class="desc">The same stock on <b>Intraday (15-min)</b>, <b>Hourly</b>, <b>Daily</b> and <b>Weekly</b> charts. By default only <b>recent</b> formations are shown (forming now, or broken out in the last few bars), each with how old it is, how far price is from the trigger, and how this pattern has played out before on this chart. Patterns that agree across timeframes are highlighted and explained at the top. Click a pattern to see it drawn on the big chart with the full logic and price-action checks.</p>
+    <div class="pg-controls">
+      <div class="pg-sym"><input id="patSym" placeholder="Symbol, e.g. RELIANCE, NIFTY" autocomplete="off"><button class="btn" id="patGo">Analyse</button></div>
+      <div class="pg-seg" id="pgShow" title="Recent hides patterns that broke out long ago"><button data-v="recent" class="on">Recent</button><button data-v="all">All</button></div>
+      <div class="pg-seg" id="pgBias"><button data-v="all" class="on">All</button><button data-v="bullish">Bullish</button><button data-v="bearish">Bearish</button></div>
+      <select id="patFilter" title="Pattern type"><option value="all">All types</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select>
+      <button class="btn" id="patScanBtn" style="display:none" title="Moved: use Scan all in the all-stocks scan below">Scan all stocks</button>
+    </div>
+    <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
+    <div id="pgMtf"></div>
+    <div id="pgZone"></div>
+    <div id="pgLevels"></div>
+    <div id="pgGrid" class="pg-grid"></div>
+    <div class="pg-detail">
+      <div class="pg-detail-head"><h4 style="margin:0;">Detailed view</h4><div class="pg-seg" id="pgDtf"><button data-v="15m">Intraday</button><button data-v="1h">Hourly</button><button data-v="1D" class="on">Daily</button><button data-v="1W">Weekly</button></div></div>
+      <div id="patChart" style="width:100%;height:360px;border:1px solid var(--border);border-radius:8px;margin:8px 0 10px;overflow:hidden;"></div>
+      <div id="patSummary" style="margin-bottom:6px;"></div>
+      <div style="overflow-x:auto;"><table id="patTable"><thead><tr><th>Pattern</th><th>Bias</th><th>Status &amp; age</th><th>Price action</th><th>Confidence</th><th>Levels &amp; distance</th><th>Logic (click for full strategy)</th></tr></thead><tbody id="patBody"></tbody></table></div>
+      <div class="metric-sub" style="margin-top:8px;">Confidence blends geometric fit, confirmation, volume, trend alignment and the price-action checks &mdash; a ranking aid, not a probability of profit. Points = price move in rupees (index points for indices).</div>
+    </div>
+    <div id="patPlan" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+      <h4 style="margin:0 0 4px;">Trade planner <span class="metric-sub">stop, targets, timeline and expiry view for any price</span></h4>
+      <div class="metric-sub" style="margin-bottom:8px;">A pattern's entry is the breakout price from when it confirmed. Type the price you would actually trade at (or leave it empty for the live price) and press <b>Analyse price</b> to get a fresh stop-loss, targets, how long they may take, and whether the monthly futures &amp; options expiry gives enough time.</div>
+      <div class="pat-controls" style="grid-template-columns:1fr 1fr 1.6fr auto;">
+        <div><label>Price to analyse <a href="#" id="tpLive" style="font-size:10px;">use live price</a></label><input id="tpPx" type="number" step="0.05" min="0" placeholder="live price"></div>
+        <div><label>Direction</label><select id="tpDir"><option value="auto">Auto (from pattern / trend)</option><option value="long">Long / Buy</option><option value="short">Short / Sell</option></select></div>
+        <div><label>Based on</label><select id="tpPat"><option value="-1">Volatility only (no pattern)</option></select></div>
+        <button class="btn" id="tpGo" style="padding:9px;">Analyse price</button>
+      </div>
+      <div id="tpOut"></div>
+    </div>
+    <h4 style="margin:16px 0 4px;">Scan across all stocks <span class="metric-sub">recent patterns on Daily and Hourly; stocks where both agree come first</span></h4>
+    <div id="patScanStatus" class="metric-sub" style="margin-bottom:6px;"></div>
+    <div id="patScanOut" style="overflow-x:auto;"></div>
+    <h4 style="margin:18px 0 4px;">Historical hit rates <span class="metric-sub">how past signals actually played out</span></h4>
+    <div class="metric-sub" style="margin-bottom:8px;">Replays up to ~5 years of real daily candles: at each step the engine sees only the past, and every freshly confirmed pattern is followed forward up to 40 bars &mdash; did price reach the target or the stop first? Costs are not included. Small samples (under 20 signals) are unreliable.</div>
+    <div class="pat-controls" style="grid-template-columns:200px auto 1fr;">
+      <div><label>Stocks to test</label><select id="patHitN"><option value="15">15 (about 1 min)</option><option value="30" selected>30 (about 2 min)</option><option value="60">60 (about 4 min)</option></select></div>
+      <button class="btn" id="patHitBtn" style="padding:9px;">Run hit-rate test</button><span></span>
+    </div>
+    <div id="patHitStatus" class="metric-sub" style="margin:6px 0;"></div>
+    <div id="patHitOut" style="overflow-x:auto;"></div>
+  </section>
+  <details class="panel" id="moreBox"><summary style="cursor:pointer;font-weight:600;">More: sector heatmap &middot; seasonality <span class="metric-sub" style="font-weight:400;">(loads when opened)</span></summary>
 <section id="sec-heatmap" class="panel">
     <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
     <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
@@ -2301,7 +2301,7 @@ async function scanScreenerLive(){
     }catch(e){}
   }
   window.SCREENER_SRC = src ? {src, t:Date.now()} : null;
-  if(btn) btn.innerHTML='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan now';
+  if(btn) btn.innerHTML='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan all';
   renderScreener();
 }
 document.getElementById('screenerScanBtn')?.addEventListener('click', ()=>xsScanAll());

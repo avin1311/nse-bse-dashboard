@@ -2249,7 +2249,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-16-r33 (Scan & charts: screener, chart patterns and breakouts merged into one tab with one scan and an agreement score)';
+const BUILD = '2026-10-16-r34 (Scan & charts: all-stocks scan at the top of the tab)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

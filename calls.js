@@ -754,7 +754,7 @@ function evalSecMom(P, n, opts = {}) {
   const { bars, c, h, l, o, A, R, vwap, dayFirst } = P, sec = opts.sec, secK = opts.secK || 1.5;
   const a = A[n], first = dayFirst[n]; if (a == null || !sec || sec.pct == null || first < 1) return null;
   const k = n - first; if (k < 2) return null; // the opening range (two 15-minute bars) must be complete
-  const m = Math.floor(((bars[n].t + 19800) % 86400) / 60); if (m < 570 || m > 645) return null; // bar starts 9:30 .. 10:45 (closes 9:45 .. 11:00)
+  const m = Math.floor(((bars[n].t + 19800) % 86400) / 60); if (m < 570) return null; // from 9:30; no late cut-off of its own (the usual 14:00 last-entry rule for stock intraday applies)
   const orH = Math.max(h[first], h[first + 1]), orL = Math.min(l[first], l[first + 1]), px = c[n], prevClose = c[first - 1];
   const dayPct = (px / prevClose - 1) * 100, volR = slotVolRatio(bars, n), vw = vwap[n];
   let side = null; if (sec.pct >= secK && sec.aboveOpen !== false) side = 'BUY'; else if (sec.pct <= -secK && sec.aboveOpen !== true) side = 'SELL';

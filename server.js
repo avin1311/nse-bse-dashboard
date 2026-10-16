@@ -272,6 +272,43 @@ const NEWS_FEEDS_GENERAL = [
   ['https://www.livemint.com/rss/markets', 'Mint'],
   ['https://www.business-standard.com/rss/markets-106.rss', 'Business Standard']
 ];
+// Market and company news straight from the publishers (their own feeds carry true publish times). Stock pages are filled
+// from these first; a feed that stops working is skipped and shows up in the feed check.
+const NEWS_FEEDS_PUBLISHER = NEWS_FEEDS_GENERAL.concat([
+  ['https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms', 'Economic Times'],
+  ['https://economictimes.indiatimes.com/industry/rssfeeds/13352306.cms', 'Economic Times'],
+  ['https://www.moneycontrol.com/rss/business.xml', 'Moneycontrol'],
+  ['https://www.moneycontrol.com/rss/results.xml', 'Moneycontrol'],
+  ['https://www.moneycontrol.com/rss/buzzingstocks.xml', 'Moneycontrol'],
+  ['https://www.livemint.com/rss/companies', 'Mint'],
+  ['https://www.business-standard.com/rss/companies-101.rss', 'Business Standard'],
+  ['https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml', 'CNBC-TV18'],
+  ['https://www.cnbctv18.com/commonfeeds/v1/cne/rss/business.xml', 'CNBC-TV18'],
+  ['https://www.financialexpress.com/market/feed/', 'Financial Express'],
+  ['https://www.thehindubusinessline.com/markets/feeder/default.rss', 'BusinessLine'],
+  ['https://www.thehindubusinessline.com/companies/feeder/default.rss', 'BusinessLine'],
+  ['https://feeds.feedburner.com/ndtvprofit-latest', 'NDTV Profit']
+]);
+let pubFeedCache = { t: 0, items: [], diag: [] }, pubFeedP = null;
+async function publisherNews() { // shared by every stock page, refreshed every 5 minutes
+  if (Date.now() - pubFeedCache.t < 300000) return pubFeedCache;
+  if (pubFeedP) return pubFeedP;
+  pubFeedP = (async () => { const diag = []; const items = (await Promise.all(NEWS_FEEDS_PUBLISHER.map(([u, src]) => fetchFeed(u, src, diag)))).flat().map(i => ({ ...i, via: 'publisher' }));
+    pubFeedCache = { t: Date.now(), items, diag }; pubFeedP = null; return pubFeedCache; })();
+  return pubFeedP;
+}
+// does a headline name this company? symbol as a word, the company name, or its first two words (never one generic word)
+function stockMatcher(symbol, name) {
+  const STOP = new Set(['limited', 'ltd', 'ltd.', 'the', 'and', 'of', 'india', 'indian', 'company', 'corporation', 'corp', 'co']);
+  const words = String(name || '').replace(/\b(limited|ltd\.?)\b/ig, '').trim().split(/\s+/).filter(Boolean);
+  const pats = [];
+  if (symbol.length >= 3 && !/^(IT|OIL|IDEA|ABB|BEL)$/.test(symbol) || /^(ABB|BEL|OIL)$/.test(symbol)) pats.push(new RegExp('\\b' + symbol.replace(/[&-]/g, m => '\\' + m) + '\\b'));
+  const core = words.map(w => w.replace(/[^A-Za-z0-9]/g, '')).filter(w => w && !STOP.has(w.toLowerCase()));
+  if (core.length >= 2) pats.push(new RegExp('\\b' + core.slice(0, 2).join("(?:\\s+and\\s+|[\\s&.,'-]+)") + '\\b', 'i'));
+  if (core.length === 1 && core[0].length >= 5) pats.push(new RegExp('\\b' + core[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'));
+  return it => { const t = it.title + ' ' + (it.description || ''); return pats.some(p => p.test(t)); };
+}
+
 // What to search for on an index page: Google News phrases (index + its biggest members) and
 // keywords that make a general-feed headline relevant. broad=true: every market headline counts.
 const INDEX_NEWS = {
@@ -394,17 +431,17 @@ async function freshNews(items, maxAgeH, want) {
   const todayIst = istNow().toISOString().slice(0, 10);
   const pre = items.filter(it => {
     if (!it.ts || it.ts < lim || it.ts > now + 3600000) return false;
-    const td = dateFromText(it.title); if (td != null && td < now - 3 * 86400000) return false;
-    const ud = dateFromUrl(it.link); if (ud != null && ud < now - 3 * 86400000) return false;
+    const td = dateFromText(it.title); if (td != null && td < Math.max(lim, now - 3 * 86400000) && td < it.ts - 3 * 86400000) { if (td < lim) return false; it.ts = td; }
+    const ud = dateFromUrl(it.link); if (ud != null && ud < it.ts - 2 * 86400000) { if (ud < lim) return false; it.ts = ud; }
     return true;
   });
   // verify the newest candidates against the article page (in parallel, cached); stop once enough are confirmed
   const cand = pre.slice(0, Math.max(want * 2, 14));
   await Promise.all(cand.map(async it => {
     const real = await resolveNewsUrl(it.link);
-    if (real) { it.realLink = real; const ud = dateFromUrl(real); if (ud != null && ud < now - 3 * 86400000) { it.stale = true; return; } }
+    if (real) { it.realLink = real; const ud = dateFromUrl(real); if (ud != null && ud < it.ts - 2 * 86400000) { if (ud < lim) { it.stale = true; return; } it.ts = ud; } }
     const pub = real ? await articlePublished(real) : null;
-    if (pub) { it.verified = true; if (pub < lim) it.stale = true; else it.ts = Math.min(it.ts, pub); }
+    if (pub) { it.verified = true; if (pub < lim) it.stale = true; else it.ts = pub; }
   }));
   const out = cand.filter(it => !it.stale).filter(it => {
     const sameDay = new Date(it.ts + 19800000).toISOString().slice(0, 10) === todayIst;
@@ -435,21 +472,20 @@ app.get('/api/news/:symbol', async (req, res) => {
       items = [...spec, ...(idx.broad ? gen : rel)].sort((a, b) => b.ts - a.ts).slice(0, 25).map(i => ({ ...i, scope: 'stock' }));
       if (items.length < 8) items = items.concat(gen.filter(g => !items.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
     } else {
-    const q1 = `${name || symbol} share`;
-    const queries = [[gnews(q1), 'Google News'], [gnews(`${symbol} NSE stock`), 'Google News'], [bing(q1), 'Bing News']];
-    const [specific, general] = await Promise.all([
-      Promise.all(queries.map(([u, s]) => ff(u, s))).then(a => a.flat()),
-      Promise.all(NEWS_FEEDS_GENERAL.map(([u, s]) => ff(u, s))).then(a => a.flat())
-    ]);
-    const words = [symbol.toLowerCase(), ...(name ? name.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['limited','ltd','industries','india','corporation','company'].includes(w)) : [])];
-    const mentions = it => { const t = (it.title + ' ' + it.description).toLowerCase(); return words.some(w => t.includes(w)); };
+    // Stock page: only news about this company. Publisher feeds first (true publish times); search results (Google / Bing)
+    // only when their date is confirmed on the article page. Newest first, older ones after (up to 90 days), no market filler.
+    const nm = name || symbol, isMine = stockMatcher(symbol, name);
+    const queries = [[gnews(`"${nm}" share`), 'Google News'], [gnews(`${symbol} NSE stock`), 'Google News'], [bing(`"${nm}" share`), 'Bing News'], [bing(`${nm} stock news`), 'Bing News']];
+    const [search, pub] = await Promise.all([Promise.all(queries.map(([u, s]) => ff(u.replace('when:4d', 'when:30d'), s))).then(a => a.flat()), publisherNews()]);
+    diag.push(...pub.diag);
     const seen = new Set();
     const uniq = arr => arr.filter(it => { const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; });
-    const spec = await freshNews(uniq(specific).sort((a, b) => b.ts - a.ts), 96, 12);
-    const gen = await freshNews(uniq(general).sort((a, b) => b.ts - a.ts), 36, 10);
-    const genRel = gen.filter(mentions);
-    items = [...spec, ...genRel].sort((a, b) => b.ts - a.ts).slice(0, 15).map(i => ({ ...i, scope: 'stock' }));
-    if (items.length < 8) items = items.concat(gen.filter(g => !genRel.includes(g)).slice(0, 8 - items.length).map(i => ({ ...i, scope: 'market' })));
+    const fromPub = uniq(pub.items.filter(isMine).filter(it => it.ts && it.ts > now - 90 * 86400000 && it.ts < now + 3600000)).map(it => ({ ...it, verified: true }));
+    const cand = uniq(search.filter(isMine)).sort((a, b) => b.ts - a.ts);
+    const verified = (await freshNews(cand, 90 * 24, 14)).filter(it => it.verified).map(it => ({ ...it, via: 'search' }));
+    const mv = await todaysIndexMoves().catch(() => ({})), todayIst = istNow().toISOString().slice(0, 10);
+    items = fromPub.concat(verified).filter(it => !(new Date(it.ts + 19800000).toISOString().slice(0, 10) === todayIst && contradictsToday(it.title, mv)))
+      .sort((a, b) => b.ts - a.ts).slice(0, 15).map(i => ({ ...i, scope: 'stock' }));
     }
     items = items.map(i => ({ ...i, verified: !!i.verified, pubDate: i.ts ? new Date(i.ts).toISOString() : '', sentiment: getSentiment(i.title + ' ' + i.description) }));
     const result = { symbol, items, fetchedAt: new Date().toISOString(), feeds: diag, build: 'news-r3' };
@@ -2432,7 +2468,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-16-r41 (news: only fresh stories, dates checked on the article page; news fixed; OI analysis on Derivatives; F&O indices on Home; fundamentals keep last good values; scanner shows every pattern; alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
+const BUILD = '2026-10-17-r42 (stock pages: only news about that company, publishers first, dates shown; news: only fresh stories, dates checked on the article page; news fixed; OI analysis on Derivatives; F&O indices on Home; fundamentals keep last good values; scanner shows every pattern; alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

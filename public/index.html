@@ -2262,24 +2262,33 @@ function renderNews(d,tries){
     .then(r=>r.json().catch(()=>{ throw new Error('server answered HTTP '+r.status); }))
     .then(data=>{
       if(window.CURRENT!==d) return;
-      if(!data.items || !data.items.length){ const f=(data.feeds||[]).map(x=>`${x.host}: ${x.status!=null?'HTTP '+x.status:(x.err||'no reply')}${x.status===200?' ('+x.n+' items)':''}`); panel.innerHTML='<div class="metric-sub">No headlines came back for this page.'+(f.length?'<br>Feed check: '+f.map(newsEsc).join(' &middot; '):' The server is probably still on an older version, wait for the redeploy and reload.')+' <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>'; return; }
+      if(!data.items || !data.items.length){ const f=(data.feeds||[]).map(x=>`${x.host}: ${x.status!=null?'HTTP '+x.status:(x.err||'no reply')}${x.status===200?' ('+x.n+' items)':''}`); const okN=(data.feeds||[]).filter(x=>x.status===200).length; panel.innerHTML='<div class="metric-sub">'+(okN?'No news about '+newsEsc(d.name||d.symbol)+(isIndexSym(d.symbol)?' right now.':' in the last 90 days.'):'No headlines came back for this page.')+(f.length?'<details style="margin-top:6px;"><summary style="cursor:pointer;">Feed check ('+okN+' of '+f.length+' sources answered)</summary>'+f.map(newsEsc).join(' &middot; ')+'</details>':' The server is probably still on an older version, wait for the redeploy and reload.')+' <a href="#" onclick="renderNews(window.CURRENT);return false;">Retry</a></div>'; return; }
       const safeUrl=u=>/^https?:\/\//i.test(u)?u:'#';
+      const isStock=!isIndexSym(d.symbol);
+      const when=n=>{ const t=Date.parse(n.pubDate); if(!t) return ''; const h=(Date.now()-t)/3600000;
+        if(h<24) return newsAgo(n.pubDate); const dt=new Date(t), y=dt.getFullYear()!==new Date().getFullYear();
+        return '('+dt.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:y?'numeric':undefined,timeZone:'Asia/Kolkata'})+')'; };
+      const full=n=>n.pubDate?new Date(n.pubDate).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}):'';
       const row=n=>`
         <div class="news-item">
-          <a href="${newsEsc(safeUrl(n.link))}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;">
-            <p style="margin:0 0 4px;font-weight:600;">${newsEsc(n.title)}</p>
-          </a>
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+            <a href="${newsEsc(safeUrl(n.link))}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;flex:1;min-width:0;"><p style="margin:0 0 4px;font-weight:600;">${newsEsc(n.title)}</p></a>
+            <span class="metric-sub" style="white-space:nowrap;" title="${newsEsc(full(n))}${n.verified?' (date checked on the article)':' (date from the news feed)'}">${n.verified?'':'listed '}${when(n)}</span>
+          </div>
           ${n.description?`<div class="metric-sub" style="margin:0 0 4px;line-height:1.4;">${newsEsc(n.description)}</div>`:''}
           <div class="news-meta">
             <span>${newsEsc(n.source||'News')}</span>&middot;
-            <span title="${n.pubDate?new Date(n.pubDate).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+(n.verified?' (checked on the article page)':' (time from the news feed; the article page gave none)'):''}">${n.verified?'':'listed '}${newsAgo(n.pubDate)||'Today'}</span>&middot;
             <span class="signal-chip ${n.sentiment==='Positive'?'sig-buy':n.sentiment==='Negative'?'sig-sell':'sig-hold'}" title="Rough keyword-based tone of the headline">${n.sentiment||'Neutral'}</span>
           </div>
         </div>`;
-      const st=data.items.filter(n=>n.scope!=='market'), mk=data.items.filter(n=>n.scope==='market');
-      panel.innerHTML = (st.length?st.map(row).join(''):'<div class="metric-sub">No recent headlines mention this stock.</div>')
-        + (mk.length?'<div class="metric-sub" style="margin:12px 0 2px;text-transform:uppercase;letter-spacing:.5px;">Latest market headlines</div>'+mk.map(row).join(''):'')
-        + `<div class="metric-sub" style="margin-top:8px;">Google News, Bing, Economic Times, Moneycontrol, Mint, Business Standard &middot; only stories published in the last few days: each one's date is checked on the article itself, old stories re-listed by the feeds are dropped &middot; refreshed every 15 min</div>`;
+      const st=data.items.filter(n=>n.scope!=='market'), mk=isStock?[]:data.items.filter(n=>n.scope==='market');
+      const recent=st.filter(n=>Date.now()-Date.parse(n.pubDate)<3*86400000), older=st.filter(n=>!(Date.now()-Date.parse(n.pubDate)<3*86400000));
+      const hdr=t=>'<div class="metric-sub" style="margin:10px 0 2px;text-transform:uppercase;letter-spacing:.5px;">'+t+'</div>';
+      panel.innerHTML = (st.length
+          ? (isStock&&older.length&&recent.length?hdr('Latest'):'')+recent.map(row).join('')+(older.length?(recent.length||isStock?hdr(recent.length?'Earlier':'No news in the last 3 days &middot; earlier'):'')+older.map(row).join(''):'')
+          : '<div class="metric-sub">No news about '+newsEsc(d.name||d.symbol)+(isStock?' in the last 90 days.':' right now.')+'</div>')
+        + (mk.length?hdr('Latest market headlines')+mk.map(row).join(''):'')
+        + `<div class="metric-sub" style="margin-top:8px;">${isStock?'Only news naming '+newsEsc(d.symbol)+': Moneycontrol, Economic Times, Mint, Business Standard, CNBC-TV18 and other market publishers first, then Google / Bing results whose date was checked on the article':'Google News, Bing and market publishers &middot; each date checked, old re-listed stories dropped'} &middot; refreshed every 15 min</div>`;
     })
     .catch(e=>{
       if(window.CURRENT!==d) return;

@@ -244,6 +244,7 @@
     .container{padding-left:10px;padding-right:10px;}
     .hm-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;} .hm-cards>.card:last-child{grid-column:1/-1;} .hm-big{font-size:18px;} .hm-idx .hm-top .metric-sub{display:none;}
   }
+  .snd-unlock{position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:9500;max-width:min(92vw,620px);background:#f0a93a;color:#1a1204;border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;font-size:13px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);}
   /* Home */
   .hm-row{margin-bottom:14px;}
   .hm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;}
@@ -2918,14 +2919,24 @@ window.cbtBtn=function(c){
   const tm=t=>new Date(t*1000).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
   const dt=t=>new Date(t*1000).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
   const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
-  let data=null, view=null, timer=null, sound=LS.get('cmSound',false), actx=null, inited=false, srcF=LS.get('cmSrc','all'), typF=LS.get('cmType','all');
+  let data=null, view=null, timer=null, sndMode=LS.get('cmSoundMode','auto'), actx=null, inited=false, srcF=LS.get('cmSrc','all'), typF=LS.get('cmType','all');
   const kindOf=c=>c.kind==='option'?'option':'stock', TYP={stock:'Stocks',option:'Index options'};
   const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scanner'}, srcOf=c=>c.source||'calls';
   const pickSum=x=>!x?null:srcF==='all'?x:(x.bySource?x.bySource[srcF]:(srcF==='calls'?x:null));
   // ---- sound (Web Audio; needs one click to unlock) ----
   function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
   function tone(f,t0,d,type,vol){ const o=actx.createOscillator(), g=actx.createGain(); o.type=type||'sine'; o.frequency.value=f; g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(vol||0.25,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+d); o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0+d+0.05); }
-  function beep(kind){ if(!sound||!ensureAudio()) return; const t=actx.currentTime;
+  // Sound mode: auto = on during market hours (Mon–Fri 9:15–15:30 IST), off otherwise; or always on / always off
+  function mktHours(){ const n=new Date(Date.now()+19800000), d=n.getUTCDay(), m=n.getUTCHours()*60+n.getUTCMinutes(); return d>=1&&d<=5&&m>=555&&m<=930; }
+  function soundOn(){ return sndMode==='on'||(sndMode==='auto'&&mktHours()); }
+  // browsers block sound until the page has been clicked or tapped once: unlock on the first interaction, and say so
+  function unlockBar(){ let b=document.getElementById('sndUnlock'); const need=soundOn()&&(!actx||actx.state!=='running');
+    if(need&&!b){ b=document.createElement('button'); b.id='sndUnlock'; b.type='button'; b.className='snd-unlock'; b.textContent='🔊 Alert sound is on for market hours. Tap here (or anywhere) once so the browser lets it play'; b.onclick=()=>{ ensureAudio(); setTimeout(()=>{ unlockBar(); if(actx&&actx.state==='running') beep('info',true); },150); }; document.body.appendChild(b); }
+    else if(!need&&b) b.remove(); }
+  ['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,()=>{ if(soundOn()||sndMode!=='off'){ ensureAudio(); setTimeout(unlockBar,150); } },{capture:true,passive:true}));
+  setInterval(unlockBar,30000); setTimeout(unlockBar,2500);
+  window.cmSoundLabel=()=>sndMode==='auto'?(soundOn()?'🔊 Sound: auto (on now)':'🔇 Sound: auto (off, market closed)'):sndMode==='on'?'🔊 Sound: always on':'🔇 Sound: off';
+  function beep(kind,force){ if((!force&&!soundOn())||!ensureAudio()) return; const t=actx.currentTime;
     if(kind==='good'){ tone(660,t,.18); tone(880,t+.17,.18); tone(1320,t+.34,.35); }
     else if(kind==='bad'){ tone(300,t,.25,'sawtooth',.2); tone(220,t+.28,.25,'sawtooth',.2); tone(300,t+.56,.25,'sawtooth',.2); tone(220,t+.84,.4,'sawtooth',.2); }
     else { tone(740,t,.15); tone(740,t+.2,.15); } }
@@ -3074,17 +3085,17 @@ window.cbtBtn=function(c){
     b.querySelectorAll('[data-cmexit]').forEach(x=>x.onclick=async()=>{ if(!confirm('Exit this position at the live price? It will count in results and the daily summary.')) return; x.disabled=true; x.textContent='Exiting…'; let msg=''; try{ const r=await fetch('/api/calls/monitor/exit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:x.dataset.cmexit})}); const j=await r.json(); msg=j.ok?`Exited at ₹${j.exit} (${j.pnlPct>0?'+':''}${j.pnlPct}%)`:(j.error||'failed'); }catch(e){ msg='failed: '+e.message; } x.textContent=msg; setTimeout(poll,1200); });
     b.querySelectorAll('[data-cmrm]').forEach(x=>x.onclick=async()=>{ if(!confirm('Stop monitoring this item?')) return; x.textContent='Removing…'; try{ await fetch('/api/calls/monitor/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:x.dataset.cmrm})}); }catch(e){} await poll(); });
     b.querySelector('#cmEodNow').onclick=async e=>{ e.target.textContent='Working…'; try{ await fetch('/api/calls/eod/run',{method:'POST'}); }catch(x){} await poll(); };
-    const sb=view.querySelector('#cmSnd'); sb.textContent=sound?'🔊 Sound on':'🔇 Sound off';
+    const sb=view.querySelector('#cmSnd'); sb.textContent=window.cmSoundLabel(); sb.title='Click to switch: Auto (on during market hours, 9:15–3:30 IST weekdays) → Always on → Off';
     view.querySelector('#cmLive').innerHTML=`<span class="cm-dot ${data.stale?'off':''}"></span>${data.stale?'Connection lost, retrying':(data.market==='open'?'Live':'Market closed')} · updated ${tm(Math.floor(Date.now()/1000))}`;
   }
   function open(){
     if(view) return; view=document.createElement('div'); view.className='cm';
-    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔇 Sound off</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmCalls" style="border-color:var(--blue);color:var(--blue);" title="Every trade call with entry, stop, targets, the strategy lab and backtests">Trade Calls</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
+    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔊 Sound</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmCalls" style="border-color:var(--blue);color:var(--blue);" title="Every trade call with entry, stop, targets, the strategy lab and backtests">Trade Calls</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
     document.body.appendChild(view);
     view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; document.dispatchEvent(new Event('cm:closed')); };
     view.querySelector('#cmCalls').onclick=()=>document.getElementById('callsBtn')?.click();
-    view.querySelector('#cmSnd').onclick=()=>{ sound=!sound; LS.set('cmSound',sound); if(sound){ ensureAudio(); beep('info'); } draw(); };
-    view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k); };
+    view.querySelector('#cmSnd').onclick=()=>{ sndMode=sndMode==='auto'?'on':sndMode==='on'?'off':'auto'; LS.set('cmSoundMode',sndMode); if(soundOn()){ ensureAudio(); beep('info'); } unlockBar(); draw(); };
+    view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k,true); };
     view.querySelector('#cmNote').onclick=async()=>{ try{ const r=await Notification.requestPermission(); alert(r==='granted'?'Browser alerts on: you will get a pop-up when this tab is in the background.':'Browser alerts were not allowed.'); }catch(e){ alert('This browser does not support alerts.'); } };
     draw(); poll().then(schedule);
   }

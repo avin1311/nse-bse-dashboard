@@ -121,6 +121,8 @@
   .pg-controls select{background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:7px 8px;border-radius:8px;font-size:12px;}
   .pg-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex:none;} .pg-seg button{background:var(--panel2);color:var(--text2);border:0;border-right:1px solid var(--border);padding:7px 11px;font-size:12px;cursor:pointer;} .pg-seg button:last-child{border-right:0;} .pg-seg button.on{background:var(--blue);color:#fff;}
   .pg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
+  .vd-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:10px;} .vd-card{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:0;} .vd-main{font-size:16px;font-weight:600;margin:3px 0;} .vd-main.amber{color:var(--amber);} .vd-agree.vd-up{border-color:var(--green);background:rgba(38,194,129,.10);} .vd-agree.vd-dn{border-color:var(--red);background:rgba(239,83,80,.10);}
+  .xs-ag{font-weight:700;letter-spacing:.03em;white-space:nowrap;} .xs-mixed{color:var(--text2);font-weight:500;} tr.xs-al-up td{background:rgba(38,194,129,.09);} tr.xs-al-dn td{background:rgba(239,83,80,.09);}
   .pg-card{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel);min-width:0;} .pg-card.mtf-bull{border-color:rgba(38,194,129,.75);box-shadow:0 0 0 1px rgba(38,194,129,.25) inset;} .pg-card.mtf-bear{border-color:rgba(239,83,80,.75);box-shadow:0 0 0 1px rgba(239,83,80,.25) inset;}
   .pg-card-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;} .pg-card-h b{font-size:14px;} .pg-card-h .pg-open{margin-left:auto;font-size:11px;padding:3px 8px;}
   .pg-mini{height:200px;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:6px;}
@@ -391,7 +393,7 @@
 <div id="stockView">
 <div class="stock-head" id="stockHead"></div>
 
-<div class="view-tabs" id="viewTabs"><button class="vt-btn" data-vtab="overview">Overview</button><button class="vt-btn" data-vtab="chart">Chart &amp; patterns</button><button class="vt-btn" data-vtab="fundamentals">Fundamentals</button><button class="vt-btn" data-vtab="screener">Screener &amp; scans</button><button class="vt-btn" data-vtab="derivatives">Derivatives</button><button class="vt-btn" data-vtab="portfolio">Portfolio &amp; tools</button></div>
+<div class="view-tabs" id="viewTabs"><button class="vt-btn" data-vtab="overview">Overview</button><button class="vt-btn" data-vtab="chart">Scan &amp; charts</button><button class="vt-btn" data-vtab="fundamentals">Fundamentals</button><button class="vt-btn" data-vtab="derivatives">Derivatives</button><button class="vt-btn" data-vtab="portfolio">Portfolio &amp; tools</button></div>
 <div class="container">
 <div class="vtab-pane" id="vtab-overview" data-vtab="overview" style="display:none;">
   <section id="sec-overview">
@@ -413,11 +415,17 @@
 <div class="vtab-pane" id="vtab-chart" data-vtab="chart" style="display:none;">
 <div class="grid cols-2" style="grid-template-columns:1fr;">    <section id="sec-chart" class="panel">
       <div class="panel-head"><h3>Chart</h3>
+        <label class="toggle-mini" title="Draw the open stock's breakout level and its pattern trigger / stop / target on this chart"><input type="checkbox" id="chartLinesToggle" checked> Pattern &amp; breakout lines</label>
         <div class="pc-group" id="chartModeBtns"><button class="pc-btn" data-mode="pro" title="Upstox real data: drawing tools, indicators, strategies, backtest">Upstox chart</button><button class="pc-btn" data-mode="tv" title="Embedded TradingView chart">TradingView</button><a class="pc-btn" id="tvOpenLink" target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" title="Open the full TradingView chart in a new tab (works for every NSE/BSE symbol)" style="text-decoration:none;">Open on tradingview.com ↗</a></div>
       </div>
       <div id="proChartRoot"></div>
       <div id="tvWidgetRoot" style="display:none;width:100%;"></div>
     </section></div>
+  <section id="sec-verdict" class="panel">
+    <div class="panel-head"><h3>Verdict</h3><span class="metric-sub">screener, chart pattern and breakout for the open stock, side by side</span></div>
+    <div id="verdictStrip" class="vd-strip"><div class="metric-sub">Loading the open stock…</div></div>
+    <div id="screenerFocus"></div>
+  </section>
   <section id="sec-patterns" class="panel">
     <div class="panel-head"><h3>Chart patterns</h3><span class="metric-sub">4 timeframes at once &middot; 17 classic patterns &middot; real Upstox candles</span></div>
     <p class="desc">The same stock on <b>Intraday (15-min)</b>, <b>Hourly</b>, <b>Daily</b> and <b>Weekly</b> charts. By default only <b>recent</b> formations are shown (forming now, or broken out in the last few bars), each with how old it is, how far price is from the trigger, and how this pattern has played out before on this chart. Patterns that agree across timeframes are highlighted and explained at the top. Click a pattern to see it drawn on the big chart with the full logic and price-action checks.</p>
@@ -426,7 +434,7 @@
       <div class="pg-seg" id="pgShow" title="Recent hides patterns that broke out long ago"><button data-v="recent" class="on">Recent</button><button data-v="all">All</button></div>
       <div class="pg-seg" id="pgBias"><button data-v="all" class="on">All</button><button data-v="bullish">Bullish</button><button data-v="bearish">Bearish</button></div>
       <select id="patFilter" title="Pattern type"><option value="all">All types</option><option value="confirmed">Confirmed only</option><option value="forming">Forming only</option><option value="reversal">Reversal patterns</option><option value="continuation">Continuation patterns</option></select>
-      <button class="btn" id="patScanBtn" title="Scan every stock and index on Daily and Hourly charts">Scan all stocks</button>
+      <button class="btn" id="patScanBtn" style="display:none" title="Moved: use Scan all in the all-stocks scan below">Scan all stocks</button>
     </div>
     <div id="patStatus" class="metric-sub" style="margin-bottom:8px;">Scroll here to analyse the open stock, or type a symbol.</div>
     <div id="pgMtf"></div>
@@ -463,73 +471,13 @@
     <div id="patHitStatus" class="metric-sub" style="margin:6px 0;"></div>
     <div id="patHitOut" style="overflow-x:auto;"></div>
   </section>
-  <section id="sec-priceaction" class="panel">
-    <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
-    <p class="desc">Pattern-based signals using real intraday OHLC data. All three strategies run on the currently selected stock. <strong>Signal</strong> shows the latest bar's reading. <strong>Backtest</strong> walks all historical bars forward individually without look-ahead — entries on confirmed closes, exits on stop-loss or target. Composite signal fires when at least 2 of 3 strategies agree.</p>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;margin-bottom:10px;">
-      <div><label>Stock</label><select id="paStock"></select></div>
-      <div><label>Strategy</label><select id="paStrategy">
-        <option value="all">All three (composite)</option>
-        <option value="5ema">5-EMA Breakout</option>
-        <option value="support-resistance">Support / Resistance</option>
-        <option value="trend-pullback">Trend Pullback</option>
-      </select></div>
-      <div><label>Lookback</label><select id="paRange">
-        <option value="6mo">6 months</option>
-        <option value="1y" selected>1 year</option>
-        <option value="2y">2 years</option>
-      </select></div>
-      <div style="display:flex;gap:6px;align-items:end;">
-        <button class="btn" id="paScanBtn" style="padding:9px;">Signal</button>
-        <button class="btn" id="paBacktestBtn" style="padding:9px;">Backtest</button>
-      </div>
-    </div>
-    <div id="paSignalOut" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
-    <div id="paComposite" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
-    <div class="grid cols-4" id="paStats" style="margin-bottom:14px;display:none;"></div>
-    <div style="overflow-x:auto;"><table id="paTable" style="display:none;margin-bottom:14px;">
-      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
-      <tbody id="paBody"></tbody>
-    </table></div>
-    <div id="paStatus" class="metric-sub"></div>
-  </section>
-</div>
-<div class="vtab-pane" id="vtab-fundamentals" data-vtab="fundamentals" style="display:none;">
-  <section id="sec-fourpanel">
-  <div class="grid cols-4" id="fourPanel"></div>
-  </section>
-
-    <div class="panel">
-      <h3>Sector peer comparison</h3>
-      <table>
-        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th></tr></thead>
-        <tbody id="peersBody"></tbody>
-      </table>
-    </div>
-  <section id="sec-compare" class="panel">
-    <div class="panel-head"><h3>Compare stocks</h3><span class="metric-sub">Pick up to 3 stocks to see every metric side by side</span></div>
-    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;">
-      <div><label>Stock 1</label><select id="cmpStock1"></select></div>
-      <div><label>Stock 2</label><select id="cmpStock2"></select></div>
-      <div><label>Stock 3 (optional)</label><select id="cmpStock3"><option value="">&mdash; none &mdash;</option></select></div>
-      <div><button class="btn" id="cmpRunBtn" style="width:100%;padding:9px;">Compare</button></div>
-    </div>
-    <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
-  </section>
-  <div class="panel">
-    <h3>Price distribution</h3>
-    <p class="desc">How many of the recent daily closes fell in each price band (time-at-price from real closes &mdash; not traded volume).</p>
-    <div class="chart-wrap" style="height:260px;"><canvas id="volumeChart"></canvas></div>
-  </div>
-</div>
-<div class="vtab-pane" id="vtab-screener" data-vtab="screener" style="display:none;">
   <section id="sec-screener" class="panel">
-    <div class="panel-head"><h3>Multi-stock screener</h3><span class="metric-sub" id="screenerCount"></span></div>
-    <div id="screenerFocus"></div>
-    <div class="filters">
-      <button class="btn scan-btn" id="screenerScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan now</button>
+    <div class="panel-head"><h3>All-stocks scan</h3><span class="metric-sub">screener + chart patterns + breakouts, one scan &middot; <span id="screenerCount"></span></span></div>
+        <div class="filters">
+      <button class="btn scan-btn" id="screenerScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan all</button>
       <button class="btn" id="exportScreenerBtn">Export CSV</button>
-      <label class="toggle-mini"><input type="checkbox" id="autoScanToggle" checked> Auto-scan every 60s</label>
+      <label class="toggle-mini" title="Refreshes prices only; the full scan runs when you press Scan all"><input type="checkbox" id="autoScanToggle" checked> Live prices every 60s</label>
+      <span class="metric-sub" style="align-self:center;">Also scan:</span><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="1W"> Weekly</label><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="1h"> Hourly</label><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="15m"> 15-min</label>
       <input id="screenerSearch" placeholder="Search stock or sector...">
       <select id="screenerFilter">
         <option value="all">All signals</option>
@@ -594,22 +542,18 @@
       </div>
       <div style="margin-top:10px;"><button class="btn" id="clearFiltersBtn">Clear all filters</button></div>
     </div>
-    <div style="max-height:360px;overflow-y:auto;">
+    <div class="tc-bar" id="xsChips"></div>
+    <div id="xsStatus" class="metric-sub" style="margin-bottom:6px;"></div>
+    <div style="max-height:520px;overflow:auto;">
       <table>
-        <thead><tr><th>Stock</th><th>Sector</th><th>Price</th><th>Change</th><th id="screenerRsiHeader">RSI</th><th id="screenerSignalHeader">Signal</th><th>Volume</th><th>Monitor</th></tr></thead>
+        <thead><tr><th>Stock</th><th title="How many of screener, daily pattern and daily breakout point the same way (+1 when the weekly chart agrees)">Agreement</th><th>Price</th><th>Change</th><th id="screenerSignalHeader">Screener</th><th>Chart pattern</th><th>Breakout / level</th><th id="screenerRsiHeader">RSI</th><th>Volume</th><th>Monitor</th></tr></thead>
         <tbody id="screenerBody"></tbody>
       </table>
     </div>
+    <details class="cm-box" id="xsReplayBox" style="margin-top:10px;"><summary style="cursor:pointer"><b>Does agreement help?</b> <span class="metric-sub">replays the same three checks on past daily candles and compares with doing nothing</span></summary><div id="xsReplay" style="margin-top:6px;"><button class="btn" id="xsReplayBtn">Measure now (about a minute)</button></div></details>
   </section>
-  <section id="sec-breakout" class="panel">
-    <div class="panel-head"><h3>Breakout scanner</h3><span class="metric-sub">90 F&amp;O stocks &middot; real Upstox candles</span></div>
-    <div class="tc-bar" id="bkTf"></div>
-    <div class="tc-bar" id="bkCat"></div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button class="btn scan-btn" id="bkScanBtn">Scan breakouts</button><span class="metric-sub" id="bkStatus">Pick a timeframe and press Scan.</span></div>
-    <div id="bkOut" style="overflow-x:auto;margin-top:8px;"></div>
-    <div id="bkRecord" style="margin-top:10px;"></div>
-  </section>
-  <section id="sec-heatmap" class="panel">
+    <details class="panel" id="moreBox"><summary style="cursor:pointer;font-weight:600;">More: sector heatmap &middot; seasonality <span class="metric-sub" style="font-weight:400;">(loads when opened)</span></summary>
+<section id="sec-heatmap" class="panel">
     <div class="panel-head"><h3>Sector heatmap</h3><span class="metric-sub">Tile size = number of stocks &middot; color = today's average change &middot; click a tile to filter the screener</span></div>
     <div id="heatmapGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;"></div>
     <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
@@ -624,6 +568,65 @@
     <div class="panel-head"><h3>Seasonality</h3><span class="metric-sub">Month / quarter / year returns across past years &middot; real data</span></div>
     <div id="seasStockBody"></div>
   </section>
+</details>
+  <section id="sec-priceaction" class="panel">
+    <div class="panel-head"><h3>Price action strategies</h3><span class="metric-sub">5-EMA breakout &middot; Support/resistance &middot; Trend-pullback &mdash; by Vrushal Bhilpawar</span></div>
+    <p class="desc">Pattern-based signals using real intraday OHLC data. All three strategies run on the currently selected stock. <strong>Signal</strong> shows the latest bar's reading. <strong>Backtest</strong> walks all historical bars forward individually without look-ahead — entries on confirmed closes, exits on stop-loss or target. Composite signal fires when at least 2 of 3 strategies agree.</p>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;margin-bottom:10px;">
+      <div><label>Stock</label><select id="paStock"></select></div>
+      <div><label>Strategy</label><select id="paStrategy">
+        <option value="all">All three (composite)</option>
+        <option value="5ema">5-EMA Breakout</option>
+        <option value="support-resistance">Support / Resistance</option>
+        <option value="trend-pullback">Trend Pullback</option>
+      </select></div>
+      <div><label>Lookback</label><select id="paRange">
+        <option value="6mo">6 months</option>
+        <option value="1y" selected>1 year</option>
+        <option value="2y">2 years</option>
+      </select></div>
+      <div style="display:flex;gap:6px;align-items:end;">
+        <button class="btn" id="paScanBtn" style="padding:9px;">Signal</button>
+        <button class="btn" id="paBacktestBtn" style="padding:9px;">Backtest</button>
+      </div>
+    </div>
+    <div id="paSignalOut" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
+    <div id="paComposite" style="margin-bottom:14px;padding:12px;background:var(--panel2);border-radius:8px;display:none;"></div>
+    <div class="grid cols-4" id="paStats" style="margin-bottom:14px;display:none;"></div>
+    <div style="overflow-x:auto;"><table id="paTable" style="display:none;margin-bottom:14px;">
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Total return</th><th>Profit factor</th><th>Max drawdown</th></tr></thead>
+      <tbody id="paBody"></tbody>
+    </table></div>
+    <div id="paStatus" class="metric-sub"></div>
+  </section>
+</div>
+<div class="vtab-pane" id="vtab-fundamentals" data-vtab="fundamentals" style="display:none;">
+  <section id="sec-fourpanel">
+  <div class="grid cols-4" id="fourPanel"></div>
+  </section>
+
+    <div class="panel">
+      <h3>Sector peer comparison</h3>
+      <table>
+        <thead><tr><th>Stock</th><th>Price</th><th>Change</th><th>P/E</th><th>P/B</th><th>ROE</th><th>ROCE</th></tr></thead>
+        <tbody id="peersBody"></tbody>
+      </table>
+    </div>
+  <section id="sec-compare" class="panel">
+    <div class="panel-head"><h3>Compare stocks</h3><span class="metric-sub">Pick up to 3 stocks to see every metric side by side</span></div>
+    <div class="bt-controls" style="grid-template-columns:1fr 1fr 1fr auto;">
+      <div><label>Stock 1</label><select id="cmpStock1"></select></div>
+      <div><label>Stock 2</label><select id="cmpStock2"></select></div>
+      <div><label>Stock 3 (optional)</label><select id="cmpStock3"><option value="">&mdash; none &mdash;</option></select></div>
+      <div><button class="btn" id="cmpRunBtn" style="width:100%;padding:9px;">Compare</button></div>
+    </div>
+    <div style="overflow-x:auto;"><table id="cmpTable" style="display:none;"><tbody id="cmpBody"></tbody></table></div>
+  </section>
+  <div class="panel">
+    <h3>Price distribution</h3>
+    <p class="desc">How many of the recent daily closes fell in each price band (time-at-price from real closes &mdash; not traded volume).</p>
+    <div class="chart-wrap" style="height:260px;"><canvas id="volumeChart"></canvas></div>
+  </div>
 </div>
 <div class="vtab-pane" id="vtab-derivatives" data-vtab="derivatives" style="display:none;">
   <section id="sec-fno" class="panel">
@@ -775,6 +778,210 @@
 </div>
 </div>
 
+<script>
+/* ============================================================
+   SCAN & CHARTS: one scan for screener + chart patterns + breakouts, the open stock's verdict,
+   lines on the main chart, and the "does agreement help?" replay.
+   Light on memory: per stock only a small summary is kept (window.XS); candles come from the shared
+   daily history (window.REAL_HIST); charts exist only for the open stock.
+   ============================================================ */
+window.XS = window.XS || {};            // symbol -> {pat, bk, w, h1, m15, at}
+let XS_CHIP = (()=>{ try{ return localStorage.getItem('xsChip')||'all'; }catch(e){ return 'all'; } })();
+const XS_WK = {};                       // weekly candles for the open stock's verdict, by symbol
+function xsSign(sig){ return /buy/.test(sig||'')?1:/sell/.test(sig||'')?-1:0; }
+function xsCandlesFromHist(h){ if(!h||!h.c) return []; return h.c.map((c,i)=>({t:h.t?h.t[i]:i,o:h.o&&h.o[i]!=null?h.o[i]:c,h:h.h?h.h[i]:c,l:h.l?h.l[i]:c,c,v:h.v?h.v[i]||0:0})).filter(x=>x.c>0); }
+// strongest recent pattern on a timeframe: {d, name, status, conf, forming, entry, stop, target}
+function xsPattern(C,tf){
+  if(!window.PatternEngine||!window.__patHelp||!C||C.length<40) return null;
+  let r; try{ r=PatternEngine.detect(C.slice(-320)); }catch(e){ return null; }
+  const H=window.__patHelp, c=C[C.length-1].c;
+  const L=(r.patterns||[]).filter(p=>p.status!=='Failed'&&H.dirOf(p)&&H.isRecent(p,tf,C.slice(-320)));
+  if(!L.length) return null;
+  // direction the same way as the pattern panel's timeframe summary: recent patterns weighted by confidence (a breakout counts more)
+  let w=0; L.forEach(p=>{ w+=H.dirOf(p)*(p.conf||50)/100*(p.brk!=null?1.5:1); }); const dir=w>0.15?1:w<-0.15?-1:0;
+  if(!dir) return null;
+  const pool=L.filter(p=>H.dirOf(p)===dir);
+  const p=pool.slice().sort((a,b)=>((b.brk!=null)-(a.brk!=null))||((b.conf||0)-(a.conf||0)))[0];
+  return {d:H.dirOf(p),name:p.name,status:p.brk!=null?p.status:'forming',conf:p.conf,forming:p.brk==null,entry:p.entry,stop:p.stop,target:p.target};
+}
+function xsBreak(C,key){
+  if(!window.BreakoutScanner||!C||C.length<80) return null;
+  const B=window.BreakoutScanner, cfg=B.TF[key], n=C.length-1;
+  let out=[]; try{ out=key==='M15'?B.sig15(C,n):B.sigDW(C,n,cfg,B.paceFrac?B.paceFrac(C,key):1)||[]; }catch(e){ return null; }
+  if(!out.length) return null;
+  const br=out.find(x=>x.type==='break'); if(br) return br;
+  return out.slice().sort((a,b)=>(a.dist||0)-(b.dist||0))[0];
+}
+function xsDaily(sym){
+  const C=xsCandlesFromHist(window.REAL_HIST&&window.REAL_HIST[sym]); if(C.length<80) return null;
+  const o=window.XS[sym]=Object.assign(window.XS[sym]||{},{pat:xsPattern(C,'1D'),bk:xsBreak(C,'D'),at:Date.now()});
+  return o;
+}
+// agreement: screener (chosen horizon) + daily pattern + daily breakout; +1 when the weekly chart agrees
+function xsAgree(d,h,x){
+  if(!x) return null;
+  const s=xsSign(h&&h.signal), p=x.pat?x.pat.d:0, b=x.bk&&x.bk.type==='break'?x.bk.d:0;
+  let a=s+p+b; const parts={s,p,b};
+  if(x.w&&a!==0&&Math.sign(x.w.d)===Math.sign(a)){ a+=Math.sign(a); parts.w=x.w.d; }
+  return {a,parts};
+}
+function xsAgreeHtml(ag){
+  const n=Math.abs(ag.a), up=ag.a>0, mixed=ag.a===0;
+  const nz=['s','p','b'].filter(k=>ag.parts[k]!==0), opp=nz.some(k=>Math.sign(ag.parts[k])!==Math.sign(ag.a));
+  if(mixed) return '<span class="xs-ag xs-mixed" title="The checks point different ways, or none fired">'+(nz.length?'● Mixed':'—')+'</span>';
+  return '<span class="xs-ag '+(up?'up':'down')+'" title="'+(n>=3?'All checks agree':'Score '+ag.a)+(ag.parts.w?' · weekly agrees':'')+(opp?' · one check disagrees':'')+'">'+(up?'▲':'▼').repeat(Math.min(n,4))+(n>=3?' Aligned':'')+'</span>';
+}
+const xsTfLine=(lab,y)=>y?'<div class="metric-sub">'+lab+': <span class="'+(y.d>0?'up':'down')+'">'+(y.d>0?'▲':'▼')+'</span> '+esc0(y.name)+'</div>':'';
+function esc0(t){ return String(t==null?'':t).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); }
+function xsPatHtml(x){
+  if(!x) return '<span class="metric-sub">—</span>';
+  const p=x.pat; let h=p?'<span class="'+(p.d>0?'up':'down')+'">'+(p.d>0?'▲ ':'▼ ')+esc0(p.name)+'</span><div class="metric-sub">'+esc0(p.status)+(p.conf?' · conf '+p.conf+'%':'')+'</div>':'<span class="metric-sub">none recent</span>';
+  return h+xsTfLine('Weekly',x.wp)+xsTfLine('Hourly',x.h1);
+}
+function xsBkHtml(x){
+  if(!x) return '<span class="metric-sub">—</span>';
+  const f=y=>{ if(!y) return ''; const up=y.d>0, t=y.type==='break'?(up?'Broke ':'Broke ')+y.name:(up?'Near ':'Near ')+y.name;
+    return '<span class="'+(y.type==='break'?(up?'up':'down'):'')+'" style="'+(y.type==='near'?'color:var(--amber)':'')+'">'+(up?'▲ ':'▼ ')+esc0(t)+'</span><div class="metric-sub">₹'+fmt(y.lvl,2)+(y.type==='near'?' · '+(y.dist*100).toFixed(1)+'% away':'')+(y.volR!=null?' · vol '+y.volR.toFixed(1)+'×':'')+'</div>'; };
+  let h=x.bk?f(x.bk):'<span class="metric-sub">inside its range</span>';
+  if(x.w&&x.w.src==='bk') h+='<div class="metric-sub">Weekly: <span class="'+(x.w.d>0?'up':'down')+'">'+(x.w.d>0?'▲':'▼')+'</span> '+esc0(x.w.name)+'</div>';
+  if(x.m15) h+='<div class="metric-sub">15-min: <span class="'+(x.m15.type==='break'?(x.m15.d>0?'up':'down'):'')+'">'+(x.m15.d>0?'▲':'▼')+'</span> '+(x.m15.type==='break'?'broke ':'near ')+esc0(x.m15.name)+'</div>';
+  return h;
+}
+const XS_CHIPS=[['all','All'],['aligned','Aligned only'],['bull','Bullish'],['bear','Bearish'],['break','Breakouts'],['pattern','Patterns'],['near','Near a level']];
+function xsChipOk(d,h){
+  if(XS_CHIP==='all') return true;
+  const x=window.XS[d.symbol]; if(!x) return false; const ag=xsAgree(d,h,x); if(!ag) return false;
+  if(XS_CHIP==='aligned') return Math.abs(ag.a)>=3;
+  if(XS_CHIP==='bull') return ag.a>0; if(XS_CHIP==='bear') return ag.a<0;
+  if(XS_CHIP==='break') return !!(x.bk&&x.bk.type==='break'); if(XS_CHIP==='near') return !!(x.bk&&x.bk.type==='near');
+  if(XS_CHIP==='pattern') return !!x.pat; return true;
+}
+function xsChipsRender(){
+  const el=document.getElementById('xsChips'); if(!el) return;
+  el.innerHTML='<span class="metric-sub">Show:</span> '+XS_CHIPS.map(([k,v])=>'<span class="tc-chip'+(k===XS_CHIP?' on':'')+'" data-xschip="'+k+'">'+v+'</span>').join('');
+}
+document.addEventListener('click',e=>{ const c=e.target.closest&&e.target.closest('[data-xschip]'); if(!c) return; XS_CHIP=c.dataset.xschip; try{ localStorage.setItem('xsChip',XS_CHIP); }catch(x){} renderScreener(); });
+const xsYield=()=>new Promise(r=>setTimeout(r,0));
+let xsBusy=false;
+// Scan all: fresh daily history + live prices (screener), then patterns and breakouts per stock; optional extra timeframes
+async function xsScanAll(quiet){
+  if(xsBusy) return; xsBusy=true;
+  const st=document.getElementById('xsStatus'), btn=document.getElementById('screenerScanBtn'), say=t=>{ if(st) st.textContent=t; };
+  const syms=STOCKS.concat(INDEX_ROWS_LIST).map(s=>s[0]);
+  try{
+    if(btn) btn.disabled=true;
+    if(!quiet){ syms.forEach(s=>{ if(window.REAL_HIST) delete window.REAL_HIST[s]; }); }
+    say('Loading daily candles and live prices…');
+    await scanScreenerLive();
+    let k=0; for(const s of syms){ xsDaily(s); if(++k%15===0){ say('Patterns and breakouts: '+k+' of '+syms.length+'…'); await xsYield(); } }
+    const tfs=[...document.querySelectorAll('.xs-tf:checked')].map(x=>x.value);
+    if(tfs.length){
+      // extra timeframes: one request per stock, for the stocks currently shown (most relevant first), at most 120
+      const shown=[...document.querySelectorAll('#screenerBody tr[data-symbol]')].map(tr=>tr.dataset.symbol).slice(0,120);
+      for(const tf of tfs){ let i=0, done=0;
+        async function worker(){ while(i<shown.length){ const s=shown[i++];
+          try{ const j=await fetch('/api/candles/'+encodeURIComponent(s)+'?tf='+tf,{cache:'no-store'}).then(r=>r.json());
+            const C=(j.series||[]).filter(x=>x&&x.c>0).map(x=>({t:x.t,o:x.o,h:x.h,l:x.l,c:x.c,v:x.v||0})), x=window.XS[s]=window.XS[s]||{};
+            if(tf==='1W'){ const C5=C.slice(-260), bk=xsBreak(C5,'W'), p=xsPattern(C5,'1W'); x.wp=p; x.w=bk&&bk.type==='break'?{d:bk.d,name:bk.name,src:'bk'}:(p?{d:p.d,name:p.name,src:'pat'}:null); }
+            else if(tf==='1h'){ x.h1=xsPattern(C.slice(-600),'1h'); }
+            else { let C2=C; if(C2.length&&C2[C2.length-1].t+900>Date.now()/1000) C2=C2.slice(0,-1); x.m15=xsBreak(C2,'M15'); }
+          }catch(e){}
+          if(++done%10===0) say((tf==='1W'?'Weekly':tf==='1h'?'Hourly':'15-min')+': '+done+' of '+shown.length+'…'); } }
+        await Promise.all([worker(),worker(),worker()]);
+      }
+    }
+    const n=Object.keys(window.XS).length, al=STOCKS.concat(INDEX_ROWS_LIST).filter(s=>{ const d=window.XS[s[0]]; return d; }).length;
+    say('Scanned '+new Date().toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+' · '+al+' stocks and indices on daily candles'+(tfs.length?' + '+tfs.map(t=>t==='1W'?'weekly':t==='1h'?'hourly':'15-min').join(', ')+' (shown rows)':'')+' · prices refresh every 60 s, the full scan only when you press Scan all');
+  }catch(e){ say('Scan failed: '+e.message); }
+  finally{ xsBusy=false; if(btn) btn.disabled=false; try{ renderScreener(); renderVerdict(); }catch(e){} }
+}
+/* ---------- the open stock: verdict strip + lines on the main chart ---------- */
+async function xsWeekly(sym){
+  const c=XS_WK[sym]; if(c&&Date.now()-c.t<3600000) return c.v;
+  try{ const j=await fetch('/api/candles/'+encodeURIComponent(sym)+'?tf=1W',{cache:'no-store'}).then(r=>r.json()); const C=(j.series||[]).filter(x=>x&&x.c>0).map(x=>({t:x.t,o:x.o,h:x.h,l:x.l,c:x.c,v:x.v||0})).slice(-260);
+    const bk=xsBreak(C,'W'), p=xsPattern(C,'1W'); const v={bk,p,d:bk&&bk.type==='break'?bk.d:(p?p.d:0)}; XS_WK[sym]={t:Date.now(),v}; return v; }catch(e){ return null; }
+}
+let vdSeq=0;
+async function renderVerdict(){
+  const el=document.getElementById('verdictStrip'); const d=window.CURRENT; if(!el||!d||!d.horizons) return;
+  const seq=++vdSeq, sym=d.symbol, h=d.horizons.swing;
+  let x=window.XS[sym]; if(!x||!x.at||Date.now()-x.at>600000) x=xsDaily(sym)||x;
+  const card=(t,main,sub,cls)=>'<div class="vd-card"><div class="metric-sub">'+t+'</div><div class="vd-main '+(cls||'')+'">'+main+'</div><div class="metric-sub">'+sub+'</div></div>';
+  const draw=(wk)=>{
+    if(seq!==vdSeq||!window.CURRENT||window.CURRENT.symbol!==sym) return;
+    const xx=Object.assign({},x||{}); if(wk&&wk.d) xx.w={d:wk.d,name:wk.bk&&wk.bk.type==='break'?wk.bk.name:(wk.p?wk.p.name:''),src:wk.bk&&wk.bk.type==='break'?'bk':'pat'};
+    const ag=x?xsAgree(d,h,xx):null, s=xsSign(h.signal), p=x&&x.pat, b=x&&x.bk;
+    const n=ag?Math.abs(ag.a):0, up=ag&&ag.a>0;
+    el.innerHTML=
+      card('Screener (swing)',(s>0?'▲ ':s<0?'▼ ':'● ')+h.signalLabel,h.score+'/100 · reasons below',s>0?'up':s<0?'down':'')+
+      card('Chart pattern (daily)',p?(p.d>0?'▲ ':'▼ ')+esc0(p.name):'● None recent',p?esc0(p.status)+(p.conf?' · conf '+p.conf+'%':''):'no fresh formation near price',p?(p.d>0?'up':'down'):'')+
+      card('Breakout (daily)',b?(b.d>0?'▲ ':'▼ ')+(b.type==='break'?'Broke ':'Near ')+esc0(b.name):'● Inside its range',b?'level ₹'+fmt(b.lvl,2)+(b.type==='near'?' · '+(b.dist*100).toFixed(1)+'% away':'')+(b.volR!=null?' · volume '+b.volR.toFixed(1)+'×':''):'no 20/55-day or 52-week level in reach',b&&b.type==='break'?(b.d>0?'up':'down'):(b?'amber':''))+
+      card('Weekly chart',wk&&wk.d?(wk.d>0?'▲ ':'▼ ')+esc0(xx.w.name):'● Neutral',wk&&wk.d?'adds a point when it agrees':'no weekly breakout or pattern',wk&&wk.d?(wk.d>0?'up':'down'):'')+
+      '<div class="vd-card vd-agree '+(ag&&n>=3?(up?'vd-up':'vd-dn'):'')+'"><div class="metric-sub">Agreement</div><div class="vd-main '+(ag&&ag.a?(up?'up':'down'):'')+'">'+(ag&&ag.a?(up?'▲':'▼').repeat(Math.min(n,4))+(n>=3?' Aligned':''):'● Mixed')+'</div><div class="metric-sub">'+(ag?(ag.a?n+' point'+(n>1?'s':'')+(up?' up':' down'):'checks disagree or none fired'):'loading…')+'</div></div>';
+    xsLines(sym,xx,ag);
+  };
+  draw(null); xsWeekly(sym).then(draw);
+}
+// pattern & breakout lines on the main (Upstox) chart
+let xsLineState={main:null,lines:[],key:''}, xsLineData=null;
+function xsLines(sym,x,ag){ xsLineData={sym,x,ag,zone:(window.__PATZ&&window.__PATZ.sym===sym)?window.__PATZ.z:null}; xsApplyLines(true); }
+function xsApplyLines(force){
+  try{
+    const S=window.ProChart&&ProChart._S, on=document.getElementById('chartLinesToggle')?.checked;
+    const main=S&&S.main; if(!main) return;
+    const want=on&&xsLineData&&S.sym===xsLineData.sym, key=want?JSON.stringify([xsLineData.sym,xsLineData.x&&xsLineData.x.bk&&xsLineData.x.bk.lvl,xsLineData.zone&&[xsLineData.zone.bull&&xsLineData.zone.bull.level,xsLineData.zone.bear&&xsLineData.zone.bear.level]]):'';
+    if(!force&&xsLineState.main===main&&xsLineState.key===key) return;
+    if(xsLineState.main===main) xsLineState.lines.forEach(l=>{ try{ main.removePriceLine(l); }catch(e){} });
+    xsLineState={main,lines:[],key};
+    if(!want) return;
+    const add=(price,color,title,style)=>{ if(price>0) xsLineState.lines.push(main.createPriceLine({price,color,lineWidth:1,lineStyle:style==null?2:style,axisLabelVisible:true,title})); };
+    const b=xsLineData.x&&xsLineData.x.bk; if(b) add(b.lvl,b.d>0?'#26c281':'#ef5350',(b.type==='break'?'broke ':'near ')+b.name,2);
+    const z=xsLineData.zone; if(z){ if(z.bull){ add(z.bull.level,'#26c281','pattern buy trigger',1); } if(z.bear){ add(z.bear.level,'#ef5350','pattern sell trigger',1); }
+      const side=xsLineData.ag&&xsLineData.ag.a<0?z.bear:z.bull; if(side){ if(side.stop) add(side.stop,'#f0a93a','stop',3); if(side.target) add(side.target,'#3d8bfd','target',3); } }
+    else { const p=xsLineData.x&&xsLineData.x.pat; if(p){ add(p.entry,p.d>0?'#26c281':'#ef5350',p.name+(p.forming?' trigger':' level'),1); if(p.stop) add(p.stop,'#f0a93a','stop',3); if(p.target) add(p.target,'#3d8bfd','target',3); } }
+  }catch(e){}
+}
+setInterval(()=>{ if(window.ACTIVE_VTAB==='chart') xsApplyLines(false); },1500); // re-draw after the chart switches timeframe or stock
+document.addEventListener('change',e=>{ if(e.target&&e.target.id==='chartLinesToggle') xsApplyLines(true); });
+window.addEventListener('pat:loaded',e=>{ const D=e.detail||{}; window.__PATZ={sym:D.sym,z:D.zone}; if(window.CURRENT&&window.CURRENT.symbol===D.sym&&xsLineData&&xsLineData.sym===D.sym){ xsLineData.zone=D.zone; xsApplyLines(true); } });
+// "More" section loads only when opened
+document.addEventListener('toggle',e=>{ if(e.target&&e.target.id==='moreBox'&&e.target.open&&window.CURRENT){ try{ renderHeatmap(); renderSeasonalityInto(document.getElementById('seasStockBody'),window.CURRENT.symbol,window.CURRENT.name); }catch(x){} } },true);
+/* ---------- does agreement help? replay on past daily candles ---------- */
+async function xsReplay(){
+  const box=document.getElementById('xsReplay'); if(!box||!window.BreakoutScanner) return;
+  const B=window.BreakoutScanner, cfg=B.TF.D, H=10, STEP=5;
+  const syms=STOCKS.map(s=>s[0]).filter(s=>(!window.FNO_SET||window.FNO_SET.has(s))&&window.REAL_HIST&&window.REAL_HIST[s]).slice(0,120);
+  if(!syms.length){ box.innerHTML='<div class="metric-sub">Press Scan all first so the daily candles are loaded.</div>'; return; }
+  const G={}, add=(k,r,t)=>{ const a=G[k]=G[k]||{n:0,w:0,ret:0,t0:t,t1:t}; a.n++; if(r.win) a.w++; a.ret+=r.ret; a.t0=Math.min(a.t0,t); a.t1=Math.max(a.t1,t); };
+  let done=0;
+  for(const sym of syms){
+    const C=xsCandlesFromHist(window.REAL_HIST[sym]); if(C.length<200) continue;
+    const closes=C.map(x=>x.c), Hh=C.map(x=>x.h), Ll=C.map(x=>x.l);
+    for(let k=Math.max(120,C.length-250);k<C.length-H;k+=STEP){
+      const atr=B.atrAt(C,k,14); if(!(atr>0)) continue;
+      const cl=closes.slice(0,k+1), hh=Hh.slice(0,k+1), ll=Ll.slice(0,k+1), last=cl[cl.length-1];
+      const dd={symbol:sym,prices:cl,histHL:{h:hh,l:ll},realHistory:true,price:last,support1:Math.min(...ll.slice(-20)),resistance1:Math.max(...hh.slice(-20))};
+      dd.support2=dd.support1*0.97; dd.resistance2=dd.resistance1*1.03; dd.targetMean=last;
+      let s=0; try{ s=xsSign(buildHorizons(dd).swing.signal); }catch(e){}
+      const sub=C.slice(Math.max(0,k-319),k+1), pt=xsPattern(sub,'1D'), p=pt?pt.d:0;
+      let b=0; try{ const o=B.sigDW(C,k,cfg,1)||[]; const br=o.find(x=>x.type==='break'); if(br) b=br.d; }catch(e){}
+      for(const d of [1,-1]){ const r=B.fwdRes(C,k,d,atr,H,false); if(r) add('base'+(d>0?'+':'-'),r,C[k].t); }
+      const a=s+p+b, n=Math.abs(a); if(!n) continue;
+      const r=B.fwdRes(C,k,Math.sign(a),atr,H,false); if(r) add((n>=3?'3':String(n))+(a>0?'+':'-'),r,C[k].t);
+    }
+    if(++done%5===0){ box.innerHTML='<div class="metric-sub">Replaying… '+done+' of '+syms.length+' stocks</div>'; await xsYield(); }
+  }
+  const d0=t=>new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'});
+  const all=Object.values(G); const t0=Math.min(...all.map(a=>a.t0)), t1=Math.max(...all.map(a=>a.t1));
+  const row=(k,lab)=>{ const a=G[k]; if(!a) return '<tr><td>'+lab+'</td><td>0</td><td>—</td><td>—</td></tr>'; return '<tr><td>'+lab+'</td><td>'+a.n+'</td><td>'+Math.round(a.w/a.n*100)+'%</td><td class="'+(a.ret>0?'up':'down')+'">'+(a.ret/a.n>0?'+':'')+(a.ret/a.n).toFixed(2)+'%</td></tr>'; };
+  box.innerHTML='<div class="metric-sub" style="margin-bottom:6px;">Daily candles · '+d0(t0)+' – '+d0(t1)+' · '+done+' F&amp;O stocks · checked every '+STEP+'th day · held '+H+' days · before costs</div>'+
+    '<div style="overflow-x:auto;"><table><thead><tr><th>Signal</th><th>Past signals</th><th>Reached +1 ATR before −1 ATR</th><th>Avg move after '+H+' days</th></tr></thead><tbody>'+
+    row('base+','<span class="metric-sub">Baseline: any day, bought</span>')+row('1+','▲ one check')+row('2+','▲▲ two agree')+row('3+','<b>▲▲▲ all three agree</b>')+
+    row('base-','<span class="metric-sub">Baseline: any day, sold</span>')+row('1-','▼ one check')+row('2-','▼▼ two agree')+row('3-','<b>▼▼▼ all three agree</b>')+'</tbody></table></div>'+
+    '<div class="metric-sub" style="margin-top:4px;">A signal only adds something if it beats its baseline row. Sells are measured as shorts. The screener here is its swing view; patterns and breakouts use only candles up to each day. <a href="#" id="xsReplayAgain">Measure again</a></div>';
+}
+document.addEventListener('click',e=>{ const t=e.target.closest&&e.target.closest('#xsReplayBtn,#xsReplayAgain'); if(!t) return; e.preventDefault(); const box=document.getElementById('xsReplay'); if(box) box.innerHTML='<div class="metric-sub">Starting…</div>'; setTimeout(()=>xsReplay().catch(err=>{ if(box) box.innerHTML='<div class="metric-sub">Replay failed: '+esc0(err.message)+'</div>'; }),30); });
+</script>
 <script>
 /* Render's free tier sleeps when idle and answers the first requests with an HTML "waking up" page instead of JSON.
    Retry those API calls quietly (with a small banner) instead of failing with "Unexpected token '<'". */
@@ -1602,7 +1809,7 @@ function selectStock(symbol){
     if(!hist || window.CURRENT!==d) return;
     applyRealHistory(d, hist);
     renderStockHead(d);
-    ['overview','fundamentals','screener'].forEach(t=>{ if(TAB_DONE[t]===d.symbol) runTab(t,d,true); });
+    ['overview','fundamentals','chart'].forEach(t=>{ if(TAB_DONE[t]===d.symbol) runTab(t,d,true); });
   });
 }
 
@@ -2097,7 +2304,7 @@ async function scanScreenerLive(){
   if(btn) btn.innerHTML='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan now';
   renderScreener();
 }
-document.getElementById('screenerScanBtn')?.addEventListener('click', scanScreenerLive);
+document.getElementById('screenerScanBtn')?.addEventListener('click', ()=>xsScanAll());
 let autoScanTimer=null;
 function setupAutoScan(){
   const box=document.getElementById('autoScanToggle');
@@ -2177,19 +2384,27 @@ function renderScreener(){
     if(dividendOnly && d.divYield<=0) return false;
     return true;
   });
-  rows.sort((a,b)=>b.horizons[displayHorizon].score-a.horizons[displayHorizon].score);
+  rows=rows.filter(d=>xsChipOk(d,d.horizons[displayHorizon]));
+  rows.sort((a,b)=>{ const A=xsAgree(a,a.horizons[displayHorizon],window.XS&&window.XS[a.symbol]), B=xsAgree(b,b.horizons[displayHorizon],window.XS&&window.XS[b.symbol]);
+    return (B?Math.abs(B.a):0)-(A?Math.abs(A.a):0)||b.horizons[displayHorizon].score-a.horizons[displayHorizon].score; });
   const ss=window.SCREENER_SRC; const priceNote=ss?` &middot; prices: <b>${ss.src}</b> as of ${new Date(ss.t).toLocaleTimeString('en-IN')}`:' &middot; <span style="color:var(--amber)">prices not live yet &mdash; press Scan now</span>';
   document.getElementById('screenerCount').innerHTML=`${rows.length} of ${all.length} &mdash; ${window.__screenerRealNote}${priceNote}`;
   const body=document.getElementById('screenerBody');
   body.innerHTML = rows.map(d=>{
     const h = d.horizons[displayHorizon];
-    return `<tr class="row-click" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong>${window.FNO_SET&&window.FNO_SET.has(d.symbol)?'<span class="fno-badge" data-fno="'+d.symbol+'" title="Options &amp; futures available — click to open the options scan">F&amp;O</span>':''}</td><td class="lbl">${d.sector}</td><td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
+    const x=(window.XS&&window.XS[d.symbol])||null, ag=xsAgree(d,h,x);
+    return `<tr class="row-click${ag&&Math.abs(ag.a)>=3?(ag.a>0?' xs-al-up':' xs-al-dn'):''}" data-symbol="${d.symbol}"><td><strong>${d.symbol}</strong>${window.FNO_SET&&window.FNO_SET.has(d.symbol)?'<span class="fno-badge" data-fno="'+d.symbol+'" title="Options &amp; futures available — click to open the options scan">F&amp;O</span>':''}<div class="metric-sub">${d.sector}</div></td>
+      <td>${ag?xsAgreeHtml(ag):'<span class="metric-sub">press Scan all</span>'}</td>
+      <td>${d.sector==='Index'?'':'&#8377;'}${fmt(d.price,2)}</td>
       <td class="${d.changePct>=0?'up':'down'}">${chgTxt(d.price,d.changePct)}</td>
-      <td>${fmt(h.rsi,1)}</td><td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}</td>
+      <td><span class="signal-chip sig-${h.signal}">${h.signalLabel}</span>${combo.length>1?' <span class="metric-sub" style="font-size:9px;">(+'+(combo.length-1)+' agree)</span>':''}<div class="metric-sub">${h.score}/100</div></td>
+      <td>${xsPatHtml(x)}</td><td>${xsBkHtml(x)}</td>
+      <td>${fmt(h.rsi,1)}</td>
       <td>${(d.sector==='Index'||!d.volReal)?'&mdash;':fmtVol(d.volShares!=null?d.volShares:d.volumeCr*1e7)}</td>
       <td>${/buy|sell/.test(h.signal)?window.monBtn({source:'screener',symbol:d.symbol,side:/sell/.test(h.signal)?'SELL':'BUY',mode:displayHorizon==='intraday'?'intraday':'swing',label:'Screener '+h.signalLabel+' ('+displayHorizon+')',note:'Screener '+h.signalLabel+' on the '+displayHorizon+' view, score '+h.score+'.'},'+ Add'):''}</td></tr>`;
   }).join('');
-  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; selectStock(tr.dataset.symbol); }));
+  body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',e=>{ if(e.target.closest('[data-addmon]')) return; selectStock(tr.dataset.symbol); try{ document.getElementById('sec-chart').scrollIntoView({behavior:'smooth',block:'start'}); }catch(x){} }));
+  xsChipsRender();
   body.querySelectorAll('.fno-badge').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); gotoOptionsFor(b.dataset.fno); }));
   renderScreenerFocus();
 }
@@ -2211,7 +2426,7 @@ function renderScreenerFocus(){
     <details><summary class="metric-sub" style="cursor:pointer;">Full score breakdown</summary>${scoreBreakdownHtml(h)}</details>
     <div class="metric-sub" style="margin-top:6px;">Click any row in the table below to open that stock; this panel then explains its signal. The view (Intraday / Swing / Long-term) follows the horizon picker.</div></div>`;
 }
-{ const _rs=renderSignal; renderSignal=function(d){ _rs(d); try{ renderScreenerFocus(); }catch(e){} }; }
+{ const _rs=renderSignal; renderSignal=function(d){ _rs(d); try{ renderScreenerFocus(); }catch(e){} try{ if(window.ACTIVE_VTAB==='chart') renderVerdict(); }catch(e){} }; }
 document.getElementById('screenerHorizon')?.addEventListener('change', renderScreener);
 document.getElementById('moreFiltersBtn')?.addEventListener('click',()=>{
   const panel=document.getElementById('moreFiltersPanel');
@@ -2273,11 +2488,11 @@ document.getElementById('rail').addEventListener('click',(e)=>{
    VIEW TABS — each group of panels renders only when its tab is
    opened (once per symbol), so nothing off-screen is fetched/drawn.
    ============================================================ */
-const VTABS=['overview','chart','fundamentals','screener','derivatives','portfolio'];
+const VTABS=['overview','chart','fundamentals','derivatives','portfolio'];
 const SEC_TAB={'sec-overview':'overview','sec-signal':'overview','sec-news':'overview',
   'sec-chart':'chart','sec-patterns':'chart','sec-priceaction':'chart',
   'sec-fourpanel':'fundamentals','sec-compare':'fundamentals',
-  'sec-screener':'screener','sec-heatmap':'screener','sec-seasonality':'screener',
+  'sec-screener':'chart','sec-heatmap':'chart','sec-seasonality':'chart','sec-verdict':'chart',
   'sec-fno':'derivatives','sec-options':'derivatives',
   'sec-watchlist':'portfolio','sec-positions':'portfolio','sec-portfolio':'portfolio','sec-alerts':'portfolio','sec-backtest':'portfolio'};
 const TAB_DONE={}; // tab -> symbol it was last rendered for
@@ -2287,13 +2502,16 @@ function currentTab(){
   let t=null;
   try{ const m=/[#&]tab=(\w+)/.exec(location.hash); if(m) t=m[1]; }catch(e){}
   if(!t){ try{ t=localStorage.getItem('vtab'); }catch(e){} }
+  if(t==='screener') t='chart'; // merged into Scan & charts
   return VTABS.includes(t)?t:(window.ACTIVE_VTAB||'overview');
 }
 function runTab(t,d,refresh){
   const sym=d.symbol;
   const J={
     overview:()=>{ safe(()=>renderOverview(d)); safe(()=>renderSignal(d)); if(!refresh) safe(()=>renderNews(d)); },
-    chart:()=>{ if(!refresh){ safe(()=>renderPriceChart(d)); safe(()=>populatePaStockList()); } },
+    chart:()=>{ if(!refresh){ safe(()=>renderPriceChart(d)); safe(()=>populatePaStockList()); }
+      safe(()=>renderScreener()); safe(()=>renderVerdict()); if((!window.SCREENER_SRC || !Object.keys(window.XS||{}).length) && !window.__scanning){ window.__scanning=true; xsScanAll(true).finally(()=>{window.__scanning=false;}); }
+      if(!refresh && document.getElementById('moreBox')?.open){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
     fundamentals:()=>{ safe(()=>renderFourPanel(d)); if(!refresh){ safe(()=>renderSegments(d)); safe(()=>renderMacro(d)); safe(()=>renderPeers(d)); safe(()=>renderVolumeProfile(d)); } },
     screener:()=>{ safe(()=>renderScreener()); if(!window.SCREENER_SRC && !window.__scanning){ window.__scanning=true; scanScreenerLive().finally(()=>{window.__scanning=false;}); } if(!refresh){ safe(()=>renderHeatmap()); safe(()=>renderSeasonalityInto(document.getElementById('seasStockBody'),d.symbol,d.name)); } },
     derivatives:()=>{ safe(()=>renderFno(d)); safe(()=>renderFnoIndices()); },
@@ -2302,7 +2520,7 @@ function runTab(t,d,refresh){
   J[t]&&J[t](); TAB_DONE[t]=sym;
 }
 function showTab(t,opts){
-  opts=opts||{};
+  opts=opts||{}; if(t==='screener') t='chart';
   if(!VTABS.includes(t)) t='overview';
   window.ACTIVE_VTAB=t;
   document.querySelectorAll('.vtab-pane').forEach(p=>{ p.style.display=(p.dataset.vtab===t)?'block':'none'; });
@@ -2634,7 +2852,7 @@ window.cbtBtn=function(c){
   const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
   let data=null, view=null, timer=null, sound=LS.get('cmSound',false), actx=null, inited=false, srcF=LS.get('cmSrc','all'), typF=LS.get('cmType','all');
   const kindOf=c=>c.kind==='option'?'option':'stock', TYP={stock:'Stocks',option:'Index options'};
-  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Screener & scans'}, srcOf=c=>c.source||'calls';
+  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scan & charts'}, srcOf=c=>c.source||'calls';
   const pickSum=x=>!x?null:srcF==='all'?x:(x.bySource?x.bySource[srcF]:(srcF==='calls'?x:null));
   // ---- sound (Web Audio; needs one click to unlock) ----
   function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
@@ -2762,7 +2980,7 @@ window.cbtBtn=function(c){
     const pn=act.reduce((s,c)=>s+(c.pnlPct||0),0), K=wlb(shut), spl=splitTxt(shut);
     const sec=(a,f)=>a.filter(f);
     b.innerHTML=`
-      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Screener &amp; scans')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
+      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scan &amp; charts')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><button class="btn" data-cmcopy="text" style="font-size:12px;padding:5px 10px;">📋 Copy summary as text</button><button class="btn" data-cmcopy="image" style="font-size:12px;padding:5px 10px;">🖼 Copy summary as image</button><span class="metric-sub" id="cmCopyMsg">${srcF==='all'?'Copies everything shown below':'Copies the '+SRC[srcF]+' view'}</span></div>
       <div class="cm-kpis cm-k5" style="margin-bottom:12px;"><div>Watching<b>${act.length}</b></div><div>Closed today<b>${shut.length} <span style="font-size:11px;font-weight:400">(${K.w}W / ${K.l}L / ${K.be} BE, ${sg(K.net)})</span></b>${spl?`<div class="cm-sub" style="font-size:10.5px;">${spl}</div>`:''}</div><div>In profit<b class="cm-b">${sec(act,c=>c.pnlPct>0.05).length}</b></div><div>In loss<b class="cm-s">${sec(act,c=>c.pnlPct<-0.05).length}</b></div><div>Combined running<b class="${pn>0?'cm-b':pn<0?'cm-s':''}">${sg(Math.round(pn*100)/100)}</b></div></div>
       <div class="cm-cols"><div>
@@ -5818,6 +6036,7 @@ const PatternUI = (function(){
     const ok=TFS.filter(([tf])=>M.tf[tf]&&!M.tf[tf].err), src=new Set(ok.map(([tf])=>M.tf[tf].src)), stale=ok.filter(([tf])=>M.tf[tf].stale!=null);
     $('patStatus').innerHTML=esc(sym)+' &middot; '+ok.length+' of 4 timeframes loaded &middot; data: '+[...src].map(x=>x==='upstox'?'Upstox':x==='yahoo'?'Yahoo (fallback)':esc(x)).join(', ')+(stale.length?' <span class="sim-tag">STALE: '+stale.map(([tf])=>TFN[tf]).join(', ')+' (last good Upstox data)</span>':'');
     refresh(); setDetail(S.tf); trackRecords(sym);
+    try{ window.dispatchEvent(new CustomEvent('pat:loaded',{detail:{sym,zone:zoneData()}})); }catch(e){}
   }
   function refresh(){ if(!M.sym) return; const ag=mtf(); LV=levels(); $('pgLevels').innerHTML=levelsHtml(); $('pgZone').innerHTML=zoneHtml();
     TFS.forEach(([tf])=>{ const c=$('pgCard-'+tf); if(!c) return; c.classList.toggle('mtf-bull',ag.up.length>=2&&ag.up.includes(tf)); c.classList.toggle('mtf-bear',ag.dn.length>=2&&ag.dn.includes(tf)); card(tf,true); });
@@ -6479,7 +6698,7 @@ window.TradePlanner=TradePlanner; window.PlannerUI=PlannerUI;
     if(t.dataset.bkcat){ cat=t.dataset.bkcat; try{ localStorage.setItem('bkCat',cat); }catch(x){} draw(); }
   });
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',chips); else chips();
-  window.BreakoutScanner={analyse,sigDW,sig15,TF};
+  window.BreakoutScanner={analyse,sigDW,sig15,TF,paceFrac,fwdRes,atrAt};
 })();
 </script>
 </body>

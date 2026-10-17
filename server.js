@@ -1943,6 +1943,14 @@ async function remindLogin() {
   const base = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
   try { await sendTelegram('🔑 <b>Upstox is not logged in</b> and the market opens at 9:15. No live prices or calls until you log in' + (base ? ':\n' + base.replace(/\/$/, '') + '/upstox-login' : ' (open the dashboard → Status → Connect Upstox).')); } catch (e) {}
 }
+// Stay awake through market hours: Render's free plan sleeps a service after ~15 min without inbound requests, and
+// GitHub's scheduled pings arrive only every few hours. Once awake (the 9:05 login reminder, your first visit, or the
+// GitHub ping), the server requests its own public address every 8 minutes from 8:45 to 15:50 on trading days; that
+// request comes back in through Render's front door, which counts as a visit.
+const SELF_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+let lastSelfPing = 0;
+setInterval(() => { const p = istParts(); if (!SELF_URL || p.dow === 0 || p.dow === 6 || p.mins < 525 || p.mins > 950 || Date.now() - lastSelfPing < 8 * 60000) return;
+  lastSelfPing = Date.now(); fetch(SELF_URL + '/healthz', { signal: AbortSignal.timeout(20000) }).catch(() => {}); }, 60000).unref();
 setInterval(() => { remindLogin().catch(() => {}); const p = istParts(); if (p.dow !== 0 && p.dow !== 6 && p.mins >= 555 && p.mins <= 945) remindUnacked().catch(() => {}); }, 60000).unref();
 app.post('/api/calls/ack', async (req, res) => {
   const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String).slice(0, 200) : [];

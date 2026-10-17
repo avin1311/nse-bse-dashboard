@@ -57,7 +57,7 @@
   .cm-cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:14px;align-items:start;} @media(max-width:900px){.cm-cols{grid-template-columns:1fr;}}
   .cm-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;} .cm-box h4{margin:0 0 8px;font-size:14px;}
   .cm-row{display:grid;grid-template-columns:minmax(90px,1.1fr) 1.3fr 1fr 1fr;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--border);font-size:12px;} .cm-row:first-of-type{border-top:0;}
-  .cm-src{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--border);color:var(--text2);vertical-align:2px;} .cm-src-pattern{color:#a78bfa;border-color:#a78bfa55;} .cm-src-screener{color:#38bdf8;border-color:#38bdf855;} .cm-src-calls{color:var(--amber);}
+  .cm-src{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--border);color:var(--text2);vertical-align:2px;} .cm-src-pattern{color:#a78bfa;border-color:#a78bfa55;} .cm-src-agreement{color:#38bdf8;border-color:#38bdf855;} .cm-src-screener{color:#38bdf8;border-color:#38bdf855;} .cm-src-calls{color:var(--amber);}
   .cm-kpis.cm-k5{grid-template-columns:repeat(5,1fr);} @media(max-width:560px){.cm-kpis.cm-k5{grid-template-columns:repeat(2,1fr);}}
   .cm-done{opacity:.6;filter:grayscale(.65);} .cm-done:hover{opacity:.9;filter:none;} .cm-stat{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;border:1px solid currentColor;vertical-align:2px;}
   .cm-row b{font-size:14px;} .cm-sub{color:var(--text2);font-size:11px;} .cm-b{color:var(--green);} .cm-s{color:var(--red);}
@@ -513,6 +513,10 @@
       </table>
     </div>
     <details class="cm-box" id="xsReplayBox" style="margin-top:10px;"><summary style="cursor:pointer"><b>Does agreement help?</b> <span class="metric-sub">replays the same three checks on past daily candles and compares with doing nothing</span></summary><div id="xsReplay" style="margin-top:6px;"><button class="btn" id="xsReplayBtn">Measure now (about a minute)</button></div></details>
+    <details class="cm-box" id="agBox" style="margin-top:10px;" open><summary style="cursor:pointer"><b>Agreement strategy</b> <span class="metric-sub">buy when the screener, the daily chart pattern and the daily breakout agree (more triangles = stronger), sell when they agree down &mdash; tested on past data, paper items in the Calls Monitor</span></summary>
+      <div class="filters" style="margin:8px 0;align-items:center;flex-wrap:wrap;"><label class="toggle-mini"><input type="checkbox" id="agAutoOn" checked> Add agreement signals to the Calls Monitor as paper items (after each scan, 9:30&ndash;15:00, up to 10 a day, F&amp;O stocks)</label>
+        <select id="agRule" style="max-width:100%;"></select><button class="btn" id="agTestBtn">Run the test (a few minutes)</button></div>
+      <div id="agTest"><div class="metric-sub">Not tested yet. Press Scan all, then Run the test.</div></div></details>
   </section>
   <details class="panel" id="moreBox"><summary style="cursor:pointer;font-weight:600;">Sector heatmap &middot; seasonality <span class="metric-sub" style="font-weight:400;">(loads when opened)</span></summary>
 <section id="sec-heatmap" class="panel">
@@ -886,13 +890,22 @@ function xsAgreeHtml(ag){
 }
 const xsTfLine=(lab,y)=>y?'<div class="metric-sub">'+lab+': <span class="'+(y.d>0?'up':'down')+'">'+(y.d>0?'▲':'▼')+'</span> '+esc0(y.name)+'</div>':'';
 function esc0(t){ return String(t==null?'':t).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); }
+// Chart-pattern cell: the daily pattern first, then "+N more" with every other recent pattern found — other daily ones and,
+// when those timeframes were scanned (Also scan: Weekly / Hourly / 15-min), the weekly, hourly and 15-minute ones
 function xsPatHtml(x){
   if(!x) return '<span class="metric-sub">—</span>';
-  const p=x.pat; let h=p?'<span class="'+(p.d>0?'up':p.d<0?'down':'')+'">'+(p.d>0?'▲ ':p.d<0?'▼ ':'● ')+esc0(p.name)+'</span><div class="metric-sub">'+esc0(p.status)+(p.conf?' · conf '+p.conf+'%':'')+'</div>':'<span class="metric-sub">none recent</span>';
-  const o=(p&&p.others)||[];
-  if(o.length){ const li=q=>'<div><span class="'+(q.d>0?'up':'down')+'">'+(q.d>0?'▲ ':'▼ ')+esc0(q.name)+'</span> <span class="metric-sub">'+esc0(q.status)+(q.conf?' · '+q.conf+'%':'')+'</span></div>';
-    h+='<span class="xs-mw"><button type="button" class="xs-more" title="'+esc0(o.map(q=>(q.d>0?'▲ ':'▼ ')+q.name+' ('+q.status+(q.conf?', '+q.conf+'%':'')+')').join('\n'))+'">+'+o.length+' more</button><span class="xs-pop">'+(p.d?'<div class="metric-sub" style="margin-bottom:4px;">Also on the daily chart</div>':'<div class="metric-sub" style="margin-bottom:4px;">Recent daily patterns</div>')+o.map(li).join('')+'</span></span>'; }
-  return h+xsTfLine('Weekly',x.wp)+xsTfLine('Hourly',x.h1);
+  const p=x.pat, arrow=d=>d>0?'▲ ':d<0?'▼ ':'● ', cls=d=>d>0?'up':d<0?'down':'';
+  let h=p?'<span class="'+cls(p.d)+'">'+arrow(p.d)+esc0(p.name)+'</span><div class="metric-sub">'+esc0(p.status)+(p.conf?' · conf '+p.conf+'%':'')+'</div>':'<span class="metric-sub">none recent (daily)</span>';
+  const more=[], seen=new Set();
+  const add=(q,tf)=>{ if(!q||q.d===0&&q.name==='Mixed patterns') return; const k=tf+'|'+q.name+'|'+q.d; if(seen.has(k)) return; seen.add(k); more.push({...q,tf}); };
+  if(p) (p.others||[]).forEach(q=>add(q,'Daily'));
+  [['wp','Weekly'],['h1','Hourly'],['p15','15-min']].forEach(([k,tf])=>{ const q=x[k]; if(!q) return; if(q.d!==0) add(q,tf); (q.others||[]).forEach(o=>add(o,tf)); });
+  if(more.length){
+    const tfs=[...new Set(more.map(q=>q.tf))].join(', ');
+    const li=q=>'<div><span class="metric-sub" style="display:inline-block;min-width:46px;">'+q.tf+'</span> <span class="'+cls(q.d)+'">'+arrow(q.d)+esc0(q.name)+'</span> <span class="metric-sub">'+esc0(q.status)+(q.conf?' · '+q.conf+'%':'')+'</span></div>';
+    h+='<span class="xs-mw"><button type="button" class="xs-more" title="'+esc0(more.map(q=>q.tf+': '+(q.d>0?'▲ ':'▼ ')+q.name+' ('+q.status+(q.conf?', '+q.conf+'%':'')+')').join('\n'))+'">+'+more.length+' more</button><span class="xs-pop"><div class="metric-sub" style="margin-bottom:4px;">Other recent patterns ('+tfs+')</div>'+more.map(li).join('')+'</span></span>';
+  }
+  return h;
 }
 function xsBkHtml(x){
   if(!x) return '<span class="metric-sub">—</span>';
@@ -943,7 +956,7 @@ async function xsScanAll(quiet){
             const C=(j.series||[]).filter(x=>x&&x.c>0).map(x=>({t:x.t,o:x.o,h:x.h,l:x.l,c:x.c,v:x.v||0})), x=window.XS[s]=window.XS[s]||{};
             if(tf==='1W'){ const C5=C.slice(-260), bk=xsBreak(C5,'W'), p=xsPattern(C5,'1W'); x.wp=p; x.w=bk&&bk.type==='break'?{d:bk.d,name:bk.name,src:'bk'}:(p?{d:p.d,name:p.name,src:'pat'}:null); }
             else if(tf==='1h'){ x.h1=xsPattern(C.slice(-600),'1h'); }
-            else { let C2=C; if(C2.length&&C2[C2.length-1].t+900>Date.now()/1000) C2=C2.slice(0,-1); x.m15=xsBreak(C2,'M15'); }
+            else { let C2=C; if(C2.length&&C2[C2.length-1].t+900>Date.now()/1000) C2=C2.slice(0,-1); x.m15=xsBreak(C2,'M15'); x.p15=xsPattern(C2.slice(-600),'15m'); }
           }catch(e){}
           if(++done%10===0) say((tf==='1W'?'Weekly':tf==='1h'?'Hourly':'15-min')+': '+done+' of '+shown.length+'…'); } }
         await Promise.all([worker(),worker(),worker()]);
@@ -952,7 +965,7 @@ async function xsScanAll(quiet){
     const n=Object.keys(window.XS).length, al=STOCKS.concat(INDEX_ROWS_LIST).filter(s=>{ const d=window.XS[s[0]]; return d; }).length;
     say('Scanned '+new Date().toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+' · '+al+' stocks and indices on daily candles'+(tfs.length?' + '+tfs.map(t=>t==='1W'?'weekly':t==='1h'?'hourly':'15-min').join(', ')+' (shown rows)':'')+' · prices refresh every 60 s, the full scan only when you press Scan all');
   }catch(e){ say('Scan failed: '+e.message); }
-  finally{ xsBusy=false; window.__xsDone=Date.now(); if(btn) btn.disabled=false; try{ renderScreener(); renderVerdict(); }catch(e){} try{ if(window.CURRENT&&window.ACTIVE_VTAB==='chart') renderIndexScan(window.CURRENT); }catch(e){} try{ if(window.APP_VIEW==='home') renderHomeAgree(); }catch(e){} }
+  finally{ xsBusy=false; window.__xsDone=Date.now(); if(btn) btn.disabled=false; try{ renderScreener(); renderVerdict(); }catch(e){} try{ if(window.CURRENT&&window.ACTIVE_VTAB==='chart') renderIndexScan(window.CURRENT); }catch(e){} try{ if(window.APP_VIEW==='home') renderHomeAgree(); }catch(e){} try{ if(window.agAuto) window.agAuto(); }catch(e){} }
 }
 /* ---------- the open stock: verdict strip + lines on the main chart ---------- */
 async function xsWeekly(sym){
@@ -3005,7 +3018,7 @@ window.cbtBtn=function(c){
   const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
   let data=null, view=null, timer=null, sndMode=LS.get('cmSoundMode','auto'), actx=null, inited=false, srcF=LS.get('cmSrc','all'), typF=LS.get('cmType','all');
   const kindOf=c=>c.kind==='option'?'option':'stock', TYP={stock:'Stocks',option:'Index options'};
-  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scanner'}, srcOf=c=>c.source||'calls';
+  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scanner',agreement:'Agreement'}, srcOf=c=>c.source||'calls';
   const pickSum=x=>!x?null:srcF==='all'?x:(x.bySource?x.bySource[srcF]:(srcF==='calls'?x:null));
   // ---- sound (Web Audio; needs one click to unlock) ----
   function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
@@ -3081,7 +3094,7 @@ window.cbtBtn=function(c){
     const toSl=Math.abs(c.ltp-c.activeSl)/c.ltp*100, toT=nxt!=null?Math.abs(nxt-c.ltp)/c.ltp*100:null;
     const ST={SL_HIT:['STOP LOSS HIT','cm-s'],TARGET_HIT:['ALL TARGETS HIT','cm-b'],PROFIT:['EXITED IN PROFIT (trailed stop)','cm-b'],BREAKEVEN:['EXITED AT ENTRY','' ],EXPIRED:['TIME EXIT',''],MANUAL_EXIT:['MANUAL EXIT','']}[c.status]||[c.status,''];
     const tl=c.targets[c.targets.length-1];
-    const st=srcOf(c), tag=`<span class="cm-src cm-src-${st}" title="${esc(c.label||'')}">${st==='calls'?(c.kind==='option'?'Index option':'Trade call'):st==='pattern'?'Pattern':'Screener'}</span>${c.unproven?` <span class="cm-src" style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">Unproven</span>`:''}`;
+    const st=srcOf(c), tag=`<span class="cm-src cm-src-${st}" title="${esc(c.label||'')}">${st==='calls'?(c.kind==='option'?'Index option':'Trade call'):st==='pattern'?'Pattern':st==='agreement'?'Agreement '+esc((c.label||'').replace(/^Agreement\s*/,'').split(' ')[0]):'Screener'}</span>${c.unproven?` <span class="cm-src" style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">Unproven</span>`:''}`;
     return `<div class="cm-row${done?' cm-done':''}"><div><b class="cm-open" data-cmopen="${esc(c.kind==='option'?(c.underlying||''):c.symbol)}" title="Open ${esc(c.kind==='option'?(c.underlying||c.symbol):c.symbol)} for analysis" style="cursor:pointer;text-decoration:underline dotted;">${esc(c.symbol)} &#8599;</b> ${tag}${done?` <span class="cm-stat ${ST[1]}">${ST[0]}</span>`:''}${c.manual&&c.label?`<div class="cm-sub">${esc(c.label)}</div>`:''}<div class="cm-sub"><span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> · ${c.mode==='intraday'?'Intraday':c.kind==='option'?'Multi-day':'Swing'} · ${esc(c.riskLabel)}</div>${c.kind==='option'?`<div class="cm-sub">Expiry <b>${esc(c.expiryLabel)}</b>${c.lotSize?' · lot '+c.lotSize:''}</div><div class="cm-sub">Exit if ${esc(c.underlying)} closes ${c.dir==='BUY'?'below':'above'} ${Number(c.spotSl).toLocaleString('en-IN')}</div>`:''}<div class="cm-sub">${dt(c.t)}</div><div style="margin-top:4px">${c.manual||c.restored?`${!done&&c.status==='ACTIVE'?`<button class="btn" data-cmexit="${esc(c.id)}" style="font-size:11px;padding:3px 8px;margin-right:4px;" title="Close at the live price; counts in results and the daily summary">Exit now</button>`:''}<button class="btn" data-cmrm="${esc(c.id)}" style="font-size:11px;padding:3px 8px;" title="Delete without recording an exit (not counted anywhere)">✕ Remove</button>`:window.cbtBtn(c)}</div></div>
       <div><div class="cm-bar"><i style="left:${pos(c.sl)}%;width:${Math.abs(pos(c.entry)-pos(c.sl))}%;background:rgba(255,90,106,.45)"></i><i style="left:${Math.min(pos(c.entry),pos(tl))}%;width:${Math.abs(pos(tl)-pos(c.entry))}%;background:rgba(31,191,117,.45)"></i><span class="cm-mark" style="left:calc(${pos(px)}% - 1px)"></span></div>
         <div class="cm-sub">SL ${num(c.activeSl)}${c.targetsHit?' (trailed)':''} · Entry ${num(c.entry)} · T${(c.targetsHit||0)+1} ${nxt!=null?num(nxt):'—'}</div></div>
@@ -3139,7 +3152,7 @@ window.cbtBtn=function(c){
       F(0,13); x.fillStyle=c.side==='BUY'?'#26c281':'#ef5350'; x.fillText(c.side+' · '+c.mode,330,ty); x.fillStyle='#e6ebf5'; x.fillText(num(c.entry),450,ty); x.fillText(num(c.closed?c.exit:c.ltp),560,ty);
       F(1,14); x.fillStyle=col(c.pnlPct); x.fillText(sg(c.pnlPct),680,ty); F(0,13); x.fillText(ptsTxt(p),780,ty);
       x.fillStyle=g==='CLOSED'?col(c.pnlPct):'#e6ebf5'; x.fillText(fit(cmStat(c),150),900,ty); x.fillStyle='#8a94a6'; x.fillText(c.closed?'—':num(c.activeSl),1060,ty);
-      x.fillText(fit(srcOf(c)==='calls'?(c.kind==='option'?'Index option':'Trade call')+(c.unproven?' · unproven':''):srcOf(c)==='pattern'?'Pattern':'Screener',210),1170,ty); y+=rh; });
+      x.fillText(fit(srcOf(c)==='calls'?(c.kind==='option'?'Index option':'Trade call')+(c.unproven?' · unproven':''):srcOf(c)==='pattern'?'Pattern':srcOf(c)==='agreement'?'Agreement':'Screener',210),1170,ty); y+=rh; });
     if(!rows.length){ F(0,13); x.fillStyle='#8a94a6'; x.fillText('Nothing to show for this filter.',24,top+20); }
     F(0,11); x.fillStyle='#5d6779'; x.fillText('% after costs; points = price move (₹ per share, or option premium) before costs. Rule-based screen, paper testing, not investment advice.',24,H-18);
     return cv; }
@@ -3161,7 +3174,7 @@ window.cbtBtn=function(c){
     const pn=act.reduce((s,c)=>s+(c.pnlPct||0),0), K=wlb(shut), spl=splitTxt(shut);
     const sec=(a,f)=>a.filter(f);
     b.innerHTML=`
-      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scanner')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
+      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scanner')}${chip('agreement','Agreement')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><button class="btn" data-cmcopy="text" style="font-size:12px;padding:5px 10px;">📋 Copy summary as text</button><button class="btn" data-cmcopy="image" style="font-size:12px;padding:5px 10px;">🖼 Copy summary as image</button><span class="metric-sub" id="cmCopyMsg">${srcF==='all'?'Copies everything shown below':'Copies the '+SRC[srcF]+' view'}</span></div>
       <div class="cm-kpis cm-k5" style="margin-bottom:12px;"><div>Watching<b>${act.length}</b></div><div>Closed today<b>${shut.length} <span style="font-size:11px;font-weight:400">(${K.w}W / ${K.l}L / ${K.be} BE, ${sg(K.net)})</span></b>${spl?`<div class="cm-sub" style="font-size:10.5px;">${spl}</div>`:''}</div><div>In profit<b class="cm-b">${sec(act,c=>c.pnlPct>0.05).length}</b></div><div>In loss<b class="cm-s">${sec(act,c=>c.pnlPct<-0.05).length}</b></div><div>Combined running<b class="${pn>0?'cm-b':pn<0?'cm-s':''}">${sg(Math.round(pn*100)/100)}</b></div></div>
       <div class="cm-cols"><div>
@@ -7086,6 +7099,102 @@ window.renderIndexFund=async function(d){
     body.querySelectorAll('tr[data-symbol]').forEach(tr=>tr.addEventListener('click',()=>{ tr.style.opacity='.5'; selectStock(tr.dataset.symbol); }));
   }
 };
+})();
+</script>
+<script>
+/* ===== Agreement strategy: screener + daily chart pattern + daily breakout (+ weekly) pointing the same way.
+   The test replays it on past daily candles of the F&O stocks, the same checks the Scanner uses, with real entries,
+   stops, targets and costs. Live: paper items in the Calls Monitor (source "Agreement"), added after a scan in market hours. */
+(function(){
+  const LSg=(k,d)=>{ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(e){ return d; } }, LSs=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
+  const COST=0.15, HOLD=10, esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const VARS=[]; [2,3,4].forEach(N=>[1,2].forEach(W=>['atr','pat'].forEach(X=>VARS.push({N,W,X,key:N+'|'+W+'|'+X}))));
+  const vLabel=v=>'▲'.repeat(v.N)+' '+v.N+'+ agree'+(v.W===2?' · Strong Buy/Sell counts 2':'')+' · '+(v.X==='pat'?'pattern stop & target':'1.5×ATR stop, 3×ATR target');
+  // the agreement score with an optional double weight for Strong Buy / Strong Sell
+  function agScore(sig,p,b,w,W){ const s=/buy/.test(sig||'')?1:/sell/.test(sig||'')?-1:0, sv=s*(W===2&&/strong/.test(sig||'')?2:1); let a=sv+p+b; if(w&&a!==0&&Math.sign(w)===Math.sign(a)) a+=Math.sign(a); return a; }
+  window.agScore=agScore;
+  function weekly(C){ const W=[]; let cur=null; C.forEach(b=>{ const d=new Date((b.t+19800)*1000), wk=Math.floor((d.getTime()/86400000+3)/7); if(!cur||cur.wk!==wk){ cur={wk,t:b.t,o:b.o,h:b.h,l:b.l,c:b.c,v:b.v||0,i0:W.length}; W.push(cur); } else { cur.h=Math.max(cur.h,b.h); cur.l=Math.min(cur.l,b.l); cur.c=b.c; cur.v+=b.v||0; } cur.last=b.t; }); return W; }
+  async function agTest(){
+    const box=document.getElementById('agTest'); if(!box) return;
+    const B=window.BreakoutScanner; if(!B||!window.PatternEngine){ box.innerHTML='<div class="metric-sub">Chart tools are still loading; try again in a moment.</div>'; return; }
+    const syms=STOCKS.map(s=>s[0]).filter(s=>(!window.FNO_SET||window.FNO_SET.has(s))&&window.REAL_HIST&&window.REAL_HIST[s]&&window.REAL_HIST[s].c&&window.REAL_HIST[s].c.length>=200).slice(0,120);
+    if(!syms.length){ box.innerHTML='<div class="metric-sub">Press Scan all first so the daily candles are loaded.</div>'; return; }
+    const T={}; VARS.forEach(v=>T[v.key]=[]); let done=0; const t00=Date.now();
+    for(const sym of syms){
+      const C=xsCandlesFromHist(window.REAL_HIST[sym]); if(C.length<200) continue;
+      const closes=C.map(x=>x.c), Hh=C.map(x=>x.h), Ll=C.map(x=>x.l), Wk=weekly(C), wkBrk={}, free={};
+      const wkDir=k=>{ const wi=Wk.findIndex(w=>w.t<=C[k].t&&w.last>=C[k].t); if(wi<30) return 0; if(wkBrk[wi]!=null) return wkBrk[wi]; let d=0; try{ const r=xsBreak(Wk.slice(0,wi),'W'); d=r&&r.type==='break'?r.d:0; }catch(e){} return wkBrk[wi]=d; };
+      for(let k=Math.max(130,C.length-260);k<C.length-2;k++){
+        const cl=closes.slice(0,k+1), hh=Hh.slice(0,k+1), ll=Ll.slice(0,k+1), last=cl[k];
+        const dd={symbol:sym,prices:cl,histHL:{h:hh,l:ll},realHistory:true,price:last,support1:Math.min(...ll.slice(-20)),resistance1:Math.max(...hh.slice(-20))};
+        dd.support2=dd.support1*0.97; dd.resistance2=dd.resistance1*1.03; dd.targetMean=last;
+        let sig='hold'; try{ sig=buildHorizons(dd).swing.signal; }catch(e){}
+        const s=/buy/.test(sig)?1:/sell/.test(sig)?-1:0;
+        let b=0; try{ const o=B.sigDW(C,k,B.TF.D,1)||[]; const br=o.find(x=>x.type==='break'); if(br) b=br.d; }catch(e){}
+        if(Math.abs(s)+Math.abs(b)===0) continue;            // pattern + weekly alone are not tested (keeps the replay fast)
+        const pt=xsPattern(C.slice(Math.max(0,k-319),k+1),'1D'), p=pt?pt.d:0, w=wkDir(k), atr=B.atrAt(C,k,14); if(!(atr>0)) continue;
+        for(const v of VARS){
+          if(free[v.key]!=null&&k<free[v.key]) continue;
+          const a=agScore(sig,p,b,w,v.W); if(Math.abs(a)<v.N) continue;
+          const dir=Math.sign(a), entry=last; let stop=entry-dir*1.5*atr, tgt=entry+dir*3*atr;
+          if(v.X==='pat'&&pt&&pt.d===dir&&pt.stop&&pt.target&&dir*(entry-pt.stop)>0&&dir*(pt.target-entry)>0&&Math.abs(entry-pt.stop)/entry<=0.15){ stop=pt.stop; tgt=pt.target; }
+          let ex=null, xi=Math.min(C.length-1,k+HOLD);
+          for(let j=k+1;j<=Math.min(C.length-1,k+HOLD);j++){ const c=C[j]; if(dir>0?c.l<=stop:c.h>=stop){ ex=stop; xi=j; break; } if(dir>0?c.h>=tgt:c.l<=tgt){ ex=tgt; xi=j; break; } }
+          if(ex==null){ if(k+HOLD>C.length-1) continue; ex=C[xi].c; }  // still open at the end of the data: not counted
+          T[v.key].push({t:C[k].t,ret:dir*(ex-entry)/entry*100-COST,dir}); free[v.key]=xi+1;
+        }
+      }
+      if(++done%3===0){ box.innerHTML='<div class="metric-sub">Replaying… '+done+' of '+syms.length+' stocks ('+Math.round((Date.now()-t00)/1000)+' s)</div>'; await new Promise(r=>setTimeout(r,0)); }
+    }
+    const all=[].concat(...Object.values(T)); if(!all.length){ box.innerHTML='<div class="metric-sub">No signals found in the data.</div>'; return; }
+    const ts=all.map(x=>x.t).sort((a,b)=>a-b), mid=ts[Math.floor(ts.length/2)], t0=ts[0], t1=ts[ts.length-1];
+    const st=a=>{ if(!a.length) return null; const avg=x=>x.length?x.reduce((s,y)=>s+y.ret,0)/x.length:null, o=a.filter(x=>x.t<mid), nw=a.filter(x=>x.t>=mid);
+      return {n:a.length,win:Math.round(a.filter(x=>x.ret>0).length/a.length*100),avg:avg(a),older:avg(o),newer:avg(nw),oN:o.length,nN:nw.length,buy:a.filter(x=>x.dir>0).length}; };
+    const R=VARS.map(v=>({v,s:st(T[v.key])})).filter(r=>r.s);
+    const pass=s=>s.n>=30&&s.avg>=0.10&&s.older>0&&s.newer>0;
+    const pick=R.filter(r=>r.s.oN>=15).sort((a,b)=>b.s.older-a.s.older)[0];
+    const sg=x=>x==null?'—':(x>0?'+':'')+x.toFixed(2)+'%', d0=t=>new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'});
+    const res={at:Date.now(),t0,t1,stocks:done,pick:pick?pick.v:null,pickPass:pick?pass(pick.s):false,rows:R.map(r=>({...r.v,...r.s}))};
+    LSs('agTest',res); renderAgTest(res);
+  }
+  function renderAgTest(res){
+    const box=document.getElementById('agTest'); if(!box||!res) return;
+    const sg=x=>x==null?'—':(x>0?'+':'')+x.toFixed(2)+'%', d0=t=>new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'});
+    const pass=s=>s.n>=30&&s.avg>=0.10&&s.older>0&&s.newer>0, pk=res.pick&&res.pick.key;
+    box.innerHTML='<div class="metric-sub" style="margin-bottom:6px;">'+res.stocks+' F&amp;O stocks · daily candles '+d0(res.t0)+' – '+d0(res.t1)+' · entry at the signal day\'s close, held up to '+HOLD+' days · after '+COST+'% costs · one trade at a time per stock and rule set · tested '+new Date(res.at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})+'</div>'
+      +'<div style="overflow-x:auto;"><table><thead><tr><th>Rule set</th><th>Trades</th><th>Win</th><th>Avg / trade</th><th>Older half</th><th>Newer half</th><th>Verdict</th></tr></thead><tbody>'
+      +res.rows.map(r=>'<tr'+(r.key===pk?' style="background:rgba(61,139,253,.10)"':'')+'><td>'+esc(vLabel(r))+(r.key===pk?' <span class="ix-badge">CHOSEN</span>':'')+'<div class="metric-sub">'+r.buy+' buys · '+(r.n-r.buy)+' sells</div></td><td>'+r.n+'</td><td>'+r.win+'%</td><td class="'+(r.avg>0?'up':'down')+'">'+sg(r.avg)+'</td><td>'+sg(r.older)+' <span class="metric-sub">('+r.oN+')</span></td><td>'+sg(r.newer)+' <span class="metric-sub">('+r.nN+')</span></td><td>'+(pass(r)?'<b class="up">passes</b>':'<span class="metric-sub">does not pass</span>')+'</td></tr>').join('')+'</tbody></table></div>'
+      +'<div class="metric-sub" style="margin-top:6px;">CHOSEN = best on the older half; it counts only if it also holds on the newer half. Passing = 30+ trades, average ≥ +0.10% after costs, older and newer halves both positive (the same bar as the strategy lab). '+(res.pick?(res.pickPass?'<b class="up">The chosen rule set passes.</b>':'<b>The chosen rule set does not pass yet</b>, so live agreement items stay marked as paper.'):'')+' Weekly agreement uses the weekly breakout only; days where only the pattern and the weekly chart agree are not tested.</div>';
+    const n=document.getElementById('agRule'); if(n){ const v=LSg('agRuleSel','auto'); n.value=v; }
+  }
+  // ---- live paper items after each scan, market hours only ----
+  async function agAuto(){
+    if(!LSg('agAutoOn',true)) return;
+    if(typeof window.marketState!=='function'||window.marketState()!=='open') return;
+    const m=(()=>{ const d=new Date(Date.now()+19800000); return d.getUTCHours()*60+d.getUTCMinutes(); })(); if(m<570||m>900) return;
+    const res=LSg('agTest',null), sel=LSg('agRuleSel','auto');
+    const v=sel!=='auto'?VARS.find(x=>x.key===sel):(res&&res.pick)||{N:3,W:1,X:'atr',key:'3|1|atr'};
+    if(!v) return;
+    const day=new Date(Date.now()+19800000).toISOString().slice(0,10); let sent=LSg('agSent',{day,syms:[]}); if(sent.day!==day) sent={day,syms:[]};
+    const rows=STOCKS.filter(s=>(!window.FNO_SET||window.FNO_SET.has(s[0]))&&window.XS[s[0]]&&!sent.syms.includes(s[0])).map(s=>{ const d=screenerRow(s); if(!d.realHistory) return null; const x=window.XS[s[0]], h=d.horizons.swing; const a=agScore(h.signal,x.pat?x.pat.d:0,x.bk&&x.bk.type==='break'?x.bk.d:0,x.w?x.w.d:0,v.W); return Math.abs(a)>=v.N?{d,h,x,a}:null; }).filter(Boolean)
+      .sort((p,q)=>Math.abs(q.a)-Math.abs(p.a)||(q.a>0?q.h.score-p.h.score:p.h.score-q.h.score));
+    const room=Math.max(0,10-sent.syms.length);
+    for(const r of rows.slice(0,room)){
+      const dir=Math.sign(r.a), C=xsCandlesFromHist(window.REAL_HIST[r.d.symbol]); let atr=null; try{ atr=window.BreakoutScanner.atrAt(C,C.length-1,14); }catch(e){}
+      let sl=atr?r.d.price-dir*1.5*atr:undefined, target=atr?r.d.price+dir*3*atr:undefined; const pt=r.x.pat;
+      if(v.X==='pat'&&pt&&pt.d===dir&&pt.stop&&pt.target){ sl=pt.stop; target=pt.target; }
+      const lab='Agreement '+(dir>0?'▲':'▼').repeat(Math.min(Math.abs(r.a),4))+' ('+Math.abs(r.a)+' agree)';
+      const note=lab+': screener '+r.h.signalLabel+(pt?', '+pt.name:'')+(r.x.bk&&r.x.bk.type==='break'?', broke '+r.x.bk.name:'')+(r.x.w?', weekly agrees':'')+'. Rule set: '+vLabel(v)+'.'+(res&&res.pick&&res.pickPass?'':' Paper: the agreement test has not passed yet.');
+      try{ const resp=await fetch('/api/calls/monitor/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'agreement',symbol:r.d.symbol,side:dir>0?'BUY':'SELL',mode:'swing',label:lab,note,sl,target})}); if(resp.ok||resp.status===409) sent.syms.push(r.d.symbol); }catch(e){}
+    }
+    LSs('agSent',sent); try{ window.cmRefresh&&window.cmRefresh(); }catch(e){}
+  }
+  window.agAuto=agAuto;
+  document.addEventListener('click',e=>{ const t=e.target.closest&&e.target.closest('#agTestBtn'); if(!t) return; e.preventDefault(); const box=document.getElementById('agTest'); if(box) box.innerHTML='<div class="metric-sub">Starting…</div>'; agTest(); });
+  document.addEventListener('change',e=>{ if(e.target&&e.target.id==='agAutoOn') LSs('agAutoOn',e.target.checked); if(e.target&&e.target.id==='agRule') LSs('agRuleSel',e.target.value); });
+  function initBox(){ const sel=document.getElementById('agRule'); if(sel&&!sel.options.length){ sel.innerHTML='<option value="auto">Use the test\'s chosen rule set (until tested: 3+ agree, standard stops)</option>'+VARS.map(v=>'<option value="'+v.key+'">'+esc(vLabel(v))+'</option>').join(''); sel.value=LSg('agRuleSel','auto'); }
+    const cb=document.getElementById('agAutoOn'); if(cb) cb.checked=LSg('agAutoOn',true); renderAgTest(LSg('agTest',null)); }
+  setTimeout(initBox,500);
 })();
 </script>
 </body>

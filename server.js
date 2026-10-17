@@ -1966,7 +1966,7 @@ async function emitEvent(e, tg = true) {
 function callEvents(c, before) {
   const out = []; const now = Math.floor(Date.now() / 1000);
   const base = { callId: c.id, source: srcOf(c), symbol: c.symbol, side: c.side, mode: c.mode, t: now };
-  const tag = c.manual ? `[${srcOf(c) === 'pattern' ? 'Pattern' : 'Screener'}] ` : '';
+  const tag = c.manual ? `[${srcOf(c) === 'pattern' ? 'Pattern' : srcOf(c) === 'agreement' ? 'Agreement' : 'Screener'}] ` : '';
   const pct = x => (x > 0 ? '+' : '') + x + '%';
   for (let i = before.hit + 1; i <= (c.targetsHit || 0); i++) {
     const px = c.targets[i - 1];
@@ -2042,7 +2042,7 @@ async function liveMonitor() {
 }
 function istDateKey(t) { return new Date((t + 19800) * 1000).toISOString().slice(0, 10); }
 async function loadEod() { const a = await storeGet('store:calls-eod', []); return Array.isArray(a) ? a : []; }
-const SOURCES = { calls: 'Trade Calls', pattern: 'Chart patterns (price action)', screener: 'Screener & scans' };
+const SOURCES = { calls: 'Trade Calls', pattern: 'Chart patterns (price action)', screener: 'Screener & scans', agreement: 'Agreement (screener + pattern + breakout, paper)' };
 const srcOf = c => c.source || 'calls';
 function buildEod(db, events, day, src) {
   if (src) { db = db.filter(c => srcOf(c) === src); const ids = new Set(db.map(c => c.id)); events = events.filter(e => ids.has(e.callId)); }
@@ -2514,7 +2514,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-17-r45 (lab v14: ATR volatility trend strategy, paper, TCS first; alerts repeat until Seen; login reminder; market-type rule; NSE holidays; self keep-awake)';
+const BUILD = '2026-10-18-r46 (agreement strategy: test + paper items; scanner lists patterns from every scanned timeframe; lab v14: ATR volatility trend; alerts repeat until Seen; login reminder; market-type rule; NSE holidays; self keep-awake)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2989,7 +2989,7 @@ app.post('/api/calls/monitor/add', async (req, res) => {
 });
 async function addManualItem(b) {
   {
-    const source = b.source === 'pattern' || b.source === 'screener' ? b.source : null;
+    const source = ['pattern', 'screener', 'agreement'].includes(b.source) ? b.source : null;
     const symbol = String(b.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, '');
     const side = b.side === 'SELL' ? 'SELL' : b.side === 'BUY' ? 'BUY' : null, mode = b.mode === 'intraday' ? 'intraday' : 'swing';
     if (!source || !symbol || !side) return { status: 400, body: { error: 'source, symbol and side are required' } };
@@ -2997,6 +2997,8 @@ async function addManualItem(b) {
     const db = await loadCalls();
     const dup = db.find(c => c.manual && !c.closed && c.symbol === symbol && srcOf(c) === source && c.side === side);
     if (dup) return { status: 409, body: { error: symbol + ' is already in the monitor from this section', id: dup.id } };
+    // agreement signals are daily: the same stock and side is not re-added within 5 days of the last one, even after it closed
+    if (source === 'agreement') { const recent = db.find(c => c.manual && srcOf(c) === 'agreement' && c.symbol === symbol && c.side === side && Date.now() / 1000 - c.t < 5 * 86400); if (recent) return { status: 409, body: { error: symbol + ' agreement signal already taken in the last 5 days', id: recent.id } }; }
     const q = await getUpstoxLTPC(await dataKeyFor(symbol)); const ltp = q.price;
     if (!(ltp > 0)) throw new Error('no live price for ' + symbol);
     const sgn = side === 'BUY' ? 1 : -1;
@@ -3019,7 +3021,7 @@ async function addManualItem(b) {
       costPct: Calls.costPct(mode), analysis: (String(b.note || '').slice(0, 400) + ' Entry at the live price when added; ' + slNote + '.').trim(), t: now,
       status: 'ACTIVE', targetsHit: 0, activeSl: tk(sl), ltp, exit: null, pnlPct: 0, closed: false };
     db.push(call); if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX); await saveCalls();
-    await emitEvent({ id: call.id + ':NEW', callId: call.id, source, symbol, side, mode, kind: 'NEW', level: 'info', t: now, price: call.entry, pnlPct: null, text: `➕ [${source === 'pattern' ? 'Pattern' : 'Screener'}] ${side} ${symbol} (${mode}) added to monitor at ₹${call.entry}, SL ₹${call.sl}` }, false);
+    await emitEvent({ id: call.id + ':NEW', callId: call.id, source, symbol, side, mode, kind: 'NEW', level: 'info', t: now, price: call.entry, pnlPct: null, text: `➕ [${source === 'pattern' ? 'Pattern' : source === 'agreement' ? 'Agreement' : 'Screener'}] ${side} ${symbol} (${mode}) added to monitor at ₹${call.entry}, SL ₹${call.sl}` }, false);
     return { status: 200, body: { ok: true, call } };
   }
 }

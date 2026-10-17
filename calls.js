@@ -170,14 +170,14 @@ const COST = { intraday: Number(process.env.COST_INTRADAY_PCT) || 0.10, swing: N
 function costPct(mode) { return COST[mode] != null ? COST[mode] : COST.swing; }
 function track(call, bars, nowSec) {
   const sgn = call.side === 'BUY' ? 1 : -1;
-  let sl = call.sl, hit = 0, status = 'ACTIVE', exit = null, exitT = null, last = call.entry;
+  let sl = call.sl, hit = 0, status = 'ACTIVE', exit = null, exitT = null, last = call.entry, best = call.entry;
   const limitT = call.limitT || (call.mode === 'intraday' ? istDayEnd(call.t) : call.t + 30 * 86400);
   let j = upto(bars, call.t) + 1; const start = j;
   for (; j < bars.length; j++) {
     const b = bars[j];
     if (b.t > limitT) { status = 'EXPIRED'; exit = last; exitT = limitT; break; }
     const stopHit = sgn === 1 ? b.l <= sl : b.h >= sl;
-    if (stopHit) { status = hit >= 1 && sl === call.entry ? 'BREAKEVEN' : (hit >= 1 ? 'PROFIT' : 'SL_HIT'); exit = sl; exitT = b.t; break; }
+    if (stopHit) { status = hit >= 1 && sl === call.entry ? 'BREAKEVEN' : (hit >= 1 || (call.trailAtr && sgn * (sl - call.entry) > 0) ? 'PROFIT' : 'SL_HIT'); exit = sl; exitT = b.t; break; }
     for (let i = hit; i < call.targets.length; i++) {
       const tHit = sgn === 1 ? b.h >= call.targets[i] : b.l <= call.targets[i];
       if (!tHit) break;
@@ -186,6 +186,8 @@ function track(call, bars, nowSec) {
     }
     last = b.c;
     if (status !== 'ACTIVE') break;
+    // ATR trailing stop (ATR-trend calls): follows the best close by a fixed ATR distance, never loosens
+    if (call.trailAtr) { best = sgn === 1 ? Math.max(best, b.c) : Math.min(best, b.c); const ns = best - sgn * call.trailAtr; if (sgn === 1 ? ns > sl : ns < sl) sl = ns; }
   }
   if (status === 'ACTIVE' && nowSec > limitT) { status = 'EXPIRED'; exit = last; exitT = limitT; }
   const ltp = bars.length > start ? bars[bars.length - 1].c : call.entry;
@@ -777,6 +779,31 @@ function evalSecMom(P, n, opts = {}) {
   return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6, checks: { sector: true, lead: true, trigger: true, vol: volR == null ? null : volR >= 1 },
     setup: 'secmom', engine: 'v4', rs: null, riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
 }
+// ---- ATR volatility trend (BullsAI 'Volatility Trend ATR', BAODSYR001: ATR period 20, previous 70 candles): after a quiet
+// spell (ATR(20) below its average, or in the lowest quarter, of the previous 70 candles), a candle that closes more than
+// k x ATR beyond the previous close starts a trade that way. Exit: a stop tk x ATR behind the best close that only ever
+// tightens (the 'volatility reversal'), or the intraday square-off. Re-entry: any new signal after an exit.
+function evalAtrSq(P, n, opts = {}) {
+  const { bars, c, h, l } = P;
+  if (!P.a20) { P.a20 = atr(h, l, c, 20); }
+  const A = P.a20, a = A[n - 1], k = opts.k || 1, tk = opts.tk || 2, quiet = opts.quiet || 'avg', look = opts.look || 70;
+  if (a == null || n < look + 21) return null;
+  const m = Math.floor(((bars[n].t + 19800) % 86400) / 60); if (m < 570) return null; // bars starting 9:30 or later
+  if (quiet !== 'none') {
+    const prev = A.slice(n - look, n).filter(x => x != null); if (prev.length < look * 0.8) return null;
+    if (quiet === 'avg' && !(a < prev.reduce((s, x) => s + x, 0) / prev.length)) return null;
+    if (quiet === 'p25') { const srt = prev.slice().sort((x, y) => x - y); if (!(a <= srt[Math.floor(srt.length * 0.25)])) return null; }
+  }
+  const mv = c[n] - c[n - 1]; let side = null;
+  if (mv > k * a) side = 'BUY'; else if (mv < -k * a) side = 'SELL';
+  if (!side || (opts.side && opts.side !== side)) return null;
+  const sgn = side === 'BUY' ? 1 : -1, px = c[n], trail = tk * a;
+  const entry = tick(px), sl = tick(entry - sgn * trail), risk = trail / px * 100, f = x => r2(x);
+  const why = [`ATR(20) ${quiet === 'none' ? 'any level' : quiet === 'p25' ? 'in the lowest quarter of the last ' + look + ' candles (quiet market)' : 'below its ' + look + '-candle average (quiet market)'}`,
+    `Candle closed ${f(Math.abs(mv) / a)}× ATR ${side === 'BUY' ? 'above' : 'below'} the previous close`, `Trailing stop ${tk}× ATR (${f(trail)}) behind the best close; square-off at day end`];
+  return { side, mode: 'intraday', entry, sl, targets: [tick(entry + sgn * trail * 6)], trailAtr: r2(trail), riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6,
+    checks: { quiet: quiet !== 'none', breakout: true }, setup: 'atrsq', engine: 'v4', rs: null, riskPct: r2(risk), rr: null, atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+}
 // ---- Stock swing "squeeze" breakout: after an inside day or the narrowest range of 7 days, a close at a fresh 20-day high
 // on volume. Buy only.
 function evalSqueeze(P, n, opts = {}) {
@@ -862,10 +889,10 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
       if (m) { todayPct = m.pct; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; }
     }
     const sm = dayMove(opts.secBars15 || I, t); // the stock's sector index (Nifty when it has none)
-    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
+    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : opts.setup === 'atrsq' ? evalAtrSq(P, i, opts) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
     if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime, sm) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     if (opts.safety === true && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue; // the lab normally applies it as a filter instead
-    const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets };
+    const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets, trailAtr: ev.trailAtr };
     const st = track(call, bars, far);
     out.push({ ...tradeOf(sym, call, ev, st, bias), idxPct: todayPct, secPct: sm ? sm.pct : null, secUp: sm ? sm.aboveOpen : null, dt: dtOf(todayPct) });
     freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
@@ -890,6 +917,8 @@ const LAB_GRID = {
   // 'index must agree' was never chosen in earlier runs, so it is dropped to make room for the VWAP setup (built-in index check)
   // EMA 20/50 crossover on 5- and 15-minute index bars (run once per timeframe; the setup key says which)
   // sector momentum (stock intraday): sector strength needed, entry style, volume, stop, targets
+  // ATR volatility trend (BullsAI BAODSYR001): breakout size k, quiet-market filter, trailing distance tk (all x ATR(20))
+  stock_atrsq: product({ setup: ['atrsq'], k: [0.75, 1, 1.5, 2], quiet: ['none', 'avg', 'p25'], tk: [1.5, 2, 3], regime: ['any'] }),
   stock_secmom: product({ setup: ['secmom'], secK: [1, 1.5], entry: ['brk', 'pull'], volK: [0, 1.5], stopK: [0.75, 1], exitI: ['S', 'A'], regime: ['any'] }),
   index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
   // agree: must the stock's side agree with Nifty ('index') or with its sector index ('sector') on the day? Applied as a
@@ -903,4 +932,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { evalSecMom, secStrong, SEC_STRONG, dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { evalAtrSq, evalSecMom, secStrong, SEC_STRONG, dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

@@ -1,0 +1,21 @@
+# Keeps the Render free instance awake during Indian market hours so scans, calls and alerts never pause.
+# Render sleeps a free service after ~15 min without visitors; a request every 10 minutes prevents that.
+# Weekdays 08:30–16:20 IST (03:00–10:50 UTC). GitHub may start scheduled runs a few minutes late; that is fine here.
+name: keep-awake
+on:
+  schedule:
+    - cron: '*/10 3-10 * * 1-5'
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the dashboard
+        run: |
+          URL="${{ vars.DASHBOARD_URL || 'https://nse-bse-dashboard.onrender.com' }}"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$URL/api/auth/status") && echo "HTTP $code" && [ "$code" -lt 500 ] && exit 0
+            sleep 20
+          done
+          echo "Dashboard did not answer" && exit 1

@@ -723,7 +723,9 @@ app.get('/api/fno-stocks', (req, res) => lowPriority.run(true, async () => {
 }));
 
 
-function istParts() { const d = new Date(Date.now() + 19800000); return { dow: d.getUTCDay(), mins: d.getUTCHours() * 60 + d.getUTCMinutes() }; }
+// NSE equity trading holidays (weekdays). A holiday counts as a closed day everywhere (dow 0): no scans, calls, square-off or EOD.
+const NSE_HOLIDAYS = new Set((process.env.NSE_HOLIDAYS || '2026-01-15,2026-01-26,2026-03-03,2026-03-26,2026-03-31,2026-04-03,2026-04-14,2026-05-01,2026-05-28,2026-06-26,2026-09-14,2026-10-02,2026-10-20,2026-11-10,2026-11-24,2026-12-25').split(',').map(x => x.trim()).filter(Boolean));
+function istParts() { const d = new Date(Date.now() + 19800000), day = d.toISOString().slice(0, 10), hol = NSE_HOLIDAYS.has(day); return { dow: hol ? 0 : d.getUTCDay(), mins: d.getUTCHours() * 60 + d.getUTCMinutes(), holiday: hol, day }; }
 function marketState() { const { dow, mins } = istParts(); if (dow === 0 || dow === 6) return 'closed'; if (mins >= 555 && mins <= 930) return 'open'; if (mins >= 540 && mins < 555) return 'pre-open'; return 'closed'; }
 app.get('/api/status', async (req, res) => {
   const toks = upstoxTokens();
@@ -1918,6 +1920,34 @@ async function trackCall(call) {
 // ---- Call events (target / stop hits), live monitor and end-of-day summary ----
 let evDb = null;
 async function loadEvents() { if (!evDb) { const a = await storeGet('store:calls-events', []); evDb = Array.isArray(a) ? a : []; } return evDb; }
+// Alerts you have not acknowledged: the page beeps until you press Seen; Telegram repeats an important one once after 3 minutes.
+const ACK_KINDS = /^(NEW|SL|BE|T\d)$/;
+let ackDb = null;
+async function loadAcks() { if (!ackDb) { const a = await storeGet('store:calls-acks', { ids: [], reminded: [] }); ackDb = { ids: a.ids || [], reminded: a.reminded || [] }; } return ackDb; }
+async function saveAcks() { try { ackDb.ids = ackDb.ids.slice(-400); ackDb.reminded = ackDb.reminded.slice(-400); await storeSet('store:calls-acks', ackDb); } catch (e) {} }
+async function remindUnacked() {
+  const ev = await loadEvents(), A = await loadAcks(), now = Math.floor(Date.now() / 1000);
+  const due = ev.filter(e => ACK_KINDS.test(e.kind) && now - e.t >= 180 && now - e.t < 1800 && !A.ids.includes(e.id) && !A.reminded.includes(e.id));
+  if (!due.length) return;
+  due.forEach(e => A.reminded.push(e.id)); await saveAcks();
+  const txt = '⏰ <b>Not seen yet</b> (' + due.length + ')\n' + due.slice(0, 6).map(e => '• ' + String(e.text || '').replace(/<\/?(?!b>)[^>]*>/g, '') + ' (' + Math.round((now - e.t) / 60) + ' min ago)').join('\n') + '\nOpen the Calls Monitor and press Seen to stop reminders.';
+  try { await sendTelegram(txt); } catch (e) {}
+}
+// No Upstox login by 9:05 on a trading day: one Telegram reminder with the login link (the token expires at 3:30 every morning)
+let loginRemindDay = '';
+async function remindLogin() {
+  const p = istParts(); if (p.dow === 0 || p.dow === 6 || p.mins < 545 || p.mins > 600 || loginRemindDay === p.day) return;
+  let ok = upstoxTokens().length > 0;
+  if (ok) { try { await upstoxFetchJson(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encodeURIComponent('NSE_INDEX|Nifty 50')}`); } catch (e) { ok = false; } }
+  loginRemindDay = p.day; if (ok) return;
+  const base = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
+  try { await sendTelegram('🔑 <b>Upstox is not logged in</b> and the market opens at 9:15. No live prices or calls until you log in' + (base ? ':\n' + base.replace(/\/$/, '') + '/upstox-login' : ' (open the dashboard → Status → Connect Upstox).')); } catch (e) {}
+}
+setInterval(() => { remindLogin().catch(() => {}); const p = istParts(); if (p.dow !== 0 && p.dow !== 6 && p.mins >= 555 && p.mins <= 945) remindUnacked().catch(() => {}); }, 60000).unref();
+app.post('/api/calls/ack', async (req, res) => {
+  const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String).slice(0, 200) : [];
+  const A = await loadAcks(); ids.forEach(id => { if (!A.ids.includes(id)) A.ids.push(id); }); await saveAcks(); res.json({ ok: true, n: ids.length });
+});
 async function emitEvent(e, tg = true) {
   const db = await loadEvents();
   if (db.some(x => x.id === e.id)) return;
@@ -2468,7 +2498,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-17-r43 (Nifty 50 page lists all 50 stocks; stock pages: only news about that company, publishers first, dates shown; news: only fresh stories, dates checked on the article page; news fixed; OI analysis on Derivatives; F&O indices on Home; fundamentals keep last good values; scanner shows every pattern; alert sound on automatically in market hours; new layout: sidebar pages Home, Scanner, Calls, Portfolio; stock tabs show only the open stock; index Chart tab lists its stocks; Monitor: Exit now for your own items; lab v13: sector momentum without the 11:00 cut-off; sector momentum setup, sector override for the breadth rule, all F&O stocks; no calls while breadth is unknown; index view: constituents, drivers, sector fundamentals, news on the right)';
+const BUILD = '2026-10-17-r44 (alerts repeat until Seen + Telegram reminder; 9:05 login reminder; kinds that lose on the current market type are blocked; NSE holidays; lab v13)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2831,12 +2861,19 @@ function gateCheck(key) {
 }
 // parameter sets to evaluate live for one family: one per kind found by the lab, else the current defaults
 // dt = today's market type ('up' / 'down' / 'flat'): a kind proven only on that type of day is added (proven ones first)
+// A kind that loses on today's market type (up / down / sideways days) issues no calls today, even when it is proven overall:
+// at least DAY_MIN_TRADES past trades on that type of day, average below zero and the newer half below zero too.
+const DAY_MIN_TRADES = Number(process.env.GATE_DAY_MIN_TRADES) || 15;
+const DT_WORD = { up: 'up days', down: 'down days', flat: 'sideways days' };
+function dayLosing(key, dt) { if (!dt) return null; const d = gate.kinds && gate.kinds[key + '@' + dt]; if (!d || d.n < DAY_MIN_TRADES || d.avg == null || d.avg >= 0 || (d.newer != null && d.newer >= 0)) return null; return d; }
 function liveKinds(fam, defaults, dt) {
   const all = Object.entries((gate.t && gate.kinds) || {}).filter(([k, v]) => v.fam === fam);
-  const base = all.filter(([k]) => !k.includes('@')).map(([key, v]) => ({ key, params: v.params, proven: !!v.pass && !isRetired(v) }));
+  const base = all.filter(([k]) => !k.includes('@')).filter(([key, v]) => { const d = dayLosing(key, dt); if (!d) return true;
+      gateBlocked(key + '|' + dt, key, `loses on ${DT_WORD[dt] || dt}: ${d.n} past trades${d.from && d.to ? ' (' + new Date(d.from * 1000).toISOString().slice(0, 10) + ' to ' + new Date(d.to * 1000).toISOString().slice(0, 10) + ')' : ''}, avg ${d.avg}%, newer half ${d.newer}%`); return false; })
+    .map(([key, v]) => ({ key, params: v.params, proven: !!v.pass && !isRetired(v) }));
   const byDay = dt ? all.filter(([k, v]) => k.endsWith('@' + dt) && v.pass && !isRetired(v)).map(([key, v]) => ({ key, params: v.params, proven: true })) : [];
   const ks = byDay.concat(base).sort((a, b) => (b.proven ? 1 : 0) - (a.proven ? 1 : 0));
-  return ks.length ? ks : defaults.map(key => ({ key, params: DEF_PARAMS[fam] }));
+  return ks.length || all.length ? ks : defaults.map(key => ({ key, params: DEF_PARAMS[fam] }));
 }
 // live regime check: an unknown market breadth (just after a restart) blocks rule-filtered calls instead of letting them through
 function regimeLive(side, regime, sec) { if (!regime || regime === 'any') return true; if (callsState.breadthPct == null) return false; return Calls.regimeOk(side, callsState.breadthPct, regime, sec); }
@@ -2914,7 +2951,8 @@ app.get('/api/calls/monitor', async (req, res) => {
   const active = db.filter(c => !c.closed).sort((a, b) => b.t - a.t);
   const day = istDateKey(Math.floor(Date.now() / 1000));
   const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day).sort((a, b) => (b.closedAt || b.exitT || 0) - (a.closedAt || a.exitT || 0));
-  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, closed, events: ev.slice(-80).reverse(),
+  const A = await loadAcks();
+  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, closed, events: ev.slice(-80).reverse().map(e => A.ids.includes(e.id) ? { ...e, acked: true } : e),
     today: buildEodAll(db, ev, day), sources: SOURCES, watch: W.items, watchDone: W.done.slice(0, 8), eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
 });
 // Manually added items (from Chart patterns / Screener & scans): tracked, alerted and summarised like calls,

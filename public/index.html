@@ -258,6 +258,11 @@
   .xs-more{font:inherit;font-size:11px;font-weight:600;color:var(--blue);background:rgba(61,139,253,.12);border:1px solid rgba(61,139,253,.35);border-radius:10px;padding:1px 8px;cursor:pointer;}
   .xs-pop{display:none;position:fixed;left:0;top:0;z-index:60;min-width:230px;max-width:320px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.45);font-size:12px;line-height:1.6;white-space:normal;}
   .xs-mw:hover .xs-pop,.xs-mw:focus-within .xs-pop{display:block;}
+  .ack-bar{position:fixed;right:16px;bottom:16px;z-index:9400;max-width:min(92vw,460px);display:flex;gap:12px;align-items:center;background:var(--panel);border:2px solid #f0a93a;border-radius:12px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13px;}
+  .ack-list{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+  .ack-good{color:var(--green);} .ack-bad{color:var(--red);} .ack-info{color:var(--text);}
+  .ack-btn{background:#f0a93a!important;color:#1a1204!important;border-color:#f0a93a!important;font-weight:700;min-height:40px;padding:0 16px!important;}
+  @media(max-width:700px){ .ack-bar{left:8px;right:8px;bottom:70px;max-width:none;} }
   /* Home */
   .hm-row{margin-bottom:14px;}
   .hm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;}
@@ -417,7 +422,7 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
       <span id="upstoxConnectLabel">Connect Upstox</span>
     </a>
-    <span class="mkt-badge" id="mktBadge" title="Market hours: Mon–Fri 9:15–15:30 IST (exchange holidays are not tracked)">&hellip;</span>
+    <span class="mkt-badge" id="mktBadge" title="Market hours: Mon–Fri 9:15–15:30 IST, NSE holidays excluded">&hellip;</span>
     <button class="btn" style="display:none" id="monBtn" title="Live monitor for all trade calls, alerts and end-of-day summary">Calls Monitor</button>
     <button class="btn" style="display:none" id="callsBtn" title="Rule-based trade calls with entry, stop loss and targets">Trade Calls</button>
     <button class="btn" style="display:none" id="statusBtn" title="Connection health, Telegram test">Status</button>
@@ -2715,7 +2720,10 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
   fetch('/api/auth/status',{cache:'no-store'}).then(r=>r.json()).then(j=>{ window.AUTH_REQUIRED=!!j.required; if(j.required&&!j.ok) window.showLogin(); }).catch(()=>{});
 
   // ---- market badge ----
-  function istNow(){ const d=new Date(Date.now()+19800000); return {dow:d.getUTCDay(), mins:d.getUTCHours()*60+d.getUTCMinutes(), str:d.toISOString().slice(11,19)}; }
+  // NSE trading holidays (weekdays); a holiday is a closed day for the badge, auto sound and Home
+  window.NSE_HOLIDAYS=new Set(['2026-01-15','2026-01-26','2026-03-03','2026-03-26','2026-03-31','2026-04-03','2026-04-14','2026-05-01','2026-05-28','2026-06-26','2026-09-14','2026-10-02','2026-10-20','2026-11-10','2026-11-24','2026-12-25']);
+  function istNow(){ const d=new Date(Date.now()+19800000), day=d.toISOString().slice(0,10), hol=window.NSE_HOLIDAYS.has(day); return {dow:hol?0:d.getUTCDay(), holiday:hol, mins:d.getUTCHours()*60+d.getUTCMinutes(), str:d.toISOString().slice(11,19)}; }
+  window.isNseHoliday=()=>istNow().holiday;
   window.marketState=function(){ const {dow,mins}=istNow(); if(dow===0||dow===6) return 'closed'; if(mins>=555&&mins<=930) return 'open'; if(mins>=540&&mins<555) return 'pre-open'; return 'closed'; };
   function updateBadge(){
     const el=document.getElementById('mktBadge'); if(!el) return;
@@ -2723,7 +2731,7 @@ window.addEventListener('hashchange',()=>{ const m=/[#&]tab=(\w+)/.exec(location
     let cls='mkt-badge', txt;
     if(st==='open'){ if(age==null||age>120){ cls+=' stale'; txt=age==null?'MARKET OPEN · waiting for prices':`MARKET OPEN · prices STALE (${age>90?Math.round(age/60)+' min':age+'s'})`; } else { cls+=' open'; txt=`MARKET OPEN · updated ${age}s ago`; } }
     else if(st==='pre-open') txt='PRE-OPEN · trading starts 9:15 IST';
-    else txt='MARKET CLOSED · showing last close'+(t?'':'');
+    else txt=(istNow().holiday?'NSE HOLIDAY':'MARKET CLOSED')+' · showing last close';
     el.className=cls; el.textContent=txt;
   }
   setInterval(updateBadge,5000); setTimeout(updateBadge,300);
@@ -3003,7 +3011,7 @@ window.cbtBtn=function(c){
   function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
   function tone(f,t0,d,type,vol){ const o=actx.createOscillator(), g=actx.createGain(); o.type=type||'sine'; o.frequency.value=f; g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(vol||0.25,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+d); o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0+d+0.05); }
   // Sound mode: auto = on during market hours (Mon–Fri 9:15–15:30 IST), off otherwise; or always on / always off
-  function mktHours(){ const n=new Date(Date.now()+19800000), d=n.getUTCDay(), m=n.getUTCHours()*60+n.getUTCMinutes(); return d>=1&&d<=5&&m>=555&&m<=930; }
+  function mktHours(){ return typeof window.marketState==='function'?window.marketState()==='open':false; }
   function soundOn(){ return sndMode==='on'||(sndMode==='auto'&&mktHours()); }
   // browsers block sound until the page has been clicked or tapped once: unlock on the first interaction, and say so
   function unlockBar(){ let b=document.getElementById('sndUnlock'); const need=soundOn()&&(!actx||actx.state!=='running');
@@ -3024,13 +3032,30 @@ window.cbtBtn=function(c){
     if(seen==null){ LS.set('cmSeen',ids); return; }       // first ever load: don't replay history
     const fresh=events.filter(e=>!seen.includes(e.id)).reverse();
     fresh.forEach(e=>{ flash(e); beep(e.level); if(e.kind==='NEW') addToWatchlist(e.symbol); });
+    const imp=fresh.filter(e=>/^(NEW|SL|BE|T\d)$/.test(e.kind)&&!e.acked);
+    if(imp.length){ const P=LS.get('cmPending',[]); imp.forEach(e=>{ if(!P.some(x=>x.id===e.id)) P.push({id:e.id,text:String(e.text||'').replace(/<[^>]+>/g,''),level:e.level,t:e.t}); }); LS.set('cmPending',P.slice(-30)); ackBar(); }
     if(fresh.length) LS.set('cmSeen',ids.concat(seen).slice(0,300));
   }
+  // ---- alerts not yet seen: a bar that stays, and a repeat beep every minute until Seen (Telegram repeats once after 3 min) ----
+  function ackBar(){
+    let P=LS.get('cmPending',[]);
+    if(data&&data.events){ const acked=new Set(data.events.filter(e=>e.acked).map(e=>e.id)); const n0=P.length; P=P.filter(x=>!acked.has(x.id)); if(P.length!==n0) LS.set('cmPending',P); }
+    P=P.filter(x=>Date.now()/1000-x.t<6*3600); let b=document.getElementById('ackBar');
+    if(!P.length){ if(b) b.remove(); return; }
+    if(!b){ b=document.createElement('div'); b.id='ackBar'; b.className='ack-bar'; b.setAttribute('role','alert'); document.body.appendChild(b); }
+    b.innerHTML='<div class="ack-list">'+P.slice(-3).reverse().map(x=>'<div class="ack-'+(x.level||'info')+'">'+x.text.replace(/[<>&]/g,'')+'</div>').join('')+(P.length>3?'<div class="metric-sub">+'+(P.length-3)+' more</div>':'')+'</div><button type="button" class="btn ack-btn">Seen'+(P.length>1?' ('+P.length+')':'')+'</button>';
+    b.querySelector('.ack-btn').onclick=()=>ackAll();
+  }
+  async function ackAll(){ const P=LS.get('cmPending',[]); LS.set('cmPending',[]); ackBar(); if(P.length){ try{ await fetch('/api/calls/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:P.map(x=>x.id)})}); }catch(e){} } }
+  window.cmAckAll=ackAll;
+  setInterval(()=>{ const P=LS.get('cmPending',[]).filter(x=>Date.now()/1000-x.t<6*3600); if(P.length){ ackBar(); beep(P.some(x=>x.level==='bad')?'bad':P.some(x=>x.level==='good')?'good':'info'); } },60000);
+  setTimeout(ackBar,3000);
   function addToWatchlist(sym){ try{ if(window.WATCHLIST&&!window.WATCHLIST.includes(sym)){ window.WATCHLIST.push(sym); if(typeof renderWatchlist==='function') renderWatchlist(); } }catch(e){} }
   async function poll(){
     if(document.hidden&&!LS.get('cmBg',true)) return;
     try{ const r=await fetch('/api/calls/monitor',{cache:'no-store'}); if(!r.ok) throw 0; data=await r.json();
       (data.active||[]).forEach(c=>addToWatchlist(c.symbol)); handleNew(data.events||[]); }catch(e){ if(data) data.stale=true; }
+    try{ ackBar(); }catch(e){}
     window.CM_DATA=data; try{ document.dispatchEvent(new CustomEvent('cm:data',{detail:data})); }catch(e){}
     if(view) draw();
   }
@@ -3173,7 +3198,7 @@ window.cbtBtn=function(c){
     view.querySelector('#cmSnd').onclick=()=>{ sndMode=sndMode==='auto'?'on':sndMode==='on'?'off':'auto'; LS.set('cmSoundMode',sndMode); if(soundOn()){ ensureAudio(); beep('info'); } unlockBar(); draw(); };
     view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k,true); };
     view.querySelector('#cmNote').onclick=async()=>{ try{ const r=await Notification.requestPermission(); alert(r==='granted'?'Browser alerts on: you will get a pop-up when this tab is in the background.':'Browser alerts were not allowed.'); }catch(e){ alert('This browser does not support alerts.'); } };
-    draw(); poll().then(schedule);
+    draw(); poll().then(schedule); ackAll();
   }
   document.getElementById('monBtn')?.addEventListener('click',open);
   window.cmRefresh=()=>poll();

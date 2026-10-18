@@ -2468,6 +2468,15 @@ async function runCallsCycle(force) {
                 if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
               }
             }
+            // the same strategy on 5-minute candles, for TCS and the 30 most traded F&O stocks
+            if (!found.some(f => f.symbol === sym && f.mode === 'intraday') && (sym === 'TCS' || FNO_FALLBACK.slice(0, 30).includes(sym))) {
+              const k5s = liveKinds('stock_atrsq5', ['stk|intraday|BUY|atrsq5', 'stk|intraday|SELL|atrsq5'], Calls.dtOf(ictx.todayPct));
+              if (k5s.length) { let r5 = []; try { r5 = toBars(await getUpstoxCandles(sym, '5m')); } catch (e) {}
+                if (r5.length && r5[r5.length - 1].t + 300 > nowSec) r5 = r5.slice(0, -1); r5 = r5.slice(-400);
+                if (r5.length > 120) { const P5 = Calls.prep(r5), n5 = r5.length - 1;
+                  for (const k of k5s) { const { side } = keyParts(k.key); const id = Calls.evalAtrSq(P5, n5, { ...k.params, side, setup: 'atrsq5' });
+                    if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; } } } }
+            }
             // sector momentum: a stock leading a sector that is running hard today (its own lab-tested kind)
             if (!found.some(f => f.symbol === sym && f.mode === 'intraday')) {
               const sm = await getSectorMove(sectorOf(sym));
@@ -2774,8 +2783,8 @@ const CAPS_ON = process.env.CALLS_CAPS === 'on';
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
 const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
-storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 14 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
-const SETUP_NAME = { atrsq: 'ATR volatility trend', orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold', x5: '5-min EMA 20/50 crossover', x15: '15-min EMA 20/50 crossover', secmom: 'sector momentum' };
+storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion === 15 && !gate.t) gate = { ...g, building: false }; }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
+const SETUP_NAME = { atrsq: 'ATR volatility trend', atrsq5: 'ATR volatility trend (5-min)', orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold', x5: '5-min EMA 20/50 crossover', x15: '15-min EMA 20/50 crossover', secmom: 'sector momentum' };
 const DT_LABEL = { up: 'up days', down: 'down days', flat: 'sideways days' };
 function gateLabel(key) {
   const [base, dt] = String(key).split('@');
@@ -2790,7 +2799,7 @@ function gateLabel(key) {
 const GATE_MODE = (process.env.CALLS_GATE || 'paper').toLowerCase(); // paper (default): unproven kinds still issue calls, labelled; strict: only proven; off: no gate
 const LAB_MIN_OLDER = 12;
 const DEF_PARAMS = { index_cross: { entry: 'cross', volK: 1.3, htf: true, minScore: 4, stopK: 1.25, exit: 'A' }, index_intraday: { veto: true, regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A', endMin: 795 }, index_swing: { regime: 'any', minScore: 5, needHtf: false, stopK: 1, exit: 'A' },
-  stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_atrsq: { setup: 'atrsq', k: 1, quiet: 'avg', tk: 2, regime: 'any' }, stock_secmom: { setup: 'secmom', secK: 1.5, entry: 'brk', volK: 0, stopK: 1, exitI: 'A', regime: 'any' }, stock_intraday: { safety: false, agree: 'none', regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
+  stock_swing: { regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exit: process.env.CALLS_EXIT || 'B' }, stock_atrsq: { setup: 'atrsq', k: 1, quiet: 'avg', tk: 2, regime: 'any' }, stock_atrsq5: { setup: 'atrsq5', k: 1, quiet: 'avg', tk: 2, regime: 'any', barSec: 300 }, stock_secmom: { setup: 'secmom', secK: 1.5, entry: 'brk', volK: 0, stopK: 1, exitI: 'A', regime: 'any' }, stock_intraday: { safety: false, agree: 'none', regime: 'any', setup: 'trend', minScore: 5, stopK: 1, exitI: 'A' } };
 const famOf = key => { const [g, m] = key.split('|'); return (g === 'idx' ? 'index_' : 'stock_') + m; };
 function paramsLabel(p) {
   if (!p) return '';
@@ -2798,7 +2807,7 @@ function paramsLabel(p) {
   const rg = p.regime === 'b50s' ? ' · only when market breadth agrees, unless its sector index is up (down) 1.5%+ today' : p.regime === 'b50' ? ' · only when market breadth agrees (buys ≥50% of stocks above their 50-day average, sells ≤50%)' : p.regime === 'b60' ? ' · only in a strong market (buys ≥60% above their 50-day average, sells ≤40%)' : '';
   const ia = p.idxAgree || p.agree === 'index' ? ' · only when Nifty agrees on the day (buys while it is up, sells while it is down)' : p.agree === 'sector' ? ' · only when its sector index agrees on the day (buys while it is up, sells while it is down)' : '';
   const vt = (p.veto === false ? ' · may trade against the daily trend' : '') + (p.safety ? ' · no trade against a strong sector move (0.7%+)' : '');
-  if (p.setup === 'atrsq') return `candle closes ${p.k}× ATR(20) beyond the previous close${p.quiet === 'none' ? '' : p.quiet === 'p25' ? ' after ATR sat in the lowest quarter of the last 70 candles' : ' after ATR sat below its 70-candle average'} · trailing stop ${p.tk}× ATR behind the best close · square-off at day end`;
+  if (p.setup === 'atrsq' || p.setup === 'atrsq5') return `${p.setup === 'atrsq5' ? '5-minute' : '15-minute'} candle closes ${p.k}× ATR(20) beyond the previous close${p.quiet === 'none' ? '' : p.quiet === 'p25' ? ' after ATR sat in the lowest quarter of the last 70 candles' : ' after ATR sat below its 70-candle average'} · trailing stop ${p.tk}× ATR behind the best close · square-off at day end`;
   if (p.setup === 'secmom') return `sector index ${p.secK}%+ on the day · ${p.entry === 'pull' ? 'entry on a pullback that holds the opening range / VWAP' : 'entry on the opening-range break'}${p.volK ? ' · volume ≥' + p.volK + '× usual' : ''} · stop ×${p.stopK} · targets ${{ S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R' }[p.exitI] || ''} · entries 9:45–14:00`;
   if (p.entry) return `${p.minScore}/6 checks · ${p.entry === 'retest' ? 'entry on the first pullback to the 20 EMA' : 'entry on the cross candle'}${p.volK ? ' · volume ≥' + p.volK + '× usual (required)' : ' · volume not required'}${p.htf ? ' · bigger trend must agree' : ''} · stop ×${p.stopK} · targets ${{ S: '0.8/1.6/2.4R', A: '1/2/3R', B: '1.5/3/4.5R' }[p.exit] || ''}`;
   return `${p.minScore}/6 checks${p.needHtf ? ' + bigger trend' : ''}${vt}${rg}${ia} · stop ×${p.stopK} · targets ${ex}${p.endMin ? ' · entries until ' + (p.endMin === 720 ? '12:15' : '13:30') : ''}`;
@@ -2826,7 +2835,7 @@ function statsOf(a) {
   return { from: a.t0, to: a.t1, n: a.n, avg: r(a.sum / a.n), older: a.oN ? r(a.oSum / a.oN) : null, newer: a.nN ? r(a.nSum / a.nN) : null, olderN: a.oN, newerN: a.nN, winRate: a.w + a.l ? Math.round(a.w / (a.w + a.l) * 100) : null, olderLcb: lcb };
 }
 function pickKinds(kinds, fam, combos, perCombo, cutoff) {
-  const min = GATE_MIN[fam === 'index_intraday' || fam === 'index_cross' ? 'idx_intraday' : fam === 'index_swing' ? 'idx_swing' : fam === 'stock_intraday' || fam === 'stock_secmom' || fam === 'stock_atrsq' ? 'stk_intraday' : 'stk_swing'];
+  const min = GATE_MIN[fam === 'index_intraday' || fam === 'index_cross' ? 'idx_intraday' : fam === 'index_swing' ? 'idx_swing' : fam === 'stock_intraday' || fam === 'stock_secmom' || fam === 'stock_atrsq' || fam === 'stock_atrsq5' ? 'stk_intraday' : 'stk_swing'];
   const def = DEF_PARAMS[fam], defIdx = Math.max(0, combos.findIndex(c => Object.keys(def).every(k => c[k] === def[k])));
   const keys = new Set(); perCombo.forEach(m => m.forEach((_, k) => keys.add(k)));
   for (const key of keys) {
@@ -2937,9 +2946,21 @@ async function buildGate() {
           try { const m = new Map(); accum(m, await Calls.walkIntraday(FOCUS, focusBars, { idxBars15: idx15, secBars15: idx15, breadth, ...v.params }, yieldLoop), keyFn, cutoff); v.focus = { sym: FOCUS, ...statsOf(m.get(key)) }; } catch (e) {} }
       }
       gate.partial = { ...kinds };
+      // ATR volatility trend on 5-minute candles: TCS + the 30 most traded F&O stocks (5-minute history is heavier to load)
+      const a5 = G.stock_atrsq5 || [];
+      if (a5.length) { const per5 = a5.map(() => new Map()), syms5 = [...new Set(['TCS', ...FNO_FALLBACK.slice(0, 30)])]; let cut5 = 0, k5 = 0, tcs5 = null;
+        for (const sym of syms5) { gate.progress = `lab: ATR 5-minute ${++k5}/${syms5.length}`;
+          try { const bars = await getMinuteHistory(await dataKeyFor(sym), 5, 4); if (bars.length < 600) continue; if (!cut5) cut5 = mid(bars); if (sym === 'TCS') tcs5 = bars;
+            const P5 = Calls.prep(bars);
+            for (let ci = 0; ci < a5.length; ci++) accum(per5[ci], await Calls.walkIntraday(sym, bars, { idxBars15: idx15, secBars15: idx15, _P: P5, breadth, ...a5[ci] }, yieldLoop), keyFn, cut5);
+          } catch (e) {} }
+        pickKinds(kinds, 'stock_atrsq5', a5, per5, cut5);
+        if (tcs5) for (const [key, v] of Object.entries(kinds)) { if (v.fam !== 'stock_atrsq5' || key.includes('@')) continue;
+          try { const m = new Map(); accum(m, await Calls.walkIntraday('TCS', tcs5, { idxBars15: idx15, secBars15: idx15, breadth, ...v.params }, yieldLoop), keyFn, cut5); v.focus = { sym: 'TCS', ...statsOf(m.get(key)) }; } catch (e) {} }
+        gate.partial = { ...kinds }; }
     }
     if (!Object.keys(kinds).length) throw new Error('no history could be loaded from Upstox');
-    gate = { t: Date.now(), labVersion: 14, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
+    gate = { t: Date.now(), labVersion: 15, building: false, progress: '', err: null, kinds, minTrades: GATE_MIN_TRADES, min: GATE_MIN, tookMin: Math.round((Date.now() - gate.startedAt) / 60000) };
     try { await storeSet('store:calls-gate', gate); } catch (e) {}
   } catch (e) { gate.err = e.message; }
   finally { gate.building = false; gate.progress = ''; }

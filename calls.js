@@ -802,7 +802,7 @@ function evalAtrSq(P, n, opts = {}) {
   const why = [`ATR(20) ${quiet === 'none' ? 'any level' : quiet === 'p25' ? 'in the lowest quarter of the last ' + look + ' candles (quiet market)' : 'below its ' + look + '-candle average (quiet market)'}`,
     `Candle closed ${f(Math.abs(mv) / a)}× ATR ${side === 'BUY' ? 'above' : 'below'} the previous close`, `Trailing stop ${tk}× ATR (${f(trail)}) behind the best close; square-off at day end`];
   return { side, mode: 'intraday', entry, sl, targets: [tick(entry + sgn * trail * 6)], trailAtr: r2(trail), riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6,
-    checks: { quiet: quiet !== 'none', breakout: true }, setup: 'atrsq', engine: 'v4', rs: null, riskPct: r2(risk), rr: null, atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+    checks: { quiet: quiet !== 'none', breakout: true }, setup: opts.setup === 'atrsq5' ? 'atrsq5' : 'atrsq', engine: 'v4', rs: null, riskPct: r2(risk), rr: null, atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
 }
 // ---- Stock swing "squeeze" breakout: after an inside day or the narrowest range of 7 days, a close at a fresh 20-day high
 // on volume. Buy only.
@@ -889,10 +889,10 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
       if (m) { todayPct = m.pct; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; }
     }
     const sm = dayMove(opts.secBars15 || I, t); // the stock's sector index (Nifty when it has none)
-    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : opts.setup === 'atrsq' ? evalAtrSq(P, i, opts) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
+    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : (opts.setup === 'atrsq' || opts.setup === 'atrsq5') ? evalAtrSq(P, i, opts) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
     if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime, sm) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     if (opts.safety === true && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue; // the lab normally applies it as a filter instead
-    const call = { t: t + 899, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets, trailAtr: ev.trailAtr };
+    const call = { t: t + (opts.barSec || 900) - 1, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets, trailAtr: ev.trailAtr };
     const st = track(call, bars, far);
     out.push({ ...tradeOf(sym, call, ev, st, bias), idxPct: todayPct, secPct: sm ? sm.pct : null, secUp: sm ? sm.aboveOpen : null, dt: dtOf(todayPct) });
     freeFrom = st.closed ? (st.exitT || t) + 60 : bars[bars.length - 1].t + 1;
@@ -919,6 +919,7 @@ const LAB_GRID = {
   // sector momentum (stock intraday): sector strength needed, entry style, volume, stop, targets
   // ATR volatility trend (BullsAI BAODSYR001): breakout size k, quiet-market filter, trailing distance tk (all x ATR(20))
   stock_atrsq: product({ setup: ['atrsq'], k: [0.75, 1, 1.5, 2], quiet: ['none', 'avg', 'p25'], tk: [1.5, 2, 3], regime: ['any'] }),
+  stock_atrsq5: product({ setup: ['atrsq5'], k: [0.75, 1, 1.5, 2], quiet: ['none', 'avg', 'p25'], tk: [1.5, 2, 3], regime: ['any'], barSec: [300] }), // same strategy on 5-minute candles (TCS + the most traded F&O stocks)
   stock_secmom: product({ setup: ['secmom'], secK: [1, 1.5], entry: ['brk', 'pull'], volK: [0, 1.5], stopK: [0.75, 1], exitI: ['S', 'A'], regime: ['any'] }),
   index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
   // agree: must the stock's side agree with Nifty ('index') or with its sector index ('sector') on the day? Applied as a

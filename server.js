@@ -2042,6 +2042,34 @@ async function liveMonitor() {
 }
 function istDateKey(t) { return new Date((t + 19800) * 1000).toISOString().slice(0, 10); }
 async function loadEod() { const a = await storeGet('store:calls-eod', []); return Array.isArray(a) ? a : []; }
+// ---- Risk in rupees: your capital and risk per trade size every new call (quantity / lots, ₹ at risk, ₹ profit or loss),
+// and a daily loss stop halts new Trade Calls for the rest of the day once today's calls have lost that much (paper).
+let riskCfg = { on: false, capital: 100000, riskPct: 1, dailyStopPct: 2, leverage: 5 };
+storeGet('store:risk-settings', null).then(v => { if (v && typeof v === 'object') riskCfg = { ...riskCfg, ...v }; }).catch(() => {});
+function sizeCall(c) {
+  if (!riskCfg.on || !(c.entry > 0) || !(c.sl > 0)) return c;
+  const riskRs = riskCfg.capital * riskCfg.riskPct / 100, per = Math.abs(c.entry - c.sl); if (!(per > 0)) return c;
+  if (c.kind === 'option') { const lot = c.lotSize || 1, perLot = per * lot; const lots = Math.max(1, Math.floor(riskRs / perLot)); Object.assign(c, { lots, qty: lots * lot, riskRs: Math.round(perLot * lots), capRs: Math.round(c.entry * lots * lot), overRisk: perLot > riskRs }); }
+  else { const capMax = riskCfg.capital * (c.mode === 'intraday' ? (riskCfg.leverage || 1) : 1); let qty = Math.floor(riskRs / per); qty = Math.min(qty, Math.floor(capMax / c.entry)); Object.assign(c, { qty: Math.max(0, qty), riskRs: Math.round(per * Math.max(0, qty)), capRs: Math.round(c.entry * Math.max(0, qty)) }); }
+  return c;
+}
+const pnlRsOf = c => (c.qty > 0 && c.pnlPct != null && c.entry > 0) ? Math.round(c.pnlPct / 100 * c.entry * c.qty) : null;
+function withRs(c) { const r = pnlRsOf(c); return r == null ? c : { ...c, pnlRs: r }; }
+// today's Trade Calls (not your own monitor items) in rupees: closed today + still open
+function dayRs(db) { const day = istDateKey(Math.floor(Date.now() / 1000)); let closed = 0, open = 0, n = 0;
+  db.filter(c => !c.manual && c.qty > 0).forEach(c => { const r = pnlRsOf(c); if (r == null) return; if (c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day) { closed += r; n++; } else if (!c.closed) open += r; });
+  return { day, closed, open, total: closed + open, n, limit: riskCfg.on ? -Math.round(riskCfg.capital * riskCfg.dailyStopPct / 100) : null }; }
+let dailyStopTold = '';
+function dailyStopped(db) { if (!riskCfg.on || !(riskCfg.dailyStopPct > 0)) return false; const d = dayRs(db); const hit = d.total <= d.limit;
+  if (hit && dailyStopTold !== d.day) { dailyStopTold = d.day; sendTelegram(`🛑 <b>Daily loss stop</b>: today's calls are at ₹${d.total.toLocaleString('en-IN')} (limit ₹${d.limit.toLocaleString('en-IN')}). No new Trade Calls until tomorrow; open calls keep running to their stops and targets.`).catch(() => {}); }
+  return hit; }
+app.get('/api/settings/risk', async (req, res) => { const db = await loadCalls(); res.json({ ...riskCfg, today: dayRs(db), stopped: dailyStopped(db) }); });
+app.post('/api/settings/risk', async (req, res) => {
+  const b = req.body || {}, num = (v, lo, hi, d) => { const x = Number(v); return isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d; };
+  riskCfg = { on: !!b.on, capital: num(b.capital, 1000, 1e9, riskCfg.capital), riskPct: num(b.riskPct, 0.1, 10, riskCfg.riskPct), dailyStopPct: num(b.dailyStopPct, 0, 50, riskCfg.dailyStopPct), leverage: num(b.leverage, 1, 10, riskCfg.leverage) };
+  try { await storeSet('store:risk-settings', riskCfg); } catch (e) {}
+  res.json({ ok: true, ...riskCfg });
+});
 const SOURCES = { calls: 'Trade Calls', pattern: 'Chart patterns (price action)', screener: 'Screener & scans', agreement: 'Agreement (screener + pattern + breakout, paper)' };
 const srcOf = c => c.source || 'calls';
 function buildEod(db, events, day, src) {
@@ -2303,6 +2331,7 @@ async function runIndexScan(db, notes) {
   const made = { intraday: 0, swing: 0 };
   const DAY_CAP = { intraday: 3, swing: 2 };
   found.sort((a, b) => (gateCheck(b.gateKey || '').proven ? 1 : 0) - (gateCheck(a.gateKey || '').proven ? 1 : 0)); // proven signals first
+  if (dailyStopped(db)) { if (found.length) st.skipped.push('daily loss stop reached: no new calls today'); found.length = 0; }
   for (const f of found) {
     if (CAPS_ON && made[f.mode] >= 1) continue; // one new call per mode per scan
     const gk = f.gateKey || `idx|${f.mode}|${f.side}|${f.setup}`, g = gateCheck(gk);
@@ -2322,9 +2351,9 @@ async function runIndexScan(db, notes) {
       if (f.mode === 'swing' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) { st.skipped.push(f.u + ': moving against the idea today'); continue; }
       const call = await buildOptionCall(f.u, f, ltp, nowSec);
       Object.assign(call, { provenOn: keyParts(gk).dt || null, status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null });
-      db.push(call); optCalls.push(call); made[f.mode]++;
+      sizeCall(call); db.push(call); optCalls.push(call); made[f.mode]++;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 BUY ${call.symbol} (${call.mode}) premium ₹${call.entry}, expiry ${call.expiryLabel}` }, false);
-      notes.push(`${call.unproven ? '🧪 <b>UNPROVEN (paper)</b> ' : ''}🆕 BUY <b>${call.symbol}</b> (${call.mode === 'swing' ? 'multi-day' : 'intraday'}) expiry ${call.expiryLabel}\nPremium ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}. Exit if ${f.u} ${f.side === 'BUY' ? 'closes below' : 'closes above'} ${call.spotSl}${call.holdDays ? ', or in ' + call.holdDays + ' days' : ', and by 15:15'}.`);
+      notes.push(`${call.unproven ? '🧪 <b>UNPROVEN (paper)</b> ' : ''}🆕 BUY <b>${call.symbol}</b> (${call.mode === 'swing' ? 'multi-day' : 'intraday'}) expiry ${call.expiryLabel}\nPremium ₹${call.entry}${call.lots ? ' · ' + call.lots + ' lot' + (call.lots > 1 ? 's' : '') + ' (₹' + call.riskRs.toLocaleString('en-IN') + ' at risk' + (call.overRisk ? ', above your limit' : '') + ')' : ''}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}. Exit if ${f.u} ${f.side === 'BUY' ? 'closes below' : 'closes above'} ${call.spotSl}${call.holdDays ? ', or in ' + call.holdDays + ' days' : ', and by 15:15'}.`);
     } catch (e) { st.skipped.push(f.u + ' ' + f.mode + ': ' + e.message); }
   }
 }
@@ -2416,7 +2445,8 @@ async function runCallsCycle(force) {
     const madeToday = m => db.filter(c => c.kind !== 'option' && !c.manual && c.mode === m && dayNo(c.t) === today).length;
     // one new call per mode per scan (no clusters), within open / per-side / per-day caps
     const quota = { swing: Math.min(1, CAP.swing - cnt('swing'), DAY_CAP.swing - madeToday('swing')), intraday: Math.min(1, CAP.intraday - cnt('intraday'), DAY_CAP.intraday - madeToday('intraday')) };
-    for (const f of found) {
+    const stopToday = dailyStopped(db); if (stopToday) callsState.dailyStop = { at: Date.now() };
+    for (const f of (stopToday ? [] : found)) {
       if (CAPS_ON && (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode])) continue;
       const gk = f.gateKey || `stk|${f.mode}|${f.side}|${f.setup || 'trend'}`, g = gateCheck(gk);
       if (!g.ok) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, g.reason); continue; }
@@ -2433,9 +2463,9 @@ async function runCallsCycle(force) {
       const d = ltp - f.entry; const rb = x => Math.round((x + d) * 20) / 20;
       const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), trailAtr: f.trailAtr || undefined, riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', engine: f.engine || 'v3', rs: f.rs == null ? null : f.rs, costPct: Calls.costPct(f.mode), checks: f.checks, analysis: f.analysis, t: nowSec, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null };
       Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false, provenOn: keyParts(gk).dt || null });
-      db.push(call); open_.push(call); quota[f.mode]--;
+      sizeCall(call); db.push(call); open_.push(call); quota[f.mode]--;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}` }, false);
-      notes.push(`${call.unproven ? '🧪 UNPROVEN (paper) ' : ''}🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
+      notes.push(`${call.unproven ? '🧪 UNPROVEN (paper) ' : ''}🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}${call.qty ? ' · qty ' + call.qty + ' (₹' + call.riskRs.toLocaleString('en-IN') + ' at risk)' : ''}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
     }
     if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX);
     await saveCalls();
@@ -2978,7 +3008,7 @@ app.get('/api/calls/monitor', async (req, res) => {
   const day = istDateKey(Math.floor(Date.now() / 1000));
   const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day).sort((a, b) => (b.closedAt || b.exitT || 0) - (a.closedAt || a.exitT || 0));
   const A = await loadAcks();
-  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), active, closed, events: ev.slice(-80).reverse().map(e => A.ids.includes(e.id) ? { ...e, acked: true } : e),
+  res.json({ build: BUILD, market: marketState(), now: Math.floor(Date.now() / 1000), risk: { ...riskCfg, today: dayRs(db), stopped: dailyStopped(db) }, active: active.map(withRs), closed: closed.map(withRs), events: ev.slice(-80).reverse().map(e => A.ids.includes(e.id) ? { ...e, acked: true } : e),
     today: buildEodAll(db, ev, day), sources: SOURCES, watch: W.items, watchDone: W.done.slice(0, 8), eod: eod.slice(-30).reverse(), persisted: !!process.env.UPSTASH_REDIS_REST_URL, lastScan: callsState.lastScan, upstox: upstoxTokens().length > 0 });
 });
 // Manually added items (from Chart patterns / Screener & scans): tracked, alerted and summarised like calls,
@@ -3138,7 +3168,7 @@ app.get('/api/calls', async (req, res) => {
   if (req.query.scan === '1') lowPriority.run(true, () => runCallsCycle(true));
   else lowPriority.run(true, () => runCallsCycle(false));
   const own = db.filter(c => !c.manual);
-  const calls = own.slice().sort((a, b) => b.t - a.t);
+  const calls = own.slice().sort((a, b) => b.t - a.t).map(withRs);
   let shadow = []; try { shadow = (await loadShadow()).slice().sort((a, b) => b.t - a.t).slice(0, 60); } catch (e) {}
   res.json({ build: BUILD, calls, shadow, stats: Calls.summarize(own), scan: { ...callsState, nextInSec: Math.max(0, Math.round((SCAN_EVERY - (Date.now() - callsState.lastScan)) / 1000)), universe: FNO_FALLBACK.length, persisted: !!(process.env.UPSTASH_REDIS_REST_URL) } });
 });

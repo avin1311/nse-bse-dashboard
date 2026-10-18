@@ -3,6 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0b0f17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<script>
+/* app install + system notifications (the service worker shows them even while the app is in the background) */
+window.appNotify=function(title,body,tag){ try{ if(!window.Notification||Notification.permission!=='granted') return false;
+  if(navigator.serviceWorker&&navigator.serviceWorker.controller){ navigator.serviceWorker.ready.then(r=>r.showNotification(title,{body,tag:tag||undefined,icon:'/icon-192.png',badge:'/icon-192.png',renotify:!!tag,requireInteraction:true})); return true; }
+  new Notification(title,{body,icon:'/icon-192.png'}); return true; }catch(e){ return false; } };
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
+  navigator.serviceWorker.addEventListener('message',e=>{ if(e.data&&e.data.type==='open-monitor'){ try{ document.getElementById('callsNavBtn').click(); }catch(x){} } }); }
+document.addEventListener('click',async e=>{ const b=e.target.closest&&e.target.closest('#installBtn'); if(!b||!window.__installPrompt) return; window.__installPrompt.prompt(); try{ const r=await window.__installPrompt.userChoice; if(r&&r.outcome==='accepted'){ b.style.display='none'; if(window.Notification&&Notification.permission==='default') Notification.requestPermission(); } }catch(x){} window.__installPrompt=null; });
+window.addEventListener('appinstalled',()=>{ const b=document.getElementById('installBtn'); if(b) b.style.display='none'; });
+window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); window.__installPrompt=e; const b=document.getElementById('installBtn'); if(b) b.style.display=''; });
+</script>
 <title>NSE + BSE Analytics Dashboard</title>
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
@@ -426,7 +443,7 @@
     <button class="btn" style="display:none" id="monBtn" title="Live monitor for all trade calls, alerts and end-of-day summary">Calls Monitor</button>
     <button class="btn" style="display:none" id="callsBtn" title="Rule-based trade calls with entry, stop loss and targets">Trade Calls</button>
     <button class="btn" style="display:none" id="statusBtn" title="Connection health, Telegram test">Status</button>
-    <button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
+    <button class="btn" id="installBtn" style="display:none;border-color:var(--green);color:var(--green);" title="Install the dashboard as an app on this device">&#11015; Install app</button><button class="btn" onclick="location.reload()">&#8635; Refresh data</button>
   </div>
 </div>
 
@@ -3054,7 +3071,7 @@ window.cbtBtn=function(c){
     else { tone(740,t,.15); tone(740,t+.2,.15); } }
   // ---- on-screen alert ----
   function flash(ev){ const d=document.createElement('div'); d.className='cm-flash '+(ev.level||'info'); d.textContent=ev.text.replace(/<[^>]+>/g,''); d.style.top=(16+document.querySelectorAll('.cm-flash').length*54)+'px'; document.body.appendChild(d); setTimeout(()=>d.remove(),ev.level==='info'?6000:12000); d.onclick=()=>d.remove();
-    try{ if(window.Notification&&Notification.permission==='granted'&&document.hidden) new Notification('Trade call alert',{body:d.textContent}); }catch(e){} }
+    try{ if(document.hidden) window.appNotify('Trade call alert',d.textContent,ev.id||undefined); }catch(e){} }
   function handleNew(events){
     let seen=LS.get('cmSeen',null); const ids=events.map(e=>e.id);
     if(seen==null){ LS.set('cmSeen',ids); return; }       // first ever load: don't replay history
@@ -3564,7 +3581,7 @@ function showAlertBanner(pos, kind){
   const flashLabel = kind==='target' ? '🎯 TARGET HIT' : (kind==='stoploss' ? '⛔ SL HIT' : '⚠️ DEVIATION');
   const flashTimer=setInterval(()=>{ document.title = document.title===originalTitle ? flashLabel : originalTitle; flashes++; if(flashes>6){ clearInterval(flashTimer); document.title=originalTitle; } },600);
   if(window.Notification && Notification.permission==='granted'){
-    new Notification(kind==='target'?'Target hit':(kind==='stoploss'?'Stop-loss hit':'Deviation warning'), {body:`${pos.symbol} ${pos.side.toUpperCase()} @ ${fmt(pos.lastPrice,2)}`});
+    window.appNotify(kind==='target'?'Target hit':(kind==='stoploss'?'Stop-loss hit':'Deviation warning'), `${pos.symbol} ${pos.side.toUpperCase()} @ ${fmt(pos.lastPrice,2)}`);
   }
 }
 if(window.Notification && Notification.permission==='default'){ try{ Notification.requestPermission(); }catch(e){} }
@@ -3579,7 +3596,7 @@ function showPriceAlertBanner(a){
   host.appendChild(div);
   playAlertTone('target');
   if(window.Notification && Notification.permission==='granted'){
-    new Notification('Price alert', {body:`${a.symbol} ${a.condition} ₹${fmt(a.price,2)}`});
+    window.appNotify('Price alert', `${a.symbol} ${a.condition} ₹${fmt(a.price,2)}`);
   }
 }
 

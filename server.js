@@ -2063,6 +2063,38 @@ let dailyStopTold = '';
 function dailyStopped(db) { if (!riskCfg.on || !(riskCfg.dailyStopPct > 0)) return false; const d = dayRs(db); const hit = d.total <= d.limit;
   if (hit && dailyStopTold !== d.day) { dailyStopTold = d.day; sendTelegram(`🛑 <b>Daily loss stop</b>: today's calls are at ₹${d.total.toLocaleString('en-IN')} (limit ₹${d.limit.toLocaleString('en-IN')}). No new Trade Calls until tomorrow; open calls keep running to their stops and targets.`).catch(() => {}); }
   return hit; }
+// ---- Weekly lab report (Saturday 10:00 IST, Telegram + Calls Monitor): every kind of call's live results this week and
+// since it started, next to its backtest record from the strategy lab; kinds whose live results lag their backtest are flagged.
+async function buildWeekly() {
+  const db = await loadCalls(), now = Math.floor(Date.now() / 1000), from = now - 7 * 86400, r2 = x => Math.round(x * 100) / 100;
+  const agg = a => { const n = a.length; if (!n) return null; const w = a.filter(c => c.pnlPct > 0.05 && c.status !== 'BREAKEVEN').length, avg = a.reduce((s, c) => s + c.pnlPct, 0) / n;
+    const rs = a.reduce((s, c) => s + (pnlRsOf(c) || 0), 0); return { n, win: Math.round(w / n * 100), avg: r2(avg), sum: r2(avg * n), rs: Math.round(rs), from: Math.min(...a.map(c => c.t)), to: Math.max(...a.map(c => c.closedAt || c.exitT || c.t)) }; };
+  const closed = db.filter(c => c.closed && !c.manual), keys = [...new Set(closed.map(c => (c.gateKey || '').split('@')[0]).filter(Boolean))];
+  const kinds = keys.map(k => { const all = closed.filter(c => (c.gateKey || '').split('@')[0] === k), wk = all.filter(c => (c.closedAt || c.exitT || c.t) >= from), lab = (gate.kinds || {})[k];
+    const live = agg(all), week = agg(wk);
+    const lagging = !!(live && lab && live.n >= 8 && lab.avg != null && live.avg < 0 && lab.avg > 0);
+    return { key: k, label: gateLabel(k), week, live, lab: lab ? { n: lab.n, avg: lab.avg, winRate: lab.winRate, from: lab.from, to: lab.to, pass: !!lab.pass, retired: isRetired(lab) } : null, lagging };
+  }).sort((a, b) => (b.week ? b.week.n : 0) - (a.week ? a.week.n : 0));
+  const man = db.filter(c => c.closed && c.manual && (c.closedAt || c.exitT || c.t) >= from), bySrc = {};
+  Object.keys(SOURCES).filter(k => k !== 'calls').forEach(k => { bySrc[k] = agg(man.filter(c => srcOf(c) === k)); });
+  const labKinds = Object.entries(gate.kinds || {}).filter(([k]) => !k.includes('@'));
+  return { built: now, from, to: now, weekAll: agg(closed.filter(c => (c.closedAt || c.exitT || c.t) >= from)), kinds, bySrc,
+    lab: { built: gate.t || null, labVersion: gate.labVersion || null, proven: labKinds.filter(([, v]) => v.pass).map(([k]) => gateLabel(k)), paused: labKinds.filter(([, v]) => isRetired(v)).map(([k]) => gateLabel(k)), blocked: (callsState.gateBlocked || []).slice(0, 10) } };
+}
+function weeklyText(x) {
+  const d = t => new Date(t * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }), sg = v => v == null ? '—' : (v > 0 ? '+' : '') + v + '%';
+  let t = `📅 <b>Weekly report</b> ${d(x.from)} – ${d(x.to)}\n`;
+  t += x.weekAll ? `Trade Calls closed this week: ${x.weekAll.n} (${d(x.weekAll.from)} – ${d(x.weekAll.to)}), win ${x.weekAll.win}%, avg ${sg(x.weekAll.avg)}${riskCfg.on ? ', ₹' + x.weekAll.rs.toLocaleString('en-IN') : ''}\n` : 'No Trade Calls closed this week.\n';
+  x.kinds.filter(k => k.week).slice(0, 8).forEach(k => { t += `• ${k.label}: week ${k.week.n} trades, avg ${sg(k.week.avg)} · since start ${k.live.n} trades (${d(k.live.from)} – ${d(k.live.to)}), avg ${sg(k.live.avg)}${k.lab ? ' · lab ' + k.lab.n + ' trades, avg ' + sg(k.lab.avg) : ''}${k.lagging ? ' ⚠️ live behind the backtest' : ''}\n`; });
+  Object.entries(x.bySrc).forEach(([k, v]) => { if (v) t += `${SOURCES[k]}: ${v.n} closed, win ${v.win}%, avg ${sg(v.avg)}\n`; });
+  t += `Lab: ${x.lab.proven.length} kinds proven${x.lab.paused.length ? ', ' + x.lab.paused.length + ' paused' : ''}.`;
+  return t + '\n<i>Paper results; not advice.</i>';
+}
+let weeklyDone = '';
+setInterval(async () => { try { const d = new Date(Date.now() + 19800000); if (d.getUTCDay() !== 6 || d.getUTCHours() * 60 + d.getUTCMinutes() < 600) return; const key = d.toISOString().slice(0, 10); if (weeklyDone === key) return;
+  const list = await storeGet('store:weekly-reports', []); if (list.some(r => r.key === key)) { weeklyDone = key; return; }
+  weeklyDone = key; const x = await buildWeekly(); x.key = key; list.push(x); await storeSet('store:weekly-reports', list.slice(-12)); await sendTelegram(weeklyText(x)); } catch (e) {} }, 10 * 60000).unref();
+app.get('/api/calls/weekly', async (req, res) => { try { const list = await storeGet('store:weekly-reports', []); const live = await buildWeekly(); res.json({ latest: list[list.length - 1] || null, now: live, list: list.slice(-6).map(r => ({ key: r.key, from: r.from, to: r.to })) }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/settings/risk', async (req, res) => { const db = await loadCalls(); res.json({ ...riskCfg, today: dayRs(db), stopped: dailyStopped(db) }); });
 app.post('/api/settings/risk', async (req, res) => {
   const b = req.body || {}, num = (v, lo, hi, d) => { const x = Number(v); return isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d; };

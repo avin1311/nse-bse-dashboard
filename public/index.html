@@ -3203,6 +3203,7 @@ window.cbtBtn=function(c){
           ${(data.watchDone||[]).length?'<div class="cm-sub" style="margin-top:6px;font-weight:600;">RECENTLY RESOLVED</div>'+(data.watchDone||[]).map(w=>`<div class="cm-sub">${esc(w.symbol)} ${w.side} ${num(w.level)}: <b class="${w.outcome==='triggered'?'cm-b':''}">${w.outcome}</b>${w.px!=null?' at '+num(w.px):''} · ${dt(w.at)}${w.note?' · '+esc(w.note):''}</div>`).join(''):''}</div>`:''}
         <div class="cm-box"><h4>Daily summaries <button class="btn" id="cmEodNow" style="float:right;font-size:11px;">Generate today's</button></h4>
           ${eod.length?eod.map(({x,y})=>`<details class="cm-ev"><summary><b>${esc(x.date)}</b> · ${y.created.total} new · ${y.closed.wins}W/${y.closed.losses}L · ${sg(y.closed.netPct)}</summary>${eodBox(y,'')}</details>`).join(''):'<div class="metric-sub">The first summary is sent after 3:40 pm IST on the next trading day with calls. Use the button to see today\'s now.</div>'}</div>
+        <details class="cm-box" id="cmWeekBox"${window.__cmWeekOpen?" open":""}><summary style="cursor:pointer;"><b>Weekly report</b> <span class="metric-sub">live results vs the lab's backtest, per kind of call (sent on Telegram every Saturday)</span></summary><div id="cmWeek">${window.__cmWeekHtml||'<div class="metric-sub">Loading&hellip;</div>'}</div></details>
         <div class="cm-box"><h4>Alerts</h4>${evs.length?evs.slice(0,40).map(e=>`<div class="cm-ev ${e.level}"><b>${esc(e.kind==='NEW'?'NEW':e.kind==='SL'?'STOP LOSS':e.kind==='EXPIRED'?'EXPIRED':e.kind==='BE'?'STOPPED AT ENTRY':e.kind==='MANUAL'?'MANUAL EXIT':'TARGET '+e.kind.slice(1))}</b> ${esc(e.symbol)} ${e.side}<div class="cm-sub">${esc(e.text.replace(/<[^>]+>/g,''))} · ${dt(e.t)}</div></div>`).join(''):'<div class="metric-sub">No alerts yet. Target and stop-loss hits will show here, play a sound, and go to Telegram.</div>'}</div>
       </div></div>
       <div class="tc-disc">${data.upstox?'':'<b style="color:var(--red)">Upstox is not connected, so live prices cannot update.</b> '}${data.persisted?'History is saved.':'<b>Storage (Upstash) is not set up, so calls and summaries are lost when the server restarts.</b>'} Prices refresh every ${data.market==='open'?'15':'60'} seconds while this page is open; the server also checks every 5 minutes through the scheduled check even when the page is closed, and sends Telegram alerts. Sound only plays while this page is open in a browser tab. Rule-based screen, not investment advice.</div>`;
@@ -7234,6 +7235,22 @@ window.renderIndexFund=async function(d){
     setTimeout(()=>{ b.textContent='Save'; },1800); load(); });
   const _rp=window.renderPortView; if(typeof _rp==='function') window.renderPortView=function(){ _rp(); load(); };
   document.addEventListener('dash:resume',load); setTimeout(()=>{ if(window.APP_VIEW==='portfolio') load(); },1500);
+})();
+</script>
+<script>
+/* Weekly report box in the Calls Monitor (loads when opened) */
+(function(){
+  const sg=v=>v==null?'—':(v>0?'+':'')+v+'%', d=t=>t?new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'}):'—', esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function html(x,title){ if(!x) return ''; const rs=v=>v==null?'':' · '+(v<0?'−':'+')+'₹'+Math.abs(v).toLocaleString('en-IN');
+    return '<div class="metric-sub" style="margin:4px 0 6px;"><b>'+title+'</b> '+d(x.from)+' – '+d(x.to)+(x.weekAll?' · '+x.weekAll.n+' Trade Calls closed ('+d(x.weekAll.from)+' – '+d(x.weekAll.to)+'), win '+x.weekAll.win+'%, avg '+sg(x.weekAll.avg)+rs(x.weekAll.rs):' · no Trade Calls closed')+'</div>'
+      +'<div style="overflow-x:auto;"><table><thead><tr><th>Kind of call</th><th>This week</th><th>Live since start</th><th>Lab backtest</th><th></th></tr></thead><tbody>'
+      +(x.kinds.length?x.kinds.map(k=>'<tr><td>'+esc(k.label)+'</td><td>'+(k.week?k.week.n+' · '+sg(k.week.avg):'—')+'</td><td>'+(k.live?k.live.n+' trades ('+d(k.live.from)+' – '+d(k.live.to)+') · win '+k.live.win+'% · avg '+sg(k.live.avg):'—')+'</td><td>'+(k.lab?k.lab.n+' trades'+(k.lab.from?' ('+d(k.lab.from)+' – '+d(k.lab.to)+')':'')+' · avg '+sg(k.lab.avg)+(k.lab.pass?' · <b class="up">proven</b>':k.lab.retired?' · <b class="down">paused</b>':''):'not in the lab')+'</td><td>'+(k.lagging?'<b style="color:var(--amber)">⚠ live behind backtest</b>':'')+'</td></tr>').join(''):'<tr><td colspan="5" class="metric-sub">No closed Trade Calls yet.</td></tr>')+'</tbody></table></div>'
+      +(Object.entries(x.bySrc||{}).filter(([,v])=>v).length?'<div class="metric-sub" style="margin-top:6px;">Your own items this week: '+Object.entries(x.bySrc).filter(([,v])=>v).map(([k,v])=>esc(k)+' '+v.n+' closed, win '+v.win+'%, avg '+sg(v.avg)).join(' · ')+'</div>':'')
+      +'<div class="metric-sub" style="margin-top:4px;">Lab: '+x.lab.proven.length+' kinds proven'+(x.lab.paused.length?', '+x.lab.paused.length+' paused':'')+'. "Live behind backtest" = 8+ live trades averaging below zero while the backtest averaged above zero.</div>'; }
+  async function load(){ const box=document.getElementById('cmWeek'); if(!box) return; try{ const j=await fetch('/api/calls/weekly',{cache:'no-store'}).then(r=>r.json()); if(j.error) throw new Error(j.error);
+      box.innerHTML=window.__cmWeekHtml=html(j.now,'This week so far')+(j.latest?'<details style="margin-top:8px;"><summary class="metric-sub" style="cursor:pointer;">Last saved report ('+esc(j.latest.key)+')</summary>'+html(j.latest,'Report')+'</details>':''); }catch(e){ box.innerHTML='<div class="metric-sub">Weekly report unavailable ('+esc(e.message)+').</div>'; } }
+  let lastLoad=0;
+  document.addEventListener('toggle',e=>{ if(e.target&&e.target.id==='cmWeekBox'){ window.__cmWeekOpen=e.target.open; if(e.target.open&&Date.now()-lastLoad>60000){ lastLoad=Date.now(); load(); } } },true);
 })();
 </script>
 </body>

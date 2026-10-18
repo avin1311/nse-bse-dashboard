@@ -439,7 +439,7 @@
       <button class="btn scan-btn" id="screenerScanBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>Scan all</button>
       <button class="btn" id="exportScreenerBtn">Export CSV</button>
       <label class="toggle-mini" title="Refreshes prices only; the full scan runs when you press Scan all"><input type="checkbox" id="autoScanToggle" checked> Live prices every 60s</label>
-      <span class="metric-sub" style="align-self:center;">Also scan:</span><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="1W"> Weekly</label><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="1h"> Hourly</label><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="15m"> 15-min</label>
+      <span class="metric-sub" style="align-self:center;">Also scan:</span><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="1W"> Weekly</label><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="1h" checked> Hourly</label><label class="toggle-mini"><input type="checkbox" class="xs-tf" value="15m" checked> 15-min</label>
       <input id="screenerSearch" placeholder="Search stock or sector...">
       <select id="screenerFilter">
         <option value="all">All signals</option>
@@ -934,6 +934,9 @@ function xsChipsRender(){
   const r=b.getBoundingClientRect(); p.style.left=Math.max(8,Math.min(r.left,innerWidth-330))+'px'; p.style.top=(r.bottom+1)+'px'; }));
 document.addEventListener('click',e=>{ const c=e.target.closest&&e.target.closest('[data-xschip]'); if(!c) return; XS_CHIP=c.dataset.xschip; try{ localStorage.setItem('xsChip',XS_CHIP); }catch(x){} renderScreener(); });
 const xsYield=()=>new Promise(r=>setTimeout(r,0));
+// Also scan: Hourly and 15-min on by default, Weekly off; your own ticks are remembered
+(function(){ try{ const sv=JSON.parse(localStorage.getItem('xsTf')||'null'); if(Array.isArray(sv)) document.querySelectorAll('.xs-tf').forEach(x=>{ x.checked=sv.includes(x.value); }); }catch(e){}
+  document.addEventListener('change',e=>{ if(e.target&&e.target.classList&&e.target.classList.contains('xs-tf')){ try{ localStorage.setItem('xsTf',JSON.stringify([...document.querySelectorAll('.xs-tf:checked')].map(x=>x.value))); }catch(x){} } }); })();
 let xsBusy=false;
 // Scan all: fresh daily history + live prices (screener), then patterns and breakouts per stock; optional extra timeframes
 async function xsScanAll(quiet){

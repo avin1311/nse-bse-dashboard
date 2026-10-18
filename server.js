@@ -2603,7 +2603,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-18-r46 (agreement strategy: test + paper items; scanner lists patterns from every scanned timeframe; lab v14: ATR volatility trend; alerts repeat until Seen; login reminder; market-type rule; NSE holidays; self keep-awake)';
+const BUILD = '2026-10-19-r47 (lab v15: ATR on 15-min and 5-min; risk in rupees + daily loss stop; weekly report; OI-wall tag on index options; installable app; agreement strategy)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

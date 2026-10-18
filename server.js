@@ -1802,41 +1802,55 @@ app.get('/api/options/chain/:symbol', async (req, res) => {
 // day's OI that Upstox reports), volume, premium and IV; totals, PCR now and yesterday, max pain (computed), and the strikes
 // with the most call OI (resistance) and put OI (support). 60-second cache per symbol and expiry.
 const oiCache = {};
+async function getOiSnapshot(symbol, wantExpiry) {
+  const key = await resolveInstrumentKey(symbol);
+  const ck = symbol + '|' + (wantExpiry || '');
+  if (oiCache[ck] && Date.now() - oiCache[ck].t < 60000) return oiCache[ck].v;
+  const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(key)}`);
+  const today = todayIso();
+  const expiries = [...new Set((contracts || []).map(c => c.expiry))].filter(e => e >= today).sort();
+  if (!expiries.length) { const e = new Error('No options trade on ' + symbol); e.status = 404; throw e; }
+  const expiry = expiries.includes(wantExpiry) ? wantExpiry : expiries[0];
+  const lot = ((contracts || []).find(c => c.lot_size) || {}).lot_size || null;
+  const chain = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(key)}&expiry_date=${expiry}`);
+  const side = o => { const m = (o && o.market_data) || {}, g = (o && o.option_greeks) || {};
+    return { oi: m.oi || 0, prevOi: m.prev_oi != null ? m.prev_oi : null, chg: m.prev_oi != null ? (m.oi || 0) - m.prev_oi : null, vol: m.volume || 0, ltp: m.ltp != null ? m.ltp : null, ltpChg: (m.ltp != null && m.close_price) ? m.ltp - m.close_price : null, iv: g.iv != null ? g.iv : null }; };
+  let spot = null;
+  const strikes = (chain || []).map(r => { if (r.underlying_spot_price) spot = r.underlying_spot_price; return { strike: r.strike_price, ce: side(r.call_options), pe: side(r.put_options) }; }).filter(x => x.strike != null).sort((a, b) => a.strike - b.strike);
+  if (!strikes.length) throw new Error('Upstox returned an empty option chain');
+  const sum = (f) => strikes.reduce((a, x) => a + (f(x) || 0), 0);
+  const ceOi = sum(x => x.ce.oi), peOi = sum(x => x.pe.oi), cePrev = sum(x => x.ce.prevOi), pePrev = sum(x => x.pe.prevOi);
+  const ceChg = sum(x => x.ce.chg), peChg = sum(x => x.pe.chg), ceVol = sum(x => x.ce.vol), peVol = sum(x => x.pe.vol);
+  let maxPain = null, best = Infinity;
+  for (const k of strikes) { let pain = 0; for (const x of strikes) { pain += x.ce.oi * Math.max(0, k.strike - x.strike) + x.pe.oi * Math.max(0, x.strike - k.strike); } if (pain < best) { best = pain; maxPain = k.strike; } }
+  const top = (f, n, filt) => strikes.filter(filt || (() => true)).slice().sort((a, b) => (f(b) || 0) - (f(a) || 0)).slice(0, n).filter(x => (f(x) || 0) > 0).map(x => ({ strike: x.strike, v: f(x) }));
+  const atm = spot != null ? strikes.reduce((a, x) => Math.abs(x.strike - spot) < Math.abs(a.strike - spot) ? x : a, strikes[0]) : null;
+  const v = { symbol, expiry, expiries: expiries.slice(0, 8), lot, spot, atm: atm && atm.strike, atmIv: atm ? (atm.ce.iv != null ? atm.ce.iv : atm.pe.iv) : null,
+    totals: { ceOi, peOi, ceChg, peChg, ceVol, peVol, pcr: ceOi ? Math.round(peOi / ceOi * 100) / 100 : null, pcrPrev: cePrev ? Math.round(pePrev / cePrev * 100) / 100 : null, hasPrev: cePrev > 0 || pePrev > 0 },
+    maxPain, resistance: top(x => x.ce.oi, 3, x => spot == null || x.strike >= spot * 0.98), support: top(x => x.pe.oi, 3, x => spot == null || x.strike <= spot * 1.02),
+    ceAdd: top(x => x.ce.chg, 3), peAdd: top(x => x.pe.chg, 3), ceCut: top(x => -(x.ce.chg || 0), 2), peCut: top(x => -(x.pe.chg || 0), 2),
+    strikes, market: marketState(), at: Date.now() };
+  oiCache[ck] = { t: Date.now(), v };
+  return v;
+}
+// An index option call that buys straight into a big open-interest wall: a CE with heavy call OI just above the price, or a PE
+// with heavy put OI just below it (within 0.35%, at least 1.5x the typical strike's OI nearby). Tagged on the call and tracked
+// separately (no history of strike-wise OI exists to backtest it); OI_WALL=block skips such calls instead.
+function oiWallFor(v, dir) {
+  if (!v || !v.spot) return null;
+  const sp = v.spot, near = v.strikes.filter(x => Math.abs(x.strike / sp - 1) <= 0.03);
+  const oiOf = x => dir === 'BUY' ? x.ce.oi : x.pe.oi, arr = near.map(oiOf).filter(x => x > 0).sort((a, b) => a - b); if (!arr.length) return null;
+  const med = arr[Math.floor(arr.length / 2)];
+  const cand = near.filter(x => (dir === 'BUY' ? x.strike >= sp && x.strike <= sp * 1.0035 : x.strike <= sp && x.strike >= sp * 0.9965) && oiOf(x) >= 1.5 * med)
+    .sort((a, b) => oiOf(b) - oiOf(a))[0];
+  return { against: !!cand, strike: cand ? cand.strike : null, distPct: cand ? Math.round(Math.abs(cand.strike / sp - 1) * 10000) / 100 : null, ratio: cand ? Math.round(oiOf(cand) / med * 10) / 10 : null, pcr: v.totals.pcr, expiry: v.expiry };
+}
 app.get('/api/oi/:symbol', async (req, res) => {
   const symbol = String(req.params.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, '');
   try {
     if (!upstoxTokens().length) return res.status(503).json({ error: 'Upstox is not connected', symbol });
-    const key = await resolveInstrumentKey(symbol);
-    const ck = symbol + '|' + (req.query.expiry || '');
-    if (oiCache[ck] && Date.now() - oiCache[ck].t < 60000) return res.json(oiCache[ck].v);
-    const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(key)}`);
-    const today = todayIso();
-    const expiries = [...new Set((contracts || []).map(c => c.expiry))].filter(e => e >= today).sort();
-    if (!expiries.length) return res.status(404).json({ error: 'No options trade on ' + symbol, symbol });
-    const expiry = expiries.includes(req.query.expiry) ? req.query.expiry : expiries[0];
-    const lot = ((contracts || []).find(c => c.lot_size) || {}).lot_size || null;
-    const chain = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(key)}&expiry_date=${expiry}`);
-    const side = o => { const m = (o && o.market_data) || {}, g = (o && o.option_greeks) || {};
-      return { oi: m.oi || 0, prevOi: m.prev_oi != null ? m.prev_oi : null, chg: m.prev_oi != null ? (m.oi || 0) - m.prev_oi : null, vol: m.volume || 0, ltp: m.ltp != null ? m.ltp : null, ltpChg: (m.ltp != null && m.close_price) ? m.ltp - m.close_price : null, iv: g.iv != null ? g.iv : null }; };
-    let spot = null;
-    const strikes = (chain || []).map(r => { if (r.underlying_spot_price) spot = r.underlying_spot_price; return { strike: r.strike_price, ce: side(r.call_options), pe: side(r.put_options) }; }).filter(x => x.strike != null).sort((a, b) => a.strike - b.strike);
-    if (!strikes.length) return res.status(502).json({ error: 'Upstox returned an empty option chain', symbol });
-    const sum = (f) => strikes.reduce((a, x) => a + (f(x) || 0), 0);
-    const ceOi = sum(x => x.ce.oi), peOi = sum(x => x.pe.oi), cePrev = sum(x => x.ce.prevOi), pePrev = sum(x => x.pe.prevOi);
-    const ceChg = sum(x => x.ce.chg), peChg = sum(x => x.pe.chg), ceVol = sum(x => x.ce.vol), peVol = sum(x => x.pe.vol);
-    // max pain: the expiry price at which option buyers' total payoff (writers' total loss) is smallest
-    let maxPain = null, best = Infinity;
-    for (const k of strikes) { let pain = 0; for (const x of strikes) { pain += x.ce.oi * Math.max(0, k.strike - x.strike) + x.pe.oi * Math.max(0, x.strike - k.strike); } if (pain < best) { best = pain; maxPain = k.strike; } }
-    const top = (f, n, filt) => strikes.filter(filt || (() => true)).slice().sort((a, b) => (f(b) || 0) - (f(a) || 0)).slice(0, n).filter(x => (f(x) || 0) > 0).map(x => ({ strike: x.strike, v: f(x) }));
-    const atm = spot != null ? strikes.reduce((a, x) => Math.abs(x.strike - spot) < Math.abs(a.strike - spot) ? x : a, strikes[0]) : null;
-    const v = { symbol, expiry, expiries: expiries.slice(0, 8), lot, spot, atm: atm && atm.strike, atmIv: atm ? (atm.ce.iv != null ? atm.ce.iv : atm.pe.iv) : null,
-      totals: { ceOi, peOi, ceChg, peChg, ceVol, peVol, pcr: ceOi ? Math.round(peOi / ceOi * 100) / 100 : null, pcrPrev: cePrev ? Math.round(pePrev / cePrev * 100) / 100 : null, hasPrev: cePrev > 0 || pePrev > 0 },
-      maxPain, resistance: top(x => x.ce.oi, 3, x => spot == null || x.strike >= spot * 0.98), support: top(x => x.pe.oi, 3, x => spot == null || x.strike <= spot * 1.02),
-      ceAdd: top(x => x.ce.chg, 3), peAdd: top(x => x.pe.chg, 3), ceCut: top(x => -(x.ce.chg || 0), 2), peCut: top(x => -(x.pe.chg || 0), 2),
-      strikes, market: marketState(), at: Date.now() };
-    oiCache[ck] = { t: Date.now(), v };
-    res.json(v);
-  } catch (e) { res.status(502).json({ error: e.message, symbol }); }
+    res.json(await getOiSnapshot(symbol, req.query.expiry));
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, symbol }); }
 });
 
 app.get('/api/options/expiries/:symbol', async (req, res) => {
@@ -2078,7 +2092,8 @@ async function buildWeekly() {
   const man = db.filter(c => c.closed && c.manual && (c.closedAt || c.exitT || c.t) >= from), bySrc = {};
   Object.keys(SOURCES).filter(k => k !== 'calls').forEach(k => { bySrc[k] = agg(man.filter(c => srcOf(c) === k)); });
   const labKinds = Object.entries(gate.kinds || {}).filter(([k]) => !k.includes('@'));
-  return { built: now, from, to: now, weekAll: agg(closed.filter(c => (c.closedAt || c.exitT || c.t) >= from)), kinds, bySrc,
+  const opts = closed.filter(c => c.kind === 'option' && c.oiWall), oiWall = { against: agg(opts.filter(c => c.oiWall.against)), clear: agg(opts.filter(c => !c.oiWall.against)) };
+  return { built: now, from, to: now, oiWall, weekAll: agg(closed.filter(c => (c.closedAt || c.exitT || c.t) >= from)), kinds, bySrc,
     lab: { built: gate.t || null, labVersion: gate.labVersion || null, proven: labKinds.filter(([, v]) => v.pass).map(([k]) => gateLabel(k)), paused: labKinds.filter(([, v]) => isRetired(v)).map(([k]) => gateLabel(k)), blocked: (callsState.gateBlocked || []).slice(0, 10) } };
 }
 function weeklyText(x) {
@@ -2087,6 +2102,7 @@ function weeklyText(x) {
   t += x.weekAll ? `Trade Calls closed this week: ${x.weekAll.n} (${d(x.weekAll.from)} – ${d(x.weekAll.to)}), win ${x.weekAll.win}%, avg ${sg(x.weekAll.avg)}${riskCfg.on ? ', ₹' + x.weekAll.rs.toLocaleString('en-IN') : ''}\n` : 'No Trade Calls closed this week.\n';
   x.kinds.filter(k => k.week).slice(0, 8).forEach(k => { t += `• ${k.label}: week ${k.week.n} trades, avg ${sg(k.week.avg)} · since start ${k.live.n} trades (${d(k.live.from)} – ${d(k.live.to)}), avg ${sg(k.live.avg)}${k.lab ? ' · lab ' + k.lab.n + ' trades, avg ' + sg(k.lab.avg) : ''}${k.lagging ? ' ⚠️ live behind the backtest' : ''}\n`; });
   Object.entries(x.bySrc).forEach(([k, v]) => { if (v) t += `${SOURCES[k]}: ${v.n} closed, win ${v.win}%, avg ${sg(v.avg)}\n`; });
+  if (x.oiWall && (x.oiWall.against || x.oiWall.clear)) t += `Index options into an OI wall: ${x.oiWall.against ? x.oiWall.against.n + ' closed, avg ' + sg(x.oiWall.against.avg) : 'none'} · clear of walls: ${x.oiWall.clear ? x.oiWall.clear.n + ' closed, avg ' + sg(x.oiWall.clear.avg) : 'none'} (since tagging began)\n`;
   t += `Lab: ${x.lab.proven.length} kinds proven${x.lab.paused.length ? ', ' + x.lab.paused.length + ' paused' : ''}.`;
   return t + '\n<i>Paper results; not advice.</i>';
 }
@@ -2381,7 +2397,9 @@ async function runIndexScan(db, notes) {
       const q = await getUpstoxLTPC(await dataKeyFor(f.u)); const ltp = q.price;
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) { st.skipped.push(f.u + ': price already ran away from the signal'); continue; }
       if (f.mode === 'swing' && ((f.side === 'SELL' && ltp > f.entry + 0.15 * f.atr) || (f.side === 'BUY' && ltp < f.entry - 0.15 * f.atr))) { st.skipped.push(f.u + ': moving against the idea today'); continue; }
-      const call = await buildOptionCall(f.u, f, ltp, nowSec);
+      let wall = null; try { wall = oiWallFor(await getOiSnapshot(f.u), f.side); } catch (e) {}
+      if (wall && wall.against && process.env.OI_WALL === 'block') { gateBlocked(`${f.u} ${f.mode} ${f.side} oi`, gk, `open-interest wall at ${wall.strike} (${wall.distPct}% away, ${wall.ratio}x typical OI)`); continue; }
+      const call = await buildOptionCall(f.u, f, ltp, nowSec); if (wall) call.oiWall = wall;
       Object.assign(call, { provenOn: keyParts(gk).dt || null, status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null });
       sizeCall(call); db.push(call); optCalls.push(call); made[f.mode]++;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 BUY ${call.symbol} (${call.mode}) premium ₹${call.entry}, expiry ${call.expiryLabel}` }, false);

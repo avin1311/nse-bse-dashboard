@@ -7193,6 +7193,15 @@ window.renderIndexFund=async function(d){
     LSs('agSent',sent); try{ window.cmRefresh&&window.cmRefresh(); }catch(e){}
   }
   window.agAuto=agAuto;
+  // while the page is open in market hours, rescan every 30 minutes (and soon after 9:30) so agreement signals are not missed
+  // when the dashboard was opened before the market opened
+  let lastAgScan=0;
+  setInterval(()=>{ try{
+    if(!LSg('agAutoOn',true)||typeof window.marketState!=='function'||window.marketState()!=='open') return;
+    const m=(()=>{ const d=new Date(Date.now()+19800000); return d.getUTCHours()*60+d.getUTCMinutes(); })(); if(m<571||m>900) return;
+    if(Date.now()-lastAgScan<30*60000||window.__scanning||typeof xsScanAll!=='function') return;
+    lastAgScan=Date.now(); window.__scanning=true; xsScanAll(true).finally(()=>{ window.__scanning=false; });
+  }catch(e){} },60000);
   document.addEventListener('click',e=>{ const t=e.target.closest&&e.target.closest('#agTestBtn'); if(!t) return; e.preventDefault(); const box=document.getElementById('agTest'); if(box) box.innerHTML='<div class="metric-sub">Starting…</div>'; agTest(); });
   document.addEventListener('change',e=>{ if(e.target&&e.target.id==='agAutoOn') LSs('agAutoOn',e.target.checked); if(e.target&&e.target.id==='agRule') LSs('agRuleSel',e.target.value); });
   function initBox(){ const sel=document.getElementById('agRule'); if(sel&&!sel.options.length){ sel.innerHTML='<option value="auto">Use the test\'s chosen rule set (until tested: 3+ agree, standard stops)</option>'+VARS.map(v=>'<option value="'+v.key+'">'+esc(vLabel(v))+'</option>').join(''); sel.value=LSg('agRuleSel','auto'); }

@@ -7041,11 +7041,12 @@ window.renderIndexScan=function(d){
     <td><strong>${r.sym}</strong>${drv.has(r.sym)?'<span class="ix-badge">DRIVER</span>':''}<div class="metric-sub">${esc0(r.dd.name)}</div></td>
     ${M.weights?`<td>${r.w!=null?r.w.toFixed(1)+'%':'&mdash;'}</td>`:''}
     <td>${r.ag?xsAgreeHtml(r.ag):'<span class="metric-sub">&mdash;</span>'}</td>
+    <td><b>${r.dd.price!=null&&isFinite(r.dd.price)?'&#8377;'+fmt(r.dd.price,2):'&mdash;'}</b></td>
     <td class="${r.dd.changePct>=0?'up':'down'}">${chgTxt(r.dd.price,r.dd.changePct)}</td>
     <td><span class="signal-chip sig-${r.h.signal}">${r.h.signalLabel}</span><div class="metric-sub">${r.h.score}/100</div></td>
     <td>${xsPatHtml(r.x)}</td><td>${xsBkHtml(r.x)}</td>
     <td>${/buy|sell/.test(r.h.signal)?window.monBtn({source:'screener',symbol:r.sym,side:/sell/.test(r.h.signal)?'SELL':'BUY',mode:'swing',label:'Screener '+r.h.signalLabel+' (swing)',note:'Screener '+r.h.signalLabel+' on the swing view, score '+r.h.score+'.'},'+ Add'):''}</td></tr>`;
-  const head=`<thead><tr><th>Stock</th>${M.weights?'<th>Weight</th>':''}<th>Agreement</th><th>Today</th><th>Signal (swing)</th><th>Chart pattern</th><th>Breakout / level</th><th>Monitor</th></tr></thead>`;
+  const head=`<thead><tr><th>Stock</th>${M.weights?'<th>Weight</th>':''}<th>Agreement</th><th>LTP</th><th>Today</th><th>Signal (swing)</th><th>Chart pattern</th><th>Breakout / level</th><th>Monitor</th></tr></thead>`;
   box.innerHTML=`<div class="ix-sum"><div><span class="lbl">Its stocks</span> <b class="up">${bull} bullish</b> &middot; <b class="down">${bear} bearish</b> <span class="metric-sub">of ${core.length}</span></div>
       <div><span class="lbl">Aligned</span> <b>${al.length}</b>${al.length?' <span class="metric-sub">('+al.map(r=>r.sym).join(', ')+')</span>':''}</div>
       ${dRows.length?`<div><span class="lbl">Drivers</span> <b class="${dBull*2>=dRows.length?'up':'down'}">${dBull} of ${dRows.length} bullish</b>${M.weights?' <span class="metric-sub">('+dW.toFixed(0)+'% of the index)</span>':''}</div>`:''}</div>

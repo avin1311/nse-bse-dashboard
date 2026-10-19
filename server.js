@@ -1456,7 +1456,7 @@ async function nearestExpiry(instrumentKey) {
   const contracts = await upstoxGet(`/option/contract?instrument_key=${encodeURIComponent(instrumentKey)}`);
   const expiries = [...new Set(contracts.map(c => c.expiry))].sort();
   const today = todayIso();
-  return expiries.find(e => e >= today) || expiries[expiries.length - 1];
+  const e = expiries.find(x => x >= today); if (!e) throw new Error('No options trade on this instrument'); return e;
 }
 
 async function fetchFnoSnapshot(instrumentKey) {
@@ -1704,10 +1704,10 @@ app.get('/api/upstox/fno/:index', async (req, res) => {
   const indexSymbol = req.params.index;
   if (!UPSTOX_INDEX_KEYS[indexSymbol]) return res.status(400).json({ error: 'Unknown index symbol', symbol: indexSymbol });
   try {
-    const instrumentKey = await resolveInstrumentKey(indexSymbol); // self-heals via name search if our hardcoded guess is wrong
-    const snap = await fetchFnoSnapshot(instrumentKey);
-    const healed = instrumentKey !== UPSTOX_INDEX_KEYS[indexSymbol];
-    return res.json({ symbol: indexSymbol, ...snap, source: healed ? 'upstox-real-selfhealed' : 'upstox-real' });
+    // built from the option chain itself (PCR, max pain, totals), so it also works on an expiry day when Upstox's
+    // separate PCR / max-pain endpoints answer "Invalid expiry"
+    const v = await getOiSnapshot(indexSymbol);
+    return res.json({ symbol: indexSymbol, expiry: v.expiry, spot: v.spot, pcr: v.totals.pcr, maxPain: v.maxPain, totalCallOi: v.totals.ceOi, totalPutOi: v.totals.peOi, atmIv: v.atmIv, source: 'upstox-chain' });
   } catch (e) {
     return res.status(502).json({ error: e.message, symbol: indexSymbol });
   }

@@ -3257,9 +3257,15 @@ window.cbtBtn=function(c){
   }
   function open(){
     if(view) return; view=document.createElement('div'); view.className='cm';
-    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔊 Sound</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmCalls" style="border-color:var(--blue);color:var(--blue);" title="Every trade call with entry, stop, targets, the strategy lab and backtests">Trade Calls</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
+    view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔊 Sound</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmXls" title="Download today\'s calls as an Excel file: buy and sell price, points, % and the summary">⬇ Excel</button> <button class="btn" id="cmCalls" style="border-color:var(--blue);color:var(--blue);" title="Every trade call with entry, stop, targets, the strategy lab and backtests">Trade Calls</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
     document.body.appendChild(view);
     view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; document.dispatchEvent(new Event('cm:closed')); if(!window.__navClosing&&history.state&&history.state.overlay==='monitor'){ try{ history.back(); }catch(e){} } };
+    view.querySelector('#cmXls').onclick=async e=>{ const b=e.currentTarget, t0=b.textContent; b.disabled=true; b.textContent='Preparing…';
+      try{ const r=await fetch('/api/calls/monitor/export',{cache:'no-store'}); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error||('HTTP '+r.status));
+        const bl=await r.blob(), a=document.createElement('a'), cd=r.headers.get('Content-Disposition')||'', nm=(cd.match(/filename="([^"]+)"/)||[])[1]||'calls.xlsx';
+        a.href=URL.createObjectURL(bl); a.download=nm; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+        b.textContent='✓ Downloaded '+nm; setTimeout(()=>{ b.textContent=t0; b.disabled=false; },3500);
+      }catch(err){ b.textContent='Export failed: '+err.message; setTimeout(()=>{ b.textContent=t0; b.disabled=false; },5000); } };
     view.querySelector('#cmCalls').onclick=()=>document.getElementById('callsBtn')?.click();
     view.querySelector('#cmSnd').onclick=()=>{ sndMode=sndMode==='auto'?'on':sndMode==='on'?'off':'auto'; LS.set('cmSoundMode',sndMode); if(soundOn()){ ensureAudio(); beep('info'); } unlockBar(); draw(); };
     view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k,true); };

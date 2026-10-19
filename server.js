@@ -2609,7 +2609,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-19-r48 (agreement strategy runs on the server at 3.05 pm; unproven intraday calls capped at 5 per side and skipped on low volume; market type with a 0.05% buffer)';
+const BUILD = '2026-10-19-r49 (Excel export of the Calls Monitor; LTP in index stock tables; agreement strategy on the server)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3091,6 +3091,21 @@ app.post('/api/calls/backtest-call', async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+// Excel export of the Calls Monitor: the day's calls (entered that day) plus older calls still open or closed that day.
+// GET /api/calls/monitor/export?date=YYYY-MM-DD (default today, IST)
+app.get('/api/calls/monitor/export', async (req, res) => {
+  try {
+    const { buildCallsWorkbook } = require('./export');
+    const today = istDateKey(Math.floor(Date.now() / 1000)), date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? String(req.query.date) : today;
+    const db = await loadCalls();
+    const rows = db.filter(c => istDateKey(c.t) === date || istDateKey(c.closedAt || c.exitT || 0) === date || (!c.closed && date === today));
+    const wb = await buildCallsWorkbook(rows, { from: date, to: date, title: 'Calls Monitor summary · ' + date });
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="calls-' + date + '.xlsx"');
+    res.send(Buffer.from(buf));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/calls/monitor', async (req, res) => {
   const db = await loadCalls();
   lowPriority.run(true, async () => { try { await runCallsCycle(false); await liveMonitor(); await maybeEod(); } catch (e) {} });

@@ -1897,7 +1897,7 @@ function selectStock(symbol){
   showView('stock');
   if(!window.OPEN_TABS.includes(row[0])){ window.OPEN_TABS.push(row[0]); persistTabs(); }
   renderTabBar();
-  try{ history.replaceState(null,'','?symbol='+encodeURIComponent(row[0])); }catch(e){}
+  scheduleNav();
   document.getElementById('searchResults').style.display='none';
   document.getElementById('stockSearch').value='';
   document.getElementById('signalInfo').classList.remove('open');
@@ -2634,13 +2634,33 @@ searchResults.addEventListener('click',(e)=>{
 
 /* Sidebar navigation: market-wide pages (Home, Scanner, Portfolio) plus Calls and Status, which open their own screens */
 const APP_VIEWS={home:'homeView',scan:'scanView',portfolio:'portView',stock:'stockView'};
+/* Browser Back / Forward: every screen change (Home, Scanner, Portfolio, a stock and its tab, the Calls Monitor) is a history
+   entry, so Back returns to the previous screen inside the dashboard instead of leaving the site. */
+window.NAV={restoring:false,t:null};
+function navStateNow(){ const v=window.APP_VIEW||'home', stock=v==='stock'&&window.CURRENT; return {v, sym:stock?window.CURRENT.symbol:null, tab:stock?(window.ACTIVE_VTAB||'overview'):null}; }
+function scheduleNav(){ clearTimeout(window.NAV.t); window.NAV.t=setTimeout(()=>{ if(window.NAV.restoring) return; try{
+  const st=navStateNow(), url=st.v==='stock'?'?symbol='+encodeURIComponent(st.sym)+'#tab='+st.tab:'?view='+st.v, cur=history.state;
+  if(cur&&!cur.overlay&&cur.v===st.v&&cur.sym===st.sym&&cur.tab===st.tab) return;
+  if(!cur) history.replaceState(st,'',url); else history.pushState(st,'',url); }catch(e){} },0); }
+window.addEventListener('popstate',e=>{
+  const st=e.state, mon=document.querySelector('.cm');
+  if(mon&&!(st&&st.overlay==='monitor')){ window.__navClosing=true; document.getElementById('cmClose')?.click(); window.__navClosing=false; }
+  if(!st||st.overlay) return;
+  window.NAV.restoring=true;
+  try{
+    if(st.v==='stock'&&st.sym){ if(!window.CURRENT||window.CURRENT.symbol!==st.sym||window.APP_VIEW!=='stock'){ if(window.CURRENT&&window.CURRENT.symbol===st.sym) showView('stock'); else selectStock(st.sym); } if(st.tab&&st.tab!==window.ACTIVE_VTAB) showTab(st.tab,{noHash:true}); }
+    else if(st.v==='home') showHome(); else showView(st.v);
+  }catch(x){}
+  setTimeout(()=>{ window.NAV.restoring=false; },80);
+});
 function showView(v){
   if(!APP_VIEWS[v]) v='home';
   window.APP_VIEW=v; window.IN_HOME_VIEW=(v!=='stock');
   Object.entries(APP_VIEWS).forEach(([k,id])=>{ const el=document.getElementById(id); if(el) el.style.display=(k===v)?'block':'none'; });
   document.querySelectorAll('#rail .rail-btn[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
-  if(v!=='stock'){ try{ stopLiveFeed(); }catch(e){} setTabActive(null); try{ history.replaceState(null,'','?view='+v); }catch(e){} }
+  if(v!=='stock'){ try{ stopLiveFeed(); }catch(e){} setTabActive(null); }
   else if(window.CURRENT){ setTabActive(window.CURRENT.symbol); try{ if(typeof startLiveFeed==='function') startLiveFeed(window.CURRENT); }catch(e){} }
+  scheduleNav();
   if(v==='scan') renderScanView();
   if(v==='portfolio') renderPortView();
   window.scrollTo(0,0);
@@ -2719,7 +2739,7 @@ function showTab(t,opts){
   document.querySelectorAll('.vtab-pane').forEach(p=>{ p.style.display=(p.dataset.vtab===t)?'block':'none'; });
   document.querySelectorAll('#viewTabs .vt-btn').forEach(b=>b.classList.toggle('active',b.dataset.vtab===t));
   try{ localStorage.setItem('vtab',t); }catch(e){}
-  if(!opts.noHash){ try{ history.replaceState(null,'',location.pathname+location.search+'#tab='+t); }catch(e){} }
+  if(!opts.noHash) scheduleNav();
   const d=window.CURRENT;
   if(d && TAB_DONE[t]!==d.symbol) runTab(t,d);
   // charts sized while hidden need a nudge; pattern section checks visibility on scroll
@@ -3239,12 +3259,13 @@ window.cbtBtn=function(c){
     if(view) return; view=document.createElement('div'); view.className='cm';
     view.innerHTML='<div class="cm-in"><div class="cm-top"><h3>Calls Monitor</h3><div class="cm-live" id="cmLive"></div><div><button class="btn" id="cmSnd">🔊 Sound</button> <button class="btn" id="cmNote">Browser alerts</button> <button class="btn" id="cmTest">Test alert</button> <button class="btn" id="cmCalls" style="border-color:var(--blue);color:var(--blue);" title="Every trade call with entry, stop, targets, the strategy lab and backtests">Trade Calls</button> <button class="btn" id="cmClose">Close</button></div></div><div id="cmBody"></div></div>';
     document.body.appendChild(view);
-    view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; document.dispatchEvent(new Event('cm:closed')); };
+    view.querySelector('#cmClose').onclick=()=>{ view.remove(); view=null; document.dispatchEvent(new Event('cm:closed')); if(!window.__navClosing&&history.state&&history.state.overlay==='monitor'){ try{ history.back(); }catch(e){} } };
     view.querySelector('#cmCalls').onclick=()=>document.getElementById('callsBtn')?.click();
     view.querySelector('#cmSnd').onclick=()=>{ sndMode=sndMode==='auto'?'on':sndMode==='on'?'off':'auto'; LS.set('cmSoundMode',sndMode); if(soundOn()){ ensureAudio(); beep('info'); } unlockBar(); draw(); };
     view.querySelector('#cmTest').onclick=()=>{ ensureAudio(); const k=['good','bad'][Math.floor(Math.random()*2)]; flash({level:k,text:k==='good'?'Test: TARGET 1 hit (sample alert)':'Test: STOP LOSS hit (sample alert)'}); beep(k,true); };
     view.querySelector('#cmNote').onclick=async()=>{ try{ const r=await Notification.requestPermission(); alert(r==='granted'?'Browser alerts on: you will get a pop-up when this tab is in the background.':'Browser alerts were not allowed.'); }catch(e){ alert('This browser does not support alerts.'); } };
     draw(); poll().then(schedule); ackAll();
+    try{ if(!(history.state&&history.state.overlay==='monitor')) history.pushState({...(history.state||{}),overlay:'monitor'},'',location.href); }catch(e){}
   }
   document.getElementById('monBtn')?.addEventListener('click',open);
   window.cmRefresh=()=>poll();

@@ -7,6 +7,10 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); 
 // 1. the page's scripts must parse, and the pattern engine must run
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].forEach((m, i) => { let e = null; try { new Function(m[1]); } catch (x) { e = x; } ok(!e, 'inline script #' + i + ' parses' + (e ? ': ' + e.message : '')); });
+{ const E = require('../engines').load(); ok(!!E, 'browser engines run on the server (agreement strategy)' + (E ? '' : ': ' + require('../engines').error()));
+  if (E) { const C = []; let p = 1000; for (let i = 0; i < 300; i++) { const o = p; p *= 1 + Math.sin(i / 9) * 0.01; C.push({ t: 1700000000 + i * 86400, o, h: Math.max(o, p) * 1.005, l: Math.min(o, p) * 0.995, c: p, v: 1e5 }); }
+    let okk = true; try { E.xsPattern(C, '1D'); E.xsBreak(C, 'D'); E.B.atrAt(C, C.length - 1, 14); const d = { symbol: 'X', prices: C.map(x => x.c), histHL: { h: C.map(x => x.h), l: C.map(x => x.l) }, realHistory: true, price: p, support1: p * 0.95, resistance1: p * 1.05, support2: p * 0.92, resistance2: p * 1.08, targetMean: p }; okk = !!E.buildHorizons(d).swing.signal; } catch (e) { okk = false; }
+    ok(okk, 'agreement inputs compute on the server'); } }
 ok(/function newsAgo\(/.test(html) && /function newsEsc\(/.test(html), 'news helpers defined');
 ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length === 4 && /id="scanView"/.test(html) && /id="portView"/.test(html), 'four stock tabs plus the Scanner and Portfolio pages');
 {

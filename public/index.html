@@ -531,7 +531,7 @@ window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); window.__
     </div>
     <details class="cm-box" id="xsReplayBox" style="margin-top:10px;"><summary style="cursor:pointer"><b>Does agreement help?</b> <span class="metric-sub">replays the same three checks on past daily candles and compares with doing nothing</span></summary><div id="xsReplay" style="margin-top:6px;"><button class="btn" id="xsReplayBtn">Measure now (about a minute)</button></div></details>
     <details class="cm-box" id="agBox" style="margin-top:10px;" open><summary style="cursor:pointer"><b>Agreement strategy</b> <span class="metric-sub">buy when the screener, the daily chart pattern and the daily breakout agree (more triangles = stronger), sell when they agree down &mdash; tested on past data, paper items in the Calls Monitor</span></summary>
-      <div class="filters" style="margin:8px 0;align-items:center;flex-wrap:wrap;"><label class="toggle-mini"><input type="checkbox" id="agAutoOn" checked> Add agreement signals to the Calls Monitor as paper items (after each scan, 9:30&ndash;15:00, up to 10 a day, F&amp;O stocks)</label>
+      <div class="filters" style="margin:8px 0;align-items:center;flex-wrap:wrap;"><div id="agSrv" class="metric-sub" style="flex-basis:100%;">The server checks every F&amp;O stock at 3:05 pm on trading days and adds agreement signals to the Calls Monitor (up to 10 a day, with a Telegram alert). The dashboard does not need to be open.</div>
         <select id="agRule" style="max-width:100%;"></select><button class="btn" id="agTestBtn">Run the test (a few minutes)</button></div>
       <div id="agTest"><div class="metric-sub">Not tested yet. Press Scan all, then Run the test.</div></div></details>
   </section>
@@ -7210,7 +7210,7 @@ window.renderIndexFund=async function(d){
     const pick=R.filter(r=>r.s.oN>=15).sort((a,b)=>b.s.older-a.s.older)[0];
     const sg=x=>x==null?'—':(x>0?'+':'')+x.toFixed(2)+'%', d0=t=>new Date(t*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Kolkata'});
     const res={at:Date.now(),t0,t1,stocks:done,pick:pick?pick.v:null,pickPass:pick?pass(pick.s):false,rows:R.map(r=>({...r.v,...r.s}))};
-    LSs('agTest',res); renderAgTest(res);
+    LSs('agTest',res); renderAgTest(res); agSendRule('test');
   }
   function renderAgTest(res){
     const box=document.getElementById('agTest'); if(!box||!res) return;
@@ -7222,42 +7222,26 @@ window.renderIndexFund=async function(d){
       +'<div class="metric-sub" style="margin-top:6px;">CHOSEN = best on the older half; it counts only if it also holds on the newer half. Passing = 30+ trades, average ≥ +0.10% after costs, older and newer halves both positive (the same bar as the strategy lab). '+(res.pick?(res.pickPass?'<b class="up">The chosen rule set passes.</b>':'<b>The chosen rule set does not pass yet</b>, so live agreement items stay marked as paper.'):'')+' Weekly agreement uses the weekly breakout only; days where only the pattern and the weekly chart agree are not tested.</div>';
     const n=document.getElementById('agRule'); if(n){ const v=LSg('agRuleSel','auto'); n.value=v; }
   }
-  // ---- live paper items after each scan, market hours only ----
-  async function agAuto(){
-    if(!LSg('agAutoOn',true)) return;
-    if(typeof window.marketState!=='function'||window.marketState()!=='open') return;
-    const m=(()=>{ const d=new Date(Date.now()+19800000); return d.getUTCHours()*60+d.getUTCMinutes(); })(); if(m<570||m>900) return;
-    const res=LSg('agTest',null), sel=LSg('agRuleSel','auto');
-    const v=sel!=='auto'?VARS.find(x=>x.key===sel):(res&&res.pick)||{N:3,W:1,X:'atr',key:'3|1|atr'};
-    if(!v) return;
-    const day=new Date(Date.now()+19800000).toISOString().slice(0,10); let sent=LSg('agSent',{day,syms:[]}); if(sent.day!==day) sent={day,syms:[]};
-    const rows=STOCKS.filter(s=>(!window.FNO_SET||window.FNO_SET.has(s[0]))&&window.XS[s[0]]&&!sent.syms.includes(s[0])).map(s=>{ const d=screenerRow(s); if(!d.realHistory) return null; const x=window.XS[s[0]], h=d.horizons.swing; const a=agScore(h.signal,x.pat?x.pat.d:0,x.bk&&x.bk.type==='break'?x.bk.d:0,x.w?x.w.d:0,v.W); return Math.abs(a)>=v.N?{d,h,x,a}:null; }).filter(Boolean)
-      .sort((p,q)=>Math.abs(q.a)-Math.abs(p.a)||(q.a>0?q.h.score-p.h.score:p.h.score-q.h.score));
-    const room=Math.max(0,10-sent.syms.length);
-    for(const r of rows.slice(0,room)){
-      const dir=Math.sign(r.a), C=xsCandlesFromHist(window.REAL_HIST[r.d.symbol]); let atr=null; try{ atr=window.BreakoutScanner.atrAt(C,C.length-1,14); }catch(e){}
-      let sl=atr?r.d.price-dir*1.5*atr:undefined, target=atr?r.d.price+dir*3*atr:undefined; const pt=r.x.pat;
-      if(v.X==='pat'&&pt&&pt.d===dir&&pt.stop&&pt.target){ sl=pt.stop; target=pt.target; }
-      const lab='Agreement '+(dir>0?'▲':'▼').repeat(Math.min(Math.abs(r.a),4))+' ('+Math.abs(r.a)+' agree)';
-      const note=lab+': screener '+r.h.signalLabel+(pt?', '+pt.name:'')+(r.x.bk&&r.x.bk.type==='break'?', broke '+r.x.bk.name:'')+(r.x.w?', weekly agrees':'')+'. Rule set: '+vLabel(v)+'.'+(res&&res.pick&&res.pickPass?'':' Paper: the agreement test has not passed yet.');
-      try{ const resp=await fetch('/api/calls/monitor/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'agreement',symbol:r.d.symbol,side:dir>0?'BUY':'SELL',mode:'swing',label:lab,note,sl,target})}); if(resp.ok||resp.status===409) sent.syms.push(r.d.symbol); }catch(e){}
-    }
-    LSs('agSent',sent); try{ window.cmRefresh&&window.cmRefresh(); }catch(e){}
-  }
-  window.agAuto=agAuto;
-  // while the page is open in market hours, rescan every 30 minutes (and soon after 9:30) so agreement signals are not missed
-  // when the dashboard was opened before the market opened
-  let lastAgScan=0;
-  setInterval(()=>{ try{
-    if(!LSg('agAutoOn',true)||typeof window.marketState!=='function'||window.marketState()!=='open') return;
-    const m=(()=>{ const d=new Date(Date.now()+19800000); return d.getUTCHours()*60+d.getUTCMinutes(); })(); if(m<571||m>900) return;
-    if(Date.now()-lastAgScan<30*60000||window.__scanning||typeof xsScanAll!=='function') return;
-    lastAgScan=Date.now(); window.__scanning=true; xsScanAll(true).finally(()=>{ window.__scanning=false; });
-  }catch(e){} },60000);
+  // live agreement items are added by the server at 15:05 (server.js runAgreement); the page only sends the chosen rule set
+  window.agAuto=function(){};
+  function agSendRule(chosenBy){ try{ const sel=LSg('agRuleSel','auto'), res=LSg('agTest',null); let body;
+      if(sel!=='auto'){ const r=res&&res.rows&&res.rows.find(x=>x.key===sel); body={key:sel,pass:!!(r&&r.n>=30&&r.avg>=0.10&&r.older>0&&r.newer>0),n:r?r.n:null,avg:r?r.avg:null,t0:res&&res.t0,t1:res&&res.t1,testedAt:res&&res.at,chosenBy:'user'}; }
+      else if(res&&res.pick){ const r=res.rows.find(x=>x.key===res.pick.key); body={key:res.pick.key,pass:!!res.pickPass,n:r?r.n:null,avg:r?r.avg:null,t0:res.t0,t1:res.t1,testedAt:res.at,chosenBy:'test'}; }
+      else body={key:'auto'};
+      return fetch('/api/agreement/rule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(()=>agSrvStatus()); }catch(e){} }
+  window.agSendRule=agSendRule;
+  async function agSrvStatus(){ const el=document.getElementById('agSrv'); if(!el) return; try{ const j=await fetch('/api/agreement',{cache:'no-store'}).then(r=>r.json());
+      if(!j.rule&&!window.__agSynced&&(LSg('agRuleSel','auto')!=='auto'||(LSg('agTest',null)||{}).pick)){ window.__agSynced=true; return agSendRule('test'); } // first visit after the move: hand the browser's test result to the server
+      const v=VARS.find(x=>x.key===j.using), L=j.state&&j.state.last, t=x=>new Date(x).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
+      el.innerHTML='The server checks every F&amp;O stock at 3:05 pm on trading days and adds agreement signals to the Calls Monitor (up to 10 a day, with a Telegram alert); the dashboard does not need to be open. '
+        +'Rule set in use: <b>'+esc(v?vLabel(v):j.using)+'</b> '+(j.passed?'<span class="up">(passed the test)</span>':'(paper: not passed yet)')+'.'
+        +(j.engines!=='ok'?' <b class="down">Server problem: '+esc(j.engines)+'</b>':'')
+        +(L?(L.err?' Last check '+t(L.at)+' failed: '+esc(L.err):' Last check '+t(L.at)+': '+(L.found||[]).length+' found'+(L.dry?'':', '+(L.added||[]).length+' added'+(L.added&&L.added.length?' ('+L.added.join(', ')+')':''))+'.'):''); }catch(e){} }
+  setTimeout(agSrvStatus,800);
   document.addEventListener('click',e=>{ const t=e.target.closest&&e.target.closest('#agTestBtn'); if(!t) return; e.preventDefault(); const box=document.getElementById('agTest'); if(box) box.innerHTML='<div class="metric-sub">Starting…</div>'; agTest(); });
-  document.addEventListener('change',e=>{ if(e.target&&e.target.id==='agAutoOn') LSs('agAutoOn',e.target.checked); if(e.target&&e.target.id==='agRule') LSs('agRuleSel',e.target.value); });
+  document.addEventListener('change',e=>{ if(e.target&&e.target.id==='agRule'){ LSs('agRuleSel',e.target.value); agSendRule('user'); } });
   function initBox(){ const sel=document.getElementById('agRule'); if(sel&&!sel.options.length){ sel.innerHTML='<option value="auto">Use the test\'s chosen rule set (until tested: 3+ agree, standard stops)</option>'+VARS.map(v=>'<option value="'+v.key+'">'+esc(vLabel(v))+'</option>').join(''); sel.value=LSg('agRuleSel','auto'); }
-    const cb=document.getElementById('agAutoOn'); if(cb) cb.checked=LSg('agAutoOn',true); renderAgTest(LSg('agTest',null)); }
+    renderAgTest(LSg('agTest',null)); }
   setTimeout(initBox,500);
 })();
 </script>

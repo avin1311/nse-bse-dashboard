@@ -2423,7 +2423,7 @@ async function runCallsCycle(force) {
     const universe = FNO_FALLBACK;
     if (open) { try { await checkWatches(); } catch (e) {} }
     maybeBuildGate();
-    const ictx = await getIndexContext(); callsState.market = ictx;
+    const ictx = await getIndexContext(); callsState.market = ictx; const dtI_ = liveDt(ictx.todayPct); callsState.dayType = dtI_;
     try { await runIndexScan(db, notes); } catch (e) { callsState.index = { ...(callsState.index || {}), err: e.message }; }
     // swing: block trades against the index's daily trend, and against a >0.5% move today
     const swingBias = ictx.todayPct != null && ictx.todayPct > 0.5 ? 'BULL' : ictx.todayPct != null && ictx.todayPct < -0.5 ? 'BEAR' : ictx.dailyBias;
@@ -2454,7 +2454,7 @@ async function runCallsCycle(force) {
             if (rows.length && rows[rows.length - 1].t + 900 > nowSec) rows = rows.slice(0, -1);
             // volume of the day-so-far is compared per bar, so require the same-day bar
             rows = rows.slice(-400); const P = Calls.prep(rows), n = rows.length - 1;
-            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl', 'stk|intraday|BUY|vwap', 'stk|intraday|SELL|vwap'], Calls.dtOf(ictx.todayPct))) {
+            for (const k of liveKinds('stock_intraday', ['stk|intraday|BUY|trend', 'stk|intraday|SELL|trend', 'stk|intraday|BUY|orbvwap', 'stk|intraday|SELL|orbvwap', 'stk|intraday|BUY|pdhl', 'stk|intraday|SELL|pdhl', 'stk|intraday|BUY|vwap', 'stk|intraday|SELL|vwap'], dtI_)) {
               const { side, setup = 'trend' } = keyParts(k.key);
               const agree = k.params.agree || (k.params.idxAgree ? 'index' : 'none'), sm = agree === 'sector' || k.params.regime === 'b50s' ? await getSectorMove(sectorOf(sym)) : null;
               const id = Calls.evalAt(P, n, 'intraday', { bias: ictx.intradayBias, idxTodayPct: ictx.todayPct, ...k.params, side, setup });
@@ -2462,7 +2462,7 @@ async function runCallsCycle(force) {
             }
             // ATR volatility trend (BullsAI 'Volatility Trend ATR'; TCS first in the scan order): paper calls until the lab proves it
             if (!found.some(f => f.symbol === sym && f.mode === 'intraday')) {
-              for (const k of liveKinds('stock_atrsq', ['stk|intraday|BUY|atrsq', 'stk|intraday|SELL|atrsq'], Calls.dtOf(ictx.todayPct))) {
+              for (const k of liveKinds('stock_atrsq', ['stk|intraday|BUY|atrsq', 'stk|intraday|SELL|atrsq'], dtI_)) {
                 const { side } = keyParts(k.key);
                 const id = Calls.evalAtrSq(P, n, { ...k.params, side });
                 if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
@@ -2470,7 +2470,7 @@ async function runCallsCycle(force) {
             }
             // the same strategy on 5-minute candles, for TCS and the 30 most traded F&O stocks
             if (!found.some(f => f.symbol === sym && f.mode === 'intraday') && (sym === 'TCS' || FNO_FALLBACK.slice(0, 30).includes(sym))) {
-              const k5s = liveKinds('stock_atrsq5', ['stk|intraday|BUY|atrsq5', 'stk|intraday|SELL|atrsq5'], Calls.dtOf(ictx.todayPct));
+              const k5s = liveKinds('stock_atrsq5', ['stk|intraday|BUY|atrsq5', 'stk|intraday|SELL|atrsq5'], dtI_);
               if (k5s.length) { let r5 = []; try { r5 = toBars(await getUpstoxCandles(sym, '5m')); } catch (e) {}
                 if (r5.length && r5[r5.length - 1].t + 300 > nowSec) r5 = r5.slice(0, -1); r5 = r5.slice(-400);
                 if (r5.length > 120) { const P5 = Calls.prep(r5), n5 = r5.length - 1;
@@ -2480,7 +2480,7 @@ async function runCallsCycle(force) {
             // sector momentum: a stock leading a sector that is running hard today (its own lab-tested kind)
             if (!found.some(f => f.symbol === sym && f.mode === 'intraday')) {
               const sm = await getSectorMove(sectorOf(sym));
-              if (sm && Math.abs(sm.pct) >= 1) for (const k of liveKinds('stock_secmom', ['stk|intraday|BUY|secmom', 'stk|intraday|SELL|secmom'], Calls.dtOf(ictx.todayPct))) {
+              if (sm && Math.abs(sm.pct) >= 1) for (const k of liveKinds('stock_secmom', ['stk|intraday|BUY|secmom', 'stk|intraday|SELL|secmom'], dtI_)) {
                 const { side } = keyParts(k.key);
                 const id = Calls.evalSecMom(P, n, { ...k.params, side, sec: sm, idxTodayPct: ictx.todayPct });
                 if (id && istDayEnd0(id.barTime) === istDayEnd0(nowSec) && regimeLive(side, k.params.regime, sm)) { found.push({ symbol: sym, gateKey: k.key, ...id }); break; }
@@ -2512,6 +2512,12 @@ async function runCallsCycle(force) {
       if (f.mode === 'intraday' && ((gate.kinds || {})[gk] || {}).params?.safety) { // safety block, only where the lab chose it: no sell while the sector index is up 0.7%+ above its open (mirror for buys)
         const ix = sectorOf(f.symbol), sm = await getSectorMove(ix);
         if (sm && !Calls.safetyOk(f.side, sm.pct, sm.aboveOpen)) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, `safety: ${SECTOR_LABEL[ix] || ix} is ${sm.pct > 0 ? 'up' : 'down'} ${Math.abs(sm.pct).toFixed(2)}% and ${sm.pct > 0 ? 'above' : 'below'} its open, no ${f.side === 'SELL' ? 'sell' : 'buy'} against it`); continue; }
+      }
+      // unproven (paper) intraday calls: none on below-normal volume, and at most UNPROVEN_SIDE_MAX open on one side at a time
+      // (19 same-side shorts on 19 Oct were really one bet on Nifty); proven kinds are not limited here
+      if (!g.proven && f.mode === 'intraday') {
+        if (f.checks && f.checks.vol === false) { gateBlocked(`${f.symbol} ${f.mode} ${f.side} low volume`, gk, 'unproven call on below-normal volume: skipped'); continue; }
+        if (open_.filter(c => c.mode === 'intraday' && c.unproven && c.side === f.side).length >= UNPROVEN_SIDE_MAX) { gateBlocked(`unproven ${f.side} cap`, gk, `already ${UNPROVEN_SIDE_MAX} open unproven intraday ${f.side === 'BUY' ? 'buys' : 'sells'}: no more until one closes`); continue; }
       }
       // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
       if (db.some(c => !c.manual && c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
@@ -2603,7 +2609,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-19-r47 (lab v15: ATR on 15-min and 5-min; risk in rupees + daily loss stop; weekly report; OI-wall tag on index options; installable app; agreement strategy)';
+const BUILD = '2026-10-19-r48 (agreement strategy runs on the server at 3.05 pm; unproven intraday calls capped at 5 per side and skipped on low volume; market type with a 0.05% buffer)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2779,6 +2785,7 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
   stk_intraday: Number(process.env.GATE_STK_INTRADAY_MIN) || 0.03, stk_swing: Number(process.env.GATE_STK_SWING_MIN) || 0.10 };
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on';
+const UNPROVEN_SIDE_MAX = Number(process.env.UNPROVEN_SIDE_MAX) || 5;
 // index option calls: 'strict' (default) = only kinds proven by the lab; 'paper' = unproven ones too (marked). Options lose
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
 const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
@@ -2992,6 +2999,19 @@ function gateCheck(key) {
 // at least DAY_MIN_TRADES past trades on that type of day, average below zero and the newer half below zero too.
 const DAY_MIN_TRADES = Number(process.env.GATE_DAY_MIN_TRADES) || 15;
 const DT_WORD = { up: 'up days', down: 'down days', flat: 'sideways days' };
+// today's market type with a 0.05% buffer: it changes only when Nifty is clearly past the line (stops calls switching on and off
+// while Nifty hovers at -0.40% / +0.40%)
+const DT_BUF = 0.05; let dtLive = null;
+function liveDt(pct) {
+  if (pct == null) return null; const L = 0.4, day = Math.floor((Date.now() / 1000 + 19800) / 86400);
+  if (!dtLive || dtLive.day !== day) dtLive = { day, dt: Calls.dtOf(pct) };
+  const cur = dtLive.dt;
+  let nx = cur;
+  if (cur === 'down') { if (pct > -L + DT_BUF) nx = pct >= L + DT_BUF ? 'up' : 'flat'; }
+  else if (cur === 'up') { if (pct < L - DT_BUF) nx = pct <= -L - DT_BUF ? 'down' : 'flat'; }
+  else { if (pct <= -L - DT_BUF) nx = 'down'; else if (pct >= L + DT_BUF) nx = 'up'; }
+  dtLive.dt = nx; return nx;
+}
 function dayLosing(key, dt) { if (!dt) return null; const d = gate.kinds && gate.kinds[key + '@' + dt]; if (!d || d.n < DAY_MIN_TRADES || d.avg == null || d.avg >= 0 || (d.newer != null && d.newer >= 0)) return null; return d; }
 function liveKinds(fam, defaults, dt) {
   const all = Object.entries((gate.t && gate.kinds) || {}).filter(([k, v]) => v.fam === fam);
@@ -3122,10 +3142,82 @@ async function addManualItem(b) {
       costPct: Calls.costPct(mode), analysis: (String(b.note || '').slice(0, 400) + ' Entry at the live price when added; ' + slNote + '.').trim(), t: now,
       status: 'ACTIVE', targetsHit: 0, activeSl: tk(sl), ltp, exit: null, pnlPct: 0, closed: false };
     db.push(call); if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX); await saveCalls();
-    await emitEvent({ id: call.id + ':NEW', callId: call.id, source, symbol, side, mode, kind: 'NEW', level: 'info', t: now, price: call.entry, pnlPct: null, text: `➕ [${source === 'pattern' ? 'Pattern' : source === 'agreement' ? 'Agreement' : 'Screener'}] ${side} ${symbol} (${mode}) added to monitor at ₹${call.entry}, SL ₹${call.sl}` }, false);
+    await emitEvent({ id: call.id + ':NEW', callId: call.id, source, symbol, side, mode, kind: 'NEW', level: 'info', t: now, price: call.entry, pnlPct: null, text: `➕ [${source === 'pattern' ? 'Pattern' : source === 'agreement' ? 'Agreement' : 'Screener'}] ${side} ${symbol} (${mode}) added to monitor at ₹${call.entry}, SL ₹${call.sl}` + (b.notify ? `, targets ₹${call.targets.join(' / ₹')}${call.label ? '\n' + call.label : ''}${b.paper ? '\n🧪 Paper: the agreement test has not passed yet.' : ''}` : '') }, !!b.notify);
     return { status: 200, body: { ok: true, call } };
   }
 }
+// ---- Agreement strategy, run by the server (no need for the dashboard to be open) -----------------------------------------
+// Screener signal + daily chart pattern + daily breakout (+1 when the weekly breakout agrees), computed with the page's own code
+// (engines.js runs it here). Checked once a day at 15:05 IST on the nearly finished daily candle, because the agreement test
+// enters at the day's close: a morning check reads a half-formed candle, which is what the test never saw.
+const Engines = require('./engines');
+const AG_VARS = []; [2, 3, 4].forEach(N => [1, 2].forEach(W => ['atr', 'pat'].forEach(X => AG_VARS.push({ N, W, X, key: N + '|' + W + '|' + X }))));
+const AG_DEFAULT = { N: 3, W: 1, X: 'atr', key: '3|1|atr' }, AG_MAX_DAY = 10, AG_AT = 905, AG_UNTIL = 920;
+let agState = { day: null, running: false, last: null };
+function agScoreS(sig, p, b, w, W) { const s = /buy/.test(sig || '') ? 1 : /sell/.test(sig || '') ? -1 : 0, sv = s * (W === 2 && /strong/.test(sig || '') ? 2 : 1); let a = sv + p + b; if (w && a !== 0 && Math.sign(w) === Math.sign(a)) a += Math.sign(a); return a; }
+function agWeekly(C) { const W = []; let cur = null; C.forEach(b => { const d = new Date((b.t + 19800) * 1000), wk = Math.floor((d.getTime() / 86400000 + 3) / 7); if (!cur || cur.wk !== wk) { cur = { wk, t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 }; W.push(cur); } else { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v || 0; } cur.last = b.t; }); return W; }
+// one stock on its daily candles (last = today so far): the same inputs the agreement test replays
+function agEval(E, sym, C, v) {
+  const k = C.length - 1, cl = C.map(x => x.c), hh = C.map(x => x.h), ll = C.map(x => x.l), last = cl[k];
+  const dd = { symbol: sym, prices: cl, histHL: { h: hh, l: ll }, realHistory: true, price: last, support1: Math.min(...ll.slice(-20)), resistance1: Math.max(...hh.slice(-20)) };
+  dd.support2 = dd.support1 * 0.97; dd.resistance2 = dd.resistance1 * 1.03; dd.targetMean = last;
+  let h = null; try { h = E.buildHorizons(dd).swing; } catch (e) {}
+  const sig = h ? h.signal : 'hold';
+  let bk = null; try { bk = E.xsBreak(C, 'D'); } catch (e) {}
+  const b = bk && bk.type === 'break' ? bk.d : 0;
+  let pt = null; try { pt = E.xsPattern(C.slice(-320), '1D'); } catch (e) {}
+  const p = pt ? pt.d : 0;
+  let w = 0, wk = null; try { const Wk = agWeekly(C); if (Wk.length > 30) { wk = E.xsBreak(Wk, 'W'); w = wk && wk.type === 'break' ? wk.d : 0; } } catch (e) {}
+  const a = agScoreS(sig, p, b, w, v.W);
+  let atr = null; try { atr = E.B.atrAt(C, k, 14); } catch (e) {}
+  return { sym, a, sig, sigLabel: h ? h.signalLabel : sig, score: h ? h.score : null, pt, bk, wk, w, atr, price: last };
+}
+let agRuleMem; // undefined = not read yet
+async function agRule() { if (agRuleMem === undefined) agRuleMem = await storeGet('store:agreement-rule', null).catch(() => null); const r = agRuleMem; const v = r && AG_VARS.find(x => x.key === r.key); return { v: v || AG_DEFAULT, passed: !!(r && v && r.pass), rule: r }; }
+app.post('/api/agreement/rule', async (req, res) => {
+  const b = req.body || {}, v = AG_VARS.find(x => x.key === b.key);
+  if (b.key !== 'auto' && !v) return res.status(400).json({ error: 'unknown rule set' });
+  const r = b.key === 'auto' ? null : { key: v.key, pass: !!b.pass, n: Number(b.n) || null, avg: b.avg != null ? Number(b.avg) : null, t0: b.t0 || null, t1: b.t1 || null, testedAt: b.testedAt || null, chosenBy: b.chosenBy === 'user' ? 'user' : 'test', at: Date.now() };
+  agRuleMem = r; try { await storeSet('store:agreement-rule', r); } catch (e) {}
+  res.json({ ok: true, rule: r });
+});
+app.get('/api/agreement', async (req, res) => { const R = await agRule(); res.json({ rule: R.rule, using: R.v.key, passed: R.passed, at: AG_AT, engines: Engines.load() ? 'ok' : Engines.error(), state: agState }); });
+app.post('/api/agreement/run', async (req, res) => { if (!(req.body && req.body.dry)) return res.status(400).json({ error: 'only dry runs can be started by hand' }); try { res.json(await runAgreement({ dry: true })); } catch (e) { res.status(500).json({ error: e.message }); } });
+async function runAgreement(opts = {}) {
+  const E = Engines.load(); if (!E) throw new Error('browser engines failed to load: ' + Engines.error());
+  if (agState.running) return { busy: true }; agState.running = true;
+  const t0 = Date.now(), { v, passed } = await agRule(), out = [];
+  try {
+    for (const sym of FNO_FALLBACK) {
+      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { const r = agEval(E, sym, C, v); if (Math.abs(r.a) >= v.N) out.push(r); } } catch (e) {}
+      await new Promise(r => setImmediate(r));
+    }
+    out.sort((p, q) => Math.abs(q.a) - Math.abs(p.a) || (q.a > 0 ? (q.score || 0) - (p.score || 0) : (p.score || 0) - (q.score || 0)));
+    const added = [], skipped = [];
+    if (!opts.dry) {
+      const db = await loadCalls(), day = Math.floor((Date.now() / 1000 + 19800) / 86400);
+      let room = AG_MAX_DAY - db.filter(c => c.manual && srcOf(c) === 'agreement' && Math.floor((c.t + 19800) / 86400) === day).length;
+      for (const r of out) {
+        if (room <= 0) break;
+        const dir = Math.sign(r.a); let sl = r.atr ? r.price - dir * 1.5 * r.atr : undefined, target = r.atr ? r.price + dir * 3 * r.atr : undefined; const pt = r.pt;
+        if (v.X === 'pat' && pt && pt.d === dir && pt.stop && pt.target) { sl = pt.stop; target = pt.target; }
+        const lab = 'Agreement ' + (dir > 0 ? '▲' : '▼').repeat(Math.min(Math.abs(r.a), 4)) + ' (' + Math.abs(r.a) + ' agree)';
+        const note = lab + ': screener ' + r.sigLabel + (pt && pt.d === dir ? ', ' + pt.name : '') + (r.bk && r.bk.type === 'break' ? ', broke ' + r.bk.name : '') + (r.w && Math.sign(r.w) === dir ? ', weekly breakout agrees' : '') + '. Checked at 15:05 on the daily candle. Rule set ' + v.key + '.' + (passed ? '' : ' Paper: the agreement test has not passed yet.');
+        const res = await addManualItem({ source: 'agreement', symbol: r.sym, side: dir > 0 ? 'BUY' : 'SELL', mode: 'swing', label: lab, note, sl, target, notify: true, paper: !passed });
+        if (res.status === 200) { added.push(r.sym); room--; } else skipped.push(r.sym + ': ' + (res.body && res.body.error));
+      }
+    }
+    agState.last = { at: Date.now(), tookS: Math.round((Date.now() - t0) / 1000), rule: v.key, passed, dry: !!opts.dry, found: out.map(r => ({ sym: r.sym, a: r.a, sig: r.sigLabel, pattern: r.pt ? (r.pt.d > 0 ? '▲ ' : r.pt.d < 0 ? '▼ ' : '') + r.pt.name : null, breakout: r.bk && r.bk.type === 'break' ? (r.bk.d > 0 ? '▲ ' : '▼ ') + r.bk.name : null, weekly: r.w || 0 })), added, skipped };
+    return agState.last;
+  } finally { agState.running = false; }
+}
+setInterval(() => { const p = istParts(); if (p.dow === 0 || p.dow === 6 || p.mins < AG_AT || p.mins > AG_UNTIL || !upstoxTokens().length) return;
+  const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10); if (agState.day === day || agState.running) return;
+  storeGet('store:agreement-ran', null).catch(() => null).then(d => { if (d === day) { agState.day = day; return; } agState.day = day;
+    runAgreement().then(r => storeSet('store:agreement-ran', day).catch(() => {}))
+      .catch(e => { agState.last = { at: Date.now(), err: e.message }; sendTelegram('⚠️ Agreement check failed today: ' + e.message).catch(() => {}); }); });
+}, 60000).unref();
+
 // ---- Trigger watch (Chart patterns "decision zone"): wait for a 15-minute close beyond a pattern's trigger level, then add
 // the item to the Calls Monitor at that price. Cancelled if price closes beyond the invalidation level first, or on expiry.
 let watchMem = null;

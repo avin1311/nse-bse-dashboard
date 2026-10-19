@@ -3332,6 +3332,10 @@ function renderHome(){
       <div id="hmLive" class="hm-list"><div class="metric-sub">Loading the strategy lab&hellip;</div></div>
     </section>
   </div>
+  <section class="panel hm-panel" aria-label="Readiness for real trading" id="hmReady">
+    <div class="hm-head"><h3>Ready for real money?</h3><span class="metric-sub" id="hmReadyNote">live results of lab-proven calls, still paper trading</span></div>
+    <div id="hmReadyBody"><div class="metric-sub">Loading&hellip;</div></div>
+  </section>
   <section class="panel hm-panel" aria-label="Where everything agrees">
     <div class="hm-head"><h3>Where everything agrees</h3><span class="metric-sub" id="hmAgreeNote">screener + daily pattern + daily breakout &middot; <a href="#" data-goview="scan">open Scanner</a></span></div>
     <div class="hm-two" id="hmAgree"><div class="metric-sub">Waiting for the scan&hellip;</div></div>
@@ -3356,7 +3360,7 @@ function renderHome(){
   el.querySelector('[data-hm="calls"]').onclick=()=>document.getElementById('callsBtn')?.click();
   el.querySelectorAll('[data-mov]').forEach(b=>b.onclick=()=>{ HOME.mov=b.dataset.mov; renderHomeMovers(); });
   if(window.CM_DATA) renderHomeDay(window.CM_DATA); else fetch('/api/calls/monitor',{cache:'no-store'}).then(r=>r.json()).then(d=>{ window.CM_DATA=d; renderHomeDay(d); }).catch(()=>{ const s=document.getElementById('hmDayStats'); if(s) s.innerHTML='<div class="metric-sub">Calls Monitor unavailable right now.</div>'; });
-  renderHomePositions(); renderHomeAgree();
+  renderHomePositions(); renderHomeAgree(); renderHomeReady();
   document.getElementById('fnoScanBtn').onclick=()=>renderFnoIndices();
   homeQuotes(true).then(()=>{ if(window.APP_VIEW==='home') renderFnoIndices(); });
   clearInterval(HOME.timer); HOME.timer=setInterval(()=>{ if(window.APP_VIEW==='home'&&!document.hidden) homeQuotes(false); },60000);
@@ -3428,6 +3432,18 @@ function renderHomeLive(){
   box.innerHTML=(rows.length?rows.join(''):'<div class="metric-sub">No kind of call is proven for today\'s market type, so no calls go live.</div>')
     +`<div class="hm-li metric-sub"><span>${rest} more kinds paper-only or paused</span><a href="#" data-hm2="calls">see the strategy lab</a></div>`;
   box.querySelector('[data-hm2]')?.addEventListener('click',e=>{ e.preventDefault(); document.getElementById('callsBtn')?.click(); });
+}
+async function renderHomeReady(){
+  const box=document.getElementById('hmReadyBody'); if(!box) return;
+  let j; try{ j=await fetch('/api/calls/readiness',{cache:'no-store'}).then(r=>r.json()); }catch(e){ box.innerHTML='<div class="metric-sub">Readiness is unavailable right now.</div>'; return; }
+  if(!j||j.error){ box.innerHTML='<div class="metric-sub">Readiness is unavailable right now.</div>'; return; }
+  const P=j.proven||{}, sg=x=>x==null?'—':(x>0?'+':'')+x+'%', V={ready:['READY FOR A SMALL START','up'],collecting:['STILL COLLECTING RESULTS',''],'not-yet':['NOT YET','down'],lab:['STRATEGY LAB RUNNING','']}[j.verdict]||['',''];
+  const dn={up:'Rising days',down:'Falling days',flat:'Sideways days'};
+  box.innerHTML=`<div class="hm-li"><span><b class="${V[1]}">${V[0]}</b> <span class="metric-sub">${j.passed} of ${j.total} checks pass</span></span><span class="metric-sub">${P.n||0} proven calls closed${P.from?' · '+P.from+' to '+P.to:''}</span></div>`
+    +j.checks.map(c=>`<div class="hm-li"><span>${c.ok?'<b class="up">✓</b>':'<b class="down">✗</b>'} ${esc0(c.label)}</span><span class="metric-sub">${esc0(c.have)}</span></div>`).join('')
+    +`<div class="metric-sub" style="margin:8px 0 4px;">Proven kinds that can go live in each market type (from the strategy lab${j.lab&&j.lab.built?'':', still running'}):</div>`
+    +['up','flat','down'].map(t=>`<div class="hm-li"><span><b>${dn[t]}</b> <span class="metric-sub">${(j.byType[t]||[]).length?esc0((j.byType[t]).join(' · ')):'none proven yet, so only paper calls'}</span></span></div>`).join('')
+    +`<div class="metric-sub" style="margin-top:6px;">Paper calls from kinds not yet proven: ${j.paper.n||0} closed${j.paper.n?', average '+sg(j.paper.avg)+' per call':''}. ${esc0(j.note)}</div>`;
 }
 function renderHomeAgree(){
   const box=document.getElementById('hmAgree'); if(!box) return;

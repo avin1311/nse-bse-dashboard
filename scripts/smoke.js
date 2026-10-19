@@ -43,6 +43,23 @@ ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length
   let p = 500; const bars = []; for (let i = 0; i < 400; i++) { const o = p; p *= 1 + 0.002 + 0.012 * (rn() - 0.5); bars.push({ t: 1.7e9 + i * 86400, h: Math.max(o, p) * 1.003, l: Math.min(o, p) * 0.997, c: p, v: 1e6 * (0.8 + rn()) }); }
   let n = 0, bad = 0; for (let i = 80; i < 400; i++) { const r = C.evaluate(bars.slice(0, i + 1), 'swing'); if (!r) continue; n++; const s = r.side === 'BUY' ? 1 : -1; if (!(s * (r.entry - r.sl) > 0 && s * (r.targets[0] - r.entry) > 0 && s * (r.targets[1] - r.targets[0]) > 0 && s * (r.targets[2] - r.targets[1]) > 0)) bad++; }
   ok(bad === 0, 'trade calls: levels ordered on ' + n + ' generated calls');
+  { // gap and go + range fade: signals fire on built-up days, levels are ordered, fade refuses trending index days
+    let sd = 11; const rn = () => (sd = (sd * 16807) % 2147483647) / 2147483647, D0 = Date.UTC(2026, 5, 1) / 1000 - 19800;
+    const mk = (nd, gen) => { const bars = []; let prev = 100; for (let d = 0; d < nd; d++) { const dow = new Date((D0 + d * 86400 + 19800) * 1000).getUTCDay(); if (dow === 0 || dow === 6) continue; const st = {}; let last = prev;
+      for (let i = 0; i < 25; i++) { const b = gen(d, i, prev, st, last); b.t = D0 + d * 86400 + 9 * 3600 + 900 + i * 900; bars.push(b); last = b.c; } prev = last; } return bars; };
+    const nz = (x, k) => x * (1 + (rn() - 0.5) * k);
+    const gb = mk(60, (d, i, prev, st, last) => { if (i === 0) { st.g = d % 3 === 0 ? 1.012 : 1; st.dr = d % 3 === 0 ? 0.0006 : 0; const o = prev * st.g, c = nz(o, 0.002); return { o, h: Math.max(o, c) * 1.001, l: Math.min(o, c) * 0.999, c, v: 3e5 }; }
+      const o = last, c = nz(last * (1 + st.dr), 0.004); return { o, h: Math.max(o, c) * 1.0015, l: Math.min(o, c) * 0.9985, c, v: 1e5 * (0.6 + rn()) }; });
+    const cb = mk(80, (d, i, prev, st, last) => { const w = Math.sin(i / 2.3 + d) * 0.006 + (rn() - 0.5) * 0.003, c = prev * (1 + w), o = i ? last : prev; return { o, h: Math.max(o, c) * (1 + rn() * 0.0015), l: Math.min(o, c) * (1 - rn() * 0.0015), c, v: 1e5 * (0.6 + rn()) }; });
+    const lv = (ev) => { const g = ev.side === 'BUY' ? 1 : -1; return g * (ev.entry - ev.sl) > 0 && ev.targets.every((x, i) => g * (x - ev.entry) > 0 && (!i || g * (x - ev.targets[i - 1]) > 0)); };
+    const PG = C.prep(gb), PC = C.prep(cb); let ng = 0, bg = 0, nf = 0, bf = 0;
+    for (let n = 60; n < gb.length - 1; n++) { const e = C.evalGapGo(PG, n, { gapK: 0.5, entry: 'brk', stopK: 1, exitI: 'A' }); if (e) { ng++; if (!lv(e)) bg++; } }
+    for (let n = 60; n < cb.length - 1; n++) { const e = C.evalFade(PC, n, { idxTodayPct: 0.1, edge: 0.25, rsiHi: 60, stopK: 0.3, tgt: 'near' }); if (e) { nf++; if (!lv(e)) bf++; } }
+    ok(ng > 0 && bg === 0, 'gap and go: ' + ng + ' signals on gap days, levels ordered');
+    ok(nf > 0 && bf === 0, 'range fade: ' + nf + ' signals on choppy days, levels ordered');
+    ok(C.evalFade(PC, 100, { idxTodayPct: 1.2, edge: 0.25, rsiHi: 60 }) === null, 'range fade refuses a trending index day');
+    ok(C.LAB_GRID.stock_gapgo.length > 0 && C.LAB_GRID.stock_fade.length > 0, 'lab grids include gap and go and range fade');
+  }
   { // index engine: levels ordered, option tracker closes on spot invalidation
     let s2 = 5; const r2n = () => ((s2 = (s2 * 16807) % 2147483647) / 2147483647); let q = 20000; const D = [];
     for (let i = 0; i < 400; i++) { const o = q; q *= 1 + 0.001 + (r2n() - 0.5) * 0.01; D.push({ t: 1.7e9 + i * 86400, o, h: Math.max(o, q) * 1.003, l: Math.min(o, q) * 0.997, c: q, v: 0 }); }
@@ -70,6 +87,7 @@ async function waitUp(base) { for (let i = 0; i < 40; i++) { try { const r = awa
   { const r = await (await fetch(b1 + '/api/calls/backtest')).json(); ok(r && typeof r.state === 'string', '/api/calls/backtest responds'); }
   { const r = await (await fetch(b1 + '/api/calls/backtest-call?symbol=WIPRO&side=SELL&mode=swing')).json(); ok(r && (r.error || r.symbol), '/api/calls/backtest-call responds'); }
   { const r = await fetch(b1 + '/api/calls/monitor/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'pattern', symbol: 'TCS', side: 'BUY', mode: 'swing' }) }); ok(r.status === 503 || r.status === 200 || r.status === 502, '/api/calls/monitor/add responds (' + r.status + ')'); }
+  { const r = await (await fetch(b1 + '/api/calls/readiness')).json(); ok(r && Array.isArray(r.checks) && r.checks.length === 6 && typeof r.verdict === 'string', '/api/calls/readiness responds (' + (r && r.verdict) + ')'); }
   { const r = await (await fetch(b1 + '/api/calls/gate')).json(); ok(r && Array.isArray(r.kinds) && r.enabled === true, '/api/calls/gate responds (gate on by default)'); }
   { const r = await fetch(b1 + '/api/calls/monitor/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'nope' }) }); ok(r.status === 404, '/api/calls/monitor/remove rejects unknown ids'); }
   { const r = await (await fetch(b1 + '/api/calls/backtest-call?kind=index&symbol=NIFTY&side=BUY&mode=intraday')).json(); ok(r && (r.error || r.kind === 'index'), '/api/calls/backtest-call (index) responds'); }

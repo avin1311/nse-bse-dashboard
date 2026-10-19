@@ -804,6 +804,67 @@ function evalAtrSq(P, n, opts = {}) {
   return { side, mode: 'intraday', entry, sl, targets: [tick(entry + sgn * trail * 6)], trailAtr: r2(trail), riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6,
     checks: { quiet: quiet !== 'none', breakout: true }, setup: opts.setup === 'atrsq5' ? 'atrsq5' : 'atrsq', engine: 'v4', rs: null, riskPct: r2(risk), rr: null, atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
 }
+// ---- GAP AND GO (stock intraday, the rising-day candidate; sells mirror it on falling days): a stock that opens gapGap%+
+// away from yesterday's close (gap up for buys, down for sells), keeps the gap open (never trades back to yesterday's close)
+// and holds the right side of VWAP, is bought when it clears its opening range (first 30 minutes) - 'brk' - or holds a pullback
+// to that range / VWAP after clearing it - 'pull'. Bars that close 9:45 or later; the usual 14:00 last-entry rule applies.
+function evalGapGo(P, n, opts = {}) {
+  const { bars, c, h, l, o, A, R, vwap, dayFirst } = P;
+  const a = A[n], vw = vwap[n], first = dayFirst[n]; if (a == null || vw == null || first < 1) return null;
+  if (n - first < 2) return null;                                             // the opening range (two 15-minute bars) must be complete
+  const m = Math.floor(((bars[n].t + 19800) % 86400) / 60); if (m < 570) return null;
+  const prevClose = c[first - 1], dayOpen = o[first], gap = (dayOpen / prevClose - 1) * 100, gk = opts.gapK || 0.5;
+  let side = null; if (gap >= gk) side = 'BUY'; else if (gap <= -gk) side = 'SELL';
+  if (!side || (opts.side && opts.side !== side)) return null;
+  const up = side === 'BUY', sgn = up ? 1 : -1, px = c[n];
+  for (let j = first; j <= n; j++) if (up ? l[j] <= prevClose : h[j] >= prevClose) return null;   // gap filled: no trade
+  if (!(up ? px > vw : px < vw)) return null;
+  const orH = Math.max(h[first], h[first + 1]), orL = Math.min(l[first], l[first + 1]), volR = slotVolRatio(bars, n);
+  if (opts.volK && !(volR != null && volR >= opts.volK)) return null;
+  const idx = opts.idxTodayPct; if (opts.idxAgree && idx != null && (up ? idx < 0 : idx > 0)) return null;
+  let trig = false;
+  const clearedBefore = lvl => { for (let j = first + 2; j < n; j++) if (up ? c[j] > lvl : c[j] < lvl) return true; return false; };
+  if ((opts.entry || 'brk') === 'brk') trig = up ? px > orH && c[n - 1] <= orH : px < orL && c[n - 1] >= orL;
+  else { const lvl = up ? Math.max(orH, vw) : Math.min(orL, vw);
+    trig = clearedBefore(up ? orH : orL) && (up ? l[n] <= lvl + 0.25 * a && px > lvl && c[n] > o[n] : h[n] >= lvl - 0.25 * a && px < lvl && c[n] < o[n]); }
+  if (!trig) return null;
+  const sk = opts.stopK || 1;
+  let stopDist = Math.min(sk * a * 1.5, up ? px - orL : orH - px); stopDist = Math.max(stopDist, 0.004 * px); stopDist = Math.min(stopDist, 0.03 * px);
+  const entry = tick(px), sl = tick(entry - sgn * stopDist), rr = EXITS[opts.exitI] || EXITS.A, targets = rr.map(x => tick(entry + sgn * stopDist * x)), risk = stopDist / px * 100, f = x => r2(x);
+  const why = [`Opened ${f(Math.abs(gap))}% ${up ? 'above' : 'below'} yesterday's close and the gap is still open`, `${up ? 'Above' : 'Below'} session VWAP (${f(vw)})`,
+    (opts.entry || 'brk') === 'brk' ? `Cleared the opening range ${up ? 'high' : 'low'} (${f(up ? orH : orL)})` : 'Held a pullback to the opening range / VWAP after clearing it',
+    volR != null ? `Volume ${f(volR)}x the usual for this time of day` : '', R[n] != null ? `RSI ${f(R[n])}` : ''].filter(Boolean);
+  return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6, checks: { gap: true, vwap: true, trigger: true, vol: volR == null ? null : volR >= 1 },
+    setup: 'gapgo', engine: 'v4', rs: null, riskPct: r2(risk), rr: rr[0], atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+}
+// ---- RANGE FADE (stock intraday, the sideways-day candidate): only on a flat index day (Nifty within +-0.4%). By late
+// morning the stock has a day range and has crossed VWAP at least twice (it is chopping, not trending). Sell when it is back
+// at the top fade% of that range with RSI hot and a rejection candle; buy the mirror at the bottom. Stop just beyond the day's
+// extreme, targets part-way back across the range (tgt 'near': 40 / 65 / 90%, 'far': 55 / 80 / 100%). Needs a real reward.
+function evalFade(P, n, opts = {}) {
+  const { bars, c, h, l, o, A, R, vwap, dayFirst } = P;
+  const a = A[n], vw = vwap[n], first = dayFirst[n]; if (a == null || R[n] == null || vw == null || first < 1) return null;
+  const idx = opts.idxTodayPct; if (idx == null || Math.abs(idx) >= DT_PCT) return null;            // sideways index days only
+  if (n - first < 6) return null;                                                                    // range needs about 1.5 hours to form
+  const px = c[n], prevClose = c[first - 1];
+  let hi = -Infinity, lo = Infinity, cross = 0, prevSide = 0;
+  for (let j = first; j <= n; j++) { if (h[j] > hi) hi = h[j]; if (l[j] < lo) lo = l[j]; if (vwap[j] == null) continue; const sd = c[j] > vwap[j] ? 1 : -1; if (prevSide && sd !== prevSide) cross++; prevSide = sd; }
+  const rng = hi - lo, rngPct = rng / prevClose * 100; if (rngPct < 0.6 || rngPct > 3.5 || cross < 2) return null;
+  const pos = (px - lo) / rng, edge = opts.edge || 0.15, rsiHi = opts.rsiHi || 65, bar = Math.max(1e-9, h[n] - l[n]);
+  let side = null;
+  if (pos >= 1 - edge && R[n] >= rsiHi && c[n] < o[n] && (h[n] - c[n]) / bar >= 0.5) side = 'SELL';
+  else if (pos <= edge && R[n] <= 100 - rsiHi && c[n] > o[n] && (c[n] - l[n]) / bar >= 0.5) side = 'BUY';
+  if (!side || (opts.side && opts.side !== side)) return null;
+  const up = side === 'BUY', sgn = up ? 1 : -1, ex = up ? lo : hi;
+  let stopDist = Math.abs(px - ex) + (opts.stopK || 0.3) * a; stopDist = Math.max(stopDist, 0.0035 * px); if (stopDist > 0.02 * px) return null;
+  const fr = opts.tgt === 'far' ? [0.55, 0.8, 1] : [0.4, 0.65, 0.9], entry = tick(px), sl = tick(entry - sgn * stopDist);
+  const targets = fr.map(x => tick(entry + sgn * rng * x)); if (Math.abs(targets[0] - entry) < 0.8 * stopDist) return null;   // reward must be at least 0.8 of the risk
+  const risk = stopDist / px * 100, f = x => r2(x);
+  const why = [`Sideways day: Nifty ${idx >= 0 ? 'up' : 'down'} ${f(Math.abs(idx))}%`, `Day range ${f(rngPct)}% and it has crossed VWAP ${cross} times (chopping, not trending)`,
+    `${up ? 'At the bottom' : 'At the top'} ${Math.round(edge * 100)}% of the range with RSI ${f(R[n])} and a rejection candle`, `Targets part-way back across the range, stop just beyond the day's ${up ? 'low' : 'high'}`];
+  return { side, mode: 'intraday', entry, sl, targets, riskLabel: risk < 0.9 ? 'LOW' : risk < 1.8 ? 'MEDIUM' : 'HIGH', score: 6, checks: { flat: true, range: true, edge: true, rsi: true },
+    setup: 'fade', engine: 'v4', rs: null, riskPct: r2(risk), rr: r2(Math.abs(targets[0] - entry) / stopDist), atr: r2(a), analysis: why.join('. ') + '.', barTime: bars[n].t };
+}
 // ---- Stock swing "squeeze" breakout: after an inside day or the narrowest range of 7 days, a close at a fresh 20-day high
 // on volume. Buy only.
 function evalSqueeze(P, n, opts = {}) {
@@ -889,7 +950,7 @@ async function walkIntraday(sym, bars, opts, yieldFn) {
       if (m) { todayPct = m.pct; bias = todayPct > 0.3 ? 'BULL' : todayPct < -0.3 ? 'BEAR' : 'MIXED'; }
     }
     const sm = dayMove(opts.secBars15 || I, t); // the stock's sector index (Nifty when it has none)
-    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : (opts.setup === 'atrsq' || opts.setup === 'atrsq5') ? evalAtrSq(P, i, opts) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
+    const ev = opts.setup === 'secmom' ? evalSecMom(P, i, { ...opts, sec: sm, idxTodayPct: todayPct }) : (opts.setup === 'atrsq' || opts.setup === 'atrsq5') ? evalAtrSq(P, i, opts) : opts.setup === 'gapgo' ? evalGapGo(P, i, { ...opts, idxTodayPct: todayPct }) : opts.setup === 'fade' ? evalFade(P, i, { ...opts, idxTodayPct: todayPct }) : evalAt(P, i, 'intraday', { ...opts, bias, idxTodayPct: todayPct });
     if (!ev || !regimeOk(ev.side, breadthAt(opts.breadth, t, true), opts.regime, sm) || !idxAgreeOk(ev.side, todayPct, opts.idxAgree)) continue;
     if (opts.safety === true && sm && !safetyOk(ev.side, sm.pct, sm.aboveOpen)) continue; // the lab normally applies it as a filter instead
     const call = { t: t + (opts.barSec || 900) - 1, side: ev.side, mode: 'intraday', entry: ev.entry, sl: ev.sl, targets: ev.targets, trailAtr: ev.trailAtr };
@@ -920,6 +981,10 @@ const LAB_GRID = {
   // ATR volatility trend (BullsAI BAODSYR001): breakout size k, quiet-market filter, trailing distance tk (all x ATR(20))
   stock_atrsq: product({ setup: ['atrsq'], k: [0.75, 1, 1.5, 2], quiet: ['none', 'avg', 'p25'], tk: [1.5, 2, 3], regime: ['any'] }),
   stock_atrsq5: product({ setup: ['atrsq5'], k: [0.75, 1, 1.5, 2], quiet: ['none', 'avg', 'p25'], tk: [1.5, 2, 3], regime: ['any'], barSec: [300] }), // same strategy on 5-minute candles (TCS + the most traded F&O stocks)
+  // gap and go (rising / falling days): minimum gap, entry style, volume, index agreement, stop, targets
+  stock_gapgo: product({ setup: ['gapgo'], gapK: [0.5, 1], entry: ['brk', 'pull'], volK: [0, 1.5], idxAgree: [false, true], stopK: [1], exitI: ['S', 'A'], regime: ['any'] }),
+  // range fade (sideways days only): how close to the range edge, how hot the RSI, stop buffer, how far back across the range
+  stock_fade: product({ setup: ['fade'], edge: [0.15, 0.25], rsiHi: [60, 70], stopK: [0.3, 0.6], tgt: ['near', 'far'], regime: ['any'] }),
   stock_secmom: product({ setup: ['secmom'], secK: [1, 1.5], entry: ['brk', 'pull'], volK: [0, 1.5], stopK: [0.75, 1], exitI: ['S', 'A'], regime: ['any'] }),
   index_cross: product({ entry: ['cross', 'retest'], volK: [0, 1.3, 1.8], htf: [false, true], minScore: [3, 4, 5], stopK: [0.75, 1.25], exit: ['S', 'A'] }),
   // agree: must the stock's side agree with Nifty ('index') or with its sector index ('sector') on the day? Applied as a
@@ -933,4 +998,4 @@ function summarizeTrades(trades) {
     byBias: ['BULL', 'BEAR', 'MIXED'].reduce((o, b) => (o[b] = mkAgg(done.filter(x => x.bias === b)), o), {}) };
 }
 
-module.exports = { evalAtrSq, evalSecMom, secStrong, SEC_STRONG, dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };
+module.exports = { evalGapGo, evalFade, evalAtrSq, evalSecMom, secStrong, SEC_STRONG, dayMove, dtOf, biasDt, agreeOk, safetyOk, SAFETY_PCT, DT_PCT, prepCross, evalCross, walkCross, evalVwapIntra, idxAgreeOk, breadthSeries, breadthAt, regimeOk, evalBreakIntra, evalSqueeze, prep, evalAt, evalIndexAt, biasSeries, LAB_GRID, upto, marketBias, backtest, walkSwing, walkIntraday, walkIndex, evaluateIndex, trackOption, IDX_COST, IDX_HOLD_DAYS, mkAgg, summarizeTrades, costPct, EXITS, evaluateV2, regime, ema, rsi, atr, stoch, supertrend, evaluate, track, summarize, istDayEnd };

@@ -3443,7 +3443,7 @@ async function renderHomeReady(){
     +j.checks.map(c=>`<div class="hm-li"><span>${c.ok?'<b class="up">✓</b>':'<b class="down">✗</b>'} ${esc0(c.label)}</span><span class="metric-sub">${esc0(c.have)}</span></div>`).join('')
     +`<div class="metric-sub" style="margin:8px 0 4px;">Proven kinds that can go live in each market type (from the strategy lab${j.lab&&j.lab.built?'':', still running'}):</div>`
     +['up','flat','down'].map(t=>`<div class="hm-li"><span><b>${dn[t]}</b> <span class="metric-sub">${(j.byType[t]||[]).length?esc0((j.byType[t]).join(' · ')):'none proven yet, so only paper calls'}</span></span></div>`).join('')
-    +`<div class="metric-sub" style="margin-top:6px;">Paper calls from kinds not yet proven: ${j.paper.n||0} closed${j.paper.n?', average '+sg(j.paper.avg)+' per call':''}. ${esc0(j.note)}</div>`;
+    +`<div class="metric-sub" style="margin-top:6px;">Stock calls from kinds not yet proven: ${j.paper.n||0} closed${j.paper.n?', average '+sg(j.paper.avg)+' per call':''}. Index option calls are counted separately: ${(j.options&&j.options.n)||0} closed${j.options&&j.options.n?', average '+sg(j.options.avg)+'% of premium per call':''}. ${esc0(j.note)}</div>`;
 }
 function renderHomeAgree(){
   const box=document.getElementById('hmAgree'); if(!box) return;

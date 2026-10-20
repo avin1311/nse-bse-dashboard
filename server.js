@@ -3129,10 +3129,10 @@ function readyStats(list) {
 }
 app.get('/api/calls/readiness', async (req, res) => {
   try {
-    const db = await loadCalls(), done = db.filter(c => c.closed && !c.manual && c.pnlPct != null);
-    const proven = readyStats(done.filter(c => c.unproven === false)), paper = readyStats(done.filter(c => c.unproven !== false));
+    const db = await loadCalls(), all = db.filter(c => c.closed && !c.manual && c.pnlPct != null), done = all.filter(c => c.kind !== 'option'); // stock calls only: option calls are % of premium (a miss costs about 25%), a different unit that would swamp the sums
+    const proven = readyStats(done.filter(c => c.unproven === false)), paper = readyStats(done.filter(c => c.unproven !== false)), opts = readyStats(all.filter(c => c.kind === 'option'));
     const checks = [
-      { k: 'trades', label: `at least ${READY.minTrades} closed calls from proven kinds`, ok: proven.n >= READY.minTrades, have: proven.n + ' so far' },
+      { k: 'trades', label: `at least ${READY.minTrades} closed stock calls from proven kinds`, ok: proven.n >= READY.minTrades, have: proven.n + ' so far' },
       { k: 'days', label: `spread over at least ${READY.minDays} trading days`, ok: proven.days >= READY.minDays, have: proven.days + ' so far' },
       { k: 'avg', label: `average at least +${READY.minAvg}% per call after costs`, ok: proven.n > 0 && proven.avg >= READY.minAvg, have: proven.n ? (proven.avg > 0 ? '+' : '') + proven.avg + '%' : '—' },
       { k: 'win', label: `win rate at least ${READY.minWin}%`, ok: proven.winRate != null && proven.winRate >= READY.minWin, have: proven.winRate != null ? proven.winRate + '%' : '—' },
@@ -3148,7 +3148,7 @@ app.get('/api/calls/readiness', async (req, res) => {
     }
     const passed = checks.filter(c => c.ok).length;
     const verdict = !gate.t ? 'lab' : passed === checks.length ? 'ready' : proven.n < READY.minTrades || proven.days < READY.minDays ? 'collecting' : 'not-yet';
-    res.json({ verdict, passed, total: checks.length, checks, proven, paper, byType, lab: { built: gate.t || null, version: gate.labVersion || null, building: !!gate.building, progress: gate.progress || '' }, criteria: READY,
+    res.json({ verdict, passed, total: checks.length, checks, proven, paper, options: opts, byType, lab: { built: gate.t || null, version: gate.labVersion || null, building: !!gate.building, progress: gate.progress || '' }, criteria: READY,
       note: 'All of this is paper trading. "Ready" means the live results of lab-proven calls match the lab, not that profit is guaranteed. If you start with real money, keep the size small, trade only proven kinds and keep the daily loss stop on.' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

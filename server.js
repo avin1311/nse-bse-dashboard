@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-22-r51 (market-type block off: kinds are no longer skipped for losing on sideways or falling days; set GATE_DAY_BLOCK=on to restore)';
+const BUILD = '2026-10-22-r52 (agreement exit study: replays agreement signals with different exit rules; market-type block off)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3294,6 +3294,28 @@ setInterval(() => { const p = istParts(); if (p.dow === 0 || p.dow === 6 || p.mi
     runAgreement().then(r => storeSet('store:agreement-ran', day).catch(() => {}))
       .catch(e => { agState.last = { at: Date.now(), err: e.message }; sendTelegram('⚠️ Agreement check failed today: ' + e.message).catch(() => {}); }); });
 }, 60000).unref();
+
+// ---- Agreement exit study (read-only): replays the agreement signal on each F&O stock's daily history and compares exit rules on the same
+// signals (agstudy.js). Heavy on the CPU (about 1 s per stock, in slices), so it only starts outside market hours.
+let agStudy = { running: false, progress: '', result: null, at: null, err: null };
+storeGet('store:agreement-study', null).then(v => { if (v && v.rows) { agStudy.result = v; agStudy.at = v.at || null; } }).catch(() => {});
+app.get('/api/agreement/study', (req, res) => res.json({ running: agStudy.running, progress: agStudy.progress, at: agStudy.at, err: agStudy.err, result: agStudy.result }));
+app.post('/api/agreement/study', async (req, res) => {
+  const p = istParts(); if (p.dow >= 1 && p.dow <= 5 && p.mins >= 540 && p.mins <= 945) return res.status(409).json({ error: 'not during market hours (09:00-15:45 IST): it uses a lot of CPU' });
+  if (agStudy.running) return res.json({ busy: true, progress: agStudy.progress });
+  const E = Engines.load(); if (!E) return res.status(500).json({ error: 'browser engines failed to load: ' + Engines.error() });
+  agStudy = { ...agStudy, running: true, progress: 'starting', err: null }; res.json({ started: true });
+  (async () => {
+    const St = require('./agstudy'), all = [], t0 = Date.now(); let n = 0;
+    for (const sym of FNO_FALLBACK) {
+      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { all.push(...St.study(E, sym, C, Calls.costPct('swing'))); n++; } } catch (e) {}
+      agStudy.progress = `${n} stocks done (${Math.round((Date.now() - t0) / 1000)} s)`;
+      await new Promise(r => setTimeout(r, 20));
+    }
+    const out = St.aggregate(all, n); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
+    agStudy.result = out; agStudy.at = out.at; agStudy.progress = 'done'; await storeSet('store:agreement-study', out).catch(() => {});
+  })().catch(e => { agStudy.err = e.message; }).finally(() => { agStudy.running = false; });
+});
 
 // ---- Trigger watch (Chart patterns "decision zone"): wait for a 15-minute close beyond a pattern's trigger level, then add
 // the item to the Calls Monitor at that price. Cancelled if price closes beyond the invalidation level first, or on expiry.

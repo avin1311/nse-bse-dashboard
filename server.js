@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-20-r50 (lab v16: 7 months of stock history; gap and go + range fade kinds; readiness scorecard; lab keeps server awake)';
+const BUILD = '2026-10-22-r51 (market-type block off: kinds are no longer skipped for losing on sideways or falling days; set GATE_DAY_BLOCK=on to restore)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3036,7 +3036,8 @@ function liveDt(pct) {
   else { if (pct <= -L - DT_BUF) nx = 'down'; else if (pct >= L + DT_BUF) nx = 'up'; }
   dtLive.dt = nx; return nx;
 }
-function dayLosing(key, dt) { if (!dt) return null; const d = gate.kinds && gate.kinds[key + '@' + dt]; if (!d || d.n < DAY_MIN_TRADES || d.avg == null || d.avg >= 0 || (d.newer != null && d.newer >= 0)) return null; return d; }
+const DAY_BLOCK = process.env.GATE_DAY_BLOCK === 'on'; // market-type block (a kind that lost on this type of day is skipped): OFF by default since 22 Oct, set GATE_DAY_BLOCK=on to bring it back
+function dayLosing(key, dt) { if (!DAY_BLOCK || !dt) return null; const d = gate.kinds && gate.kinds[key + '@' + dt]; if (!d || d.n < DAY_MIN_TRADES || d.avg == null || d.avg >= 0 || (d.newer != null && d.newer >= 0)) return null; return d; }
 function liveKinds(fam, defaults, dt) {
   const all = Object.entries((gate.t && gate.kinds) || {}).filter(([k, v]) => v.fam === fam);
   const base = all.filter(([k]) => !k.includes('@')).filter(([key, v]) => { const d = dayLosing(key, dt); if (!d) return true;

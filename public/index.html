@@ -3109,7 +3109,7 @@ window.cbtBtn=function(c){
     if(imp.length){ const P=LS.get('cmPending',[]); imp.forEach(e=>{ if(!P.some(x=>x.id===e.id)) P.push({id:e.id,text:String(e.text||'').replace(/<[^>]+>/g,''),level:e.level,t:e.t}); }); LS.set('cmPending',P.slice(-30)); ackBar(); }
     if(fresh.length) LS.set('cmSeen',ids.concat(seen).slice(0,300));
   }
-  // ---- alerts not yet seen: a bar that stays, and a repeat beep every minute until Seen (Telegram repeats once after 3 min) ----
+  // ---- alerts not yet seen: a bar that stays until Seen (one beep when the alert arrives, no repeat beeps; Telegram repeats once after 3 min) ----
   function ackBar(){
     let P=LS.get('cmPending',[]);
     if(data&&data.events){ const acked=new Set(data.events.filter(e=>e.acked).map(e=>e.id)); const n0=P.length; P=P.filter(x=>!acked.has(x.id)); if(P.length!==n0) LS.set('cmPending',P); }
@@ -3121,7 +3121,7 @@ window.cbtBtn=function(c){
   }
   async function ackAll(){ const P=LS.get('cmPending',[]); LS.set('cmPending',[]); ackBar(); if(P.length){ try{ await fetch('/api/calls/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:P.map(x=>x.id)})}); }catch(e){} } }
   window.cmAckAll=ackAll;
-  setInterval(()=>{ const P=LS.get('cmPending',[]).filter(x=>Date.now()/1000-x.t<6*3600); if(P.length){ ackBar(); beep(P.some(x=>x.level==='bad')?'bad':P.some(x=>x.level==='good')?'good':'info'); } },60000);
+  setInterval(()=>{ const P=LS.get('cmPending',[]).filter(x=>Date.now()/1000-x.t<6*3600); if(P.length) ackBar(); },60000); // the bar stays until Seen; the sound plays once, when the alert arrives (no repeat beep)
   setTimeout(ackBar,3000);
   function addToWatchlist(sym){ try{ if(window.WATCHLIST&&!window.WATCHLIST.includes(sym)){ window.WATCHLIST.push(sym); if(typeof renderWatchlist==='function') renderWatchlist(); } }catch(e){} }
   async function poll(){

@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-23-r53 (index bar order saved on the server; market-type block off)';
+const BUILD = '2026-10-23-r54 (alert sound plays once, no repeat beeps; index bar order saved on the server; market-type block off)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

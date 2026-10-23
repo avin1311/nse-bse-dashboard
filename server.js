@@ -1986,12 +1986,12 @@ function callEvents(c, before) {
   for (let i = before.hit + 1; i <= (c.targetsHit || 0); i++) {
     const px = c.targets[i - 1];
     out.push({ ...base, id: c.id + ':T' + i, kind: 'T' + i, level: 'good', price: px, pnlPct: null,
-      text: `🎯 ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? '. Stop moved to entry.' : '') });
+      text: `🎯 ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? '. Stop moved to entry plus costs.' : '') });
   }
   if (c.closed && !before.closed && c.status !== 'TARGET_HIT') {
     const k = c.status === 'SL_HIT' ? 'SL' : c.status === 'EXPIRED' ? 'EXPIRED' : 'BE';
     const icon = k === 'SL' ? '🛑' : k === 'EXPIRED' ? '⏱' : '⚪';
-    const word = k === 'SL' ? 'hit its stop loss' : k === 'EXPIRED' ? 'expired' : 'was stopped at entry (after a target)';
+    const word = k === 'SL' ? 'hit its stop loss' : k === 'EXPIRED' ? 'expired' : 'was stopped at entry plus costs (after a target)';
     out.push({ ...base, id: c.id + ':' + k, kind: k, level: k === 'SL' ? 'bad' : 'info', price: c.exit, pnlPct: c.pnlPct,
       text: `${icon} ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) ${word} at ₹${c.exit} (${pct(c.pnlPct)})` });
   } else if (c.closed && !before.closed) {
@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-23-r54 (alert sound plays once, no repeat beeps; index bar order saved on the server; market-type block off)';
+const BUILD = '2026-10-23-r55 (after T1 the stop moves to entry plus costs; alert sound plays once; index bar order saved on the server; market-type block off)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

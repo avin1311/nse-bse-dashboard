@@ -163,7 +163,7 @@ function evaluateV2(bars, mode, opts = {}) {
 /**
  * Replays bars after the call's creation time and returns the call's state.
  * Conservative: if SL and a target sit inside one bar, the SL is assumed first.
- * After T1 the stop trails to entry (breakeven). Intraday calls expire at the
+ * After T1 the stop moves to entry plus the round-trip costs (so a stop-out there covers brokerage and charges). Intraday calls expire at the
  * close of the day they were made (square-off); swing calls after 30 days.
  */
 const COST = { intraday: Number(process.env.COST_INTRADAY_PCT) || 0.10, swing: Number(process.env.COST_SWING_PCT) || 0.15 }; // round-trip % (brokerage, charges, slippage)
@@ -171,17 +171,18 @@ function costPct(mode) { return COST[mode] != null ? COST[mode] : COST.swing; }
 function track(call, bars, nowSec) {
   const sgn = call.side === 'BUY' ? 1 : -1;
   let sl = call.sl, hit = 0, status = 'ACTIVE', exit = null, exitT = null, last = call.entry, best = call.entry;
+  let beSl = null; // the stop after T1: entry plus the costs, so a stop-out there still pays the brokerage and charges
   const limitT = call.limitT || (call.mode === 'intraday' ? istDayEnd(call.t) : call.t + 30 * 86400);
   let j = upto(bars, call.t) + 1; const start = j;
   for (; j < bars.length; j++) {
     const b = bars[j];
     if (b.t > limitT) { status = 'EXPIRED'; exit = last; exitT = limitT; break; }
     const stopHit = sgn === 1 ? b.l <= sl : b.h >= sl;
-    if (stopHit) { status = hit >= 1 && sl === call.entry ? 'BREAKEVEN' : (hit >= 1 || (call.trailAtr && sgn * (sl - call.entry) > 0) ? 'PROFIT' : 'SL_HIT'); exit = sl; exitT = b.t; break; }
+    if (stopHit) { status = hit >= 1 && sl === beSl ? 'BREAKEVEN' : (hit >= 1 || (call.trailAtr && sgn * (sl - call.entry) > 0) ? 'PROFIT' : 'SL_HIT'); exit = sl; exitT = b.t; break; }
     for (let i = hit; i < call.targets.length; i++) {
       const tHit = sgn === 1 ? b.h >= call.targets[i] : b.l <= call.targets[i];
       if (!tHit) break;
-      hit = i + 1; if (hit === 1) sl = call.entry; else if (hit === 2) sl = call.targets[0]; // trail: entry after T1, T1 after T2
+      hit = i + 1; if (hit === 1) { const cv = call.entry * (call.costPct != null ? call.costPct : costPct(call.mode)) / 100; sl = beSl = sgn === 1 ? Math.ceil((call.entry + cv) * 100) / 100 : Math.floor((call.entry - cv) * 100) / 100; } else if (hit === 2) sl = call.targets[0]; // trail: entry + costs after T1, T1 after T2
       if (hit === call.targets.length) { status = 'TARGET_HIT'; exit = call.targets[i]; exitT = b.t; }
     }
     last = b.c;

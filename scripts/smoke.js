@@ -15,6 +15,10 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'),
 { let okk = false, msg = ''; try { const E = require('../engines').load(), St = require('../agstudy'); let sd = 7; const C = []; let p = 1000; for (let i = 0; i < 400; i++) { sd = (sd * 1664525 + 1013904223) % 4294967296; const o = p; p *= 1 + ((sd / 4294967296) - 0.5) * 0.04; C.push({ t: 1700000000 + i * 86400, o, h: Math.max(o, p) * 1.003, l: Math.min(o, p) * 0.997, c: p, v: 1e5 }); }
   const sg = St.study(E, 'X', C, 0.2), A = St.aggregate(sg, 1); okk = Array.isArray(sg) && A.rows.length === St.VARIANTS.length && A.selection && A.selection.now && sg.every(x => Object.keys(x.r).length === St.VARIANTS.length); msg = ' (' + sg.length + ' signals)'; } catch (e) { msg = ': ' + e.message; }
   ok(okk, 'agreement exit study runs on synthetic data' + msg); }
+{ const C = require('../calls.js'); const mk = (t, o, h, l, c) => ({ t, o, h, l, c, v: 1 });
+  const buy = C.track({ side: 'BUY', mode: 'swing', entry: 100, sl: 90, targets: [110, 120], t: 1000 }, [mk(2000, 100, 111, 99, 108), mk(3000, 108, 109, 94, 96)], 4000);
+  const sell = C.track({ side: 'SELL', mode: 'intraday', entry: 200, sl: 210, targets: [190, 180], t: 1000 }, [mk(2000, 200, 201, 189, 192), mk(3000, 192, 201, 191, 199)], 4000);
+  ok(buy.closed && buy.status === 'BREAKEVEN' && buy.exit === 100.15 && Math.abs(buy.pnlPct) < 0.02 && sell.status === 'BREAKEVEN' && sell.exit === 199.8 && Math.abs(sell.pnlPct) < 0.02, 'after T1 the stop sits at entry plus costs and a stop-out there nets about zero'); }
 ok(/function newsAgo\(/.test(html) && /function newsEsc\(/.test(html), 'news helpers defined');
 ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length === 4 && /id="scanView"/.test(html) && /id="portView"/.test(html), 'four stock tabs plus the Scanner and Portfolio pages');
 {

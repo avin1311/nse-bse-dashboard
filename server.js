@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-23-r55 (after T1 the stop moves to entry plus costs; alert sound plays once; index bar order saved on the server; market-type block off)';
+const BUILD = '2026-10-23-r56 (target study: how often stocks reach +3 or +4 percent before a 2 or 3 percent stop; stop after T1 at entry plus costs; alert sound once; index bar order saved)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3328,6 +3328,25 @@ app.post('/api/agreement/study', async (req, res) => {
     const out = St.aggregate(all, n); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
     agStudy.result = out; agStudy.at = out.at; agStudy.progress = 'done'; await storeSet('store:agreement-study', out).catch(() => {});
   })().catch(e => { agStudy.err = e.message; }).finally(() => { agStudy.running = false; });
+});
+
+let tgStudy = { running: false, progress: '', result: null, at: null, err: null };
+storeGet('store:target-study', null).then(v => { if (v && v.rows) { tgStudy.result = v; tgStudy.at = v.at || null; } }).catch(() => {});
+app.get('/api/agreement/target-study', (req, res) => res.json({ running: tgStudy.running, progress: tgStudy.progress, at: tgStudy.at, err: tgStudy.err, result: tgStudy.result }));
+app.post('/api/agreement/target-study', async (req, res) => {
+  const p = istParts(); if (p.dow >= 1 && p.dow <= 5 && p.mins >= 540 && p.mins <= 945) return res.status(409).json({ error: 'not during market hours (09:00-15:45 IST): it uses a lot of CPU' });
+  if (tgStudy.running || agStudy.running) return res.json({ busy: true, progress: tgStudy.progress });
+  const E = Engines.load(); if (!E) return res.status(500).json({ error: 'browser engines failed to load: ' + Engines.error() });
+  tgStudy = { ...tgStudy, running: true, progress: 'starting', err: null }; res.json({ started: true });
+  (async () => {
+    const St = require('./agstudy'), all = [], t0 = Date.now(); let n = 0;
+    for (const sym of FNO_FALLBACK) {
+      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { all.push(...St.targetStudy(E, sym, C, Calls.costPct('swing'))); n++; } } catch (e) {}
+      tgStudy.progress = `${n} stocks done (${Math.round((Date.now() - t0) / 1000)} s)`; await new Promise(r => setTimeout(r, 20));
+    }
+    const out = St.aggregateTargets(all, n); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
+    tgStudy.result = out; tgStudy.at = out.at; tgStudy.progress = 'done'; await storeSet('store:target-study', out).catch(() => {});
+  })().catch(e => { tgStudy.err = e.message; }).finally(() => { tgStudy.running = false; });
 });
 
 // ---- Trigger watch (Chart patterns "decision zone"): wait for a 15-minute close beyond a pattern's trigger level, then add

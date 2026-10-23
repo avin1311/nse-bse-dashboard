@@ -30,7 +30,7 @@ function scores(E, sym, C, k0, k1) {
     const b = bk && bk.type === 'break' ? bk.d : 0;
     if (Math.abs(s) + Math.abs(b) === 0) continue;
     let pt = null; try { pt = E.xsPattern(C.slice(Math.max(0, k - 319), k + 1), '1D'); } catch (e) {}
-    out[k] = { a: scoreOf(sig, pt ? pt.d : 0, b, wkDir(k)), score: hz ? hz.score : 0 };
+    out[k] = { a: scoreOf(sig, pt ? pt.d : 0, b, wkDir(k)), score: hz ? hz.score : 0, pname: pt && pt.d ? pt.name : null, bname: bk && bk.type === 'break' ? bk.name : null };
   }
   return out;
 }
@@ -98,4 +98,37 @@ function aggregate(all, nStocks) {
   const d0 = ts.length ? ts[0] : null, d1 = ts.length ? ts[ts.length - 1] : null;
   return { stocks: nStocks, signals: all.length, from: d0, to: d1, signalDays: days.size, rows, selection: sel, note: 'Signals at the daily close; one open trade per stock per exit rule; stop 1.5 ATR; T1 = 1 risk, T2 = 2 risk; same-day stop and target: stop first; costs included.' };
 }
-module.exports = { study, aggregate, VARIANTS, LIM };
+
+// ---- Target study: how often does a stock move +3% / +4% before a 2% / 3% stop within 10 sessions?  Signals (agreement 3+) against a no-signal baseline.
+const TG = [3, 4], SP = [2, 3], HOLD = 10;
+function outcome(C, k, dir, stopPct, tgtPct, cost) {
+  const e = C[k].c, st = e * (1 - dir * stopPct / 100), tg = e * (1 + dir * tgtPct / 100), end = Math.min(C.length - 1, k + HOLD);
+  let mfe = 0;
+  for (let j = k + 1; j <= end; j++) {
+    const b = C[j], fav = dir > 0 ? (b.h - e) / e * 100 : (e - b.l) / e * 100; mfe = Math.max(mfe, fav);
+    if (dir > 0 ? b.l <= st : b.h >= st) return { o: 'S', ret: -stopPct - cost, mfe };
+    if (dir > 0 ? b.h >= tg : b.l <= tg) return { o: 'T', ret: tgtPct - cost, mfe };
+  }
+  return { o: 'N', ret: dir * (C[end].c - e) / e * 100 - cost, mfe };
+}
+function targetStudy(E, sym, C, cost) {
+  const k0 = Math.max(130, C.length - 260), k1 = C.length - 1 - HOLD - 1; if (C.length < 200 || k1 <= k0) return [];
+  const sc = scores(E, sym, C, k0, k1), recs = [];
+  const add = (grp, k, dir, tag) => { SP.forEach(sp => TG.forEach(tg => { const r = outcome(C, k, dir, sp, tg, cost); recs.push({ g: grp, dir, sp, tg, t: C[k].t, o: r.o, ret: r.ret, mfe: r.mfe, tag }); })); };
+  for (let k = k0; k <= k1; k++) {
+    const s = sc[k];
+    if (s && Math.abs(s.a) >= 3) add('signal', k, Math.sign(s.a), (s.bname && /52-week/.test(s.bname) ? '52wk' : s.bname ? 'range' : 'nobreak') + (s.pname ? '+pattern' : ''));
+    if ((k - k0) % 5 === 0) { add('base', k, 1, null); add('base', k, -1, null); }
+  }
+  return recs;
+}
+function aggregateTargets(all, nStocks) {
+  const r2 = x => Math.round(x * 100) / 100, avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+  const ts = all.map(x => x.t).sort((a, b) => a - b), mid = ts[Math.floor(ts.length / 2)], rows = [], key = {};
+  all.forEach(x => { const k = [x.g, x.dir > 0 ? 'BUY' : 'SELL', x.sp, x.tg].join('|'); (key[k] = key[k] || []).push(x); if (x.tag) { const k2 = [x.g + ':' + x.tag, x.dir > 0 ? 'BUY' : 'SELL', x.sp, x.tg].join('|'); (key[k2] = key[k2] || []).push(x); } });
+  Object.entries(key).forEach(([k, a]) => { const [g, side, sp, tg] = k.split('|'); if (a.length < 30) return; const T = a.filter(x => x.o === 'T').length, S = a.filter(x => x.o === 'S').length;
+    rows.push({ group: g, side, stop: +sp, target: +tg, n: a.length, hitT: Math.round(T / a.length * 100), hitS: Math.round(S / a.length * 100), neither: Math.round((a.length - T - S) / a.length * 100), avg: r2(avg(a.map(x => x.ret))), older: r2(avg(a.filter(x => x.t < mid).map(x => x.ret))), newer: r2(avg(a.filter(x => x.t >= mid).map(x => x.ret))), reachedAtAnyPoint: Math.round(a.filter(x => x.mfe >= +tg).length / a.length * 100), needWin: r2(((+sp + 0.15) / (+sp + +tg)) * 100) }); });
+  rows.sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.side < b.side ? -1 : a.side > b.side ? 1 : a.stop - b.stop || a.target - b.target));
+  return { stocks: nStocks, from: ts[0] || null, to: ts[ts.length - 1] || null, hold: HOLD, rows };
+}
+module.exports = { study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets };

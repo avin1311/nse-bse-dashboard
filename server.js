@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-22-r52 (agreement exit study: replays agreement signals with different exit rules; market-type block off)';
+const BUILD = '2026-10-23-r53 (index bar order saved on the server; market-type block off)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3295,6 +3295,19 @@ setInterval(() => { const p = istParts(); if (p.dow === 0 || p.dow === 6 || p.mi
       .catch(e => { agState.last = { at: Date.now(), err: e.message }; sendTelegram('⚠️ Agreement check failed today: ' + e.message).catch(() => {}); }); });
 }, 60000).unref();
 
+// ---- Index bar order (Edit order on the ticker): kept on the server so it survives closing the browser, clearing site data or opening the dashboard on another device
+const TICKER_KEY = 'store:ticker-pref';
+let tickerMem; // undefined = not read yet; kept in memory as well as in the store
+async function tickerGet() { if (tickerMem === undefined) tickerMem = await storeGet(TICKER_KEY, null).catch(() => null); return tickerMem; }
+app.get('/api/prefs/ticker', async (req, res) => { res.json({ pref: await tickerGet() }); });
+app.post('/api/prefs/ticker', async (req, res) => {
+  const b = req.body || {}, okList = a => Array.isArray(a) && a.length <= 80 && a.every(x => typeof x === 'string' && x.length <= 60);
+  try {
+    if (b.reset) { tickerMem = null; await storeSet(TICKER_KEY, null).catch(() => {}); return res.json({ ok: true, pref: null }); }
+    if (!okList(b.order) || !okList(b.hidden || [])) return res.status(400).json({ error: 'order and hidden must be lists of index codes' });
+    const pref = { order: b.order, hidden: b.hidden || [], at: Date.now() }; tickerMem = pref; await storeSet(TICKER_KEY, pref).catch(() => {}); res.json({ ok: true, pref });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ---- Agreement exit study (read-only): replays the agreement signal on each F&O stock's daily history and compares exit rules on the same
 // signals (agstudy.js). Heavy on the CPU (about 1 s per stock, in slices), so it only starts outside market hours.
 let agStudy = { running: false, progress: '', result: null, at: null, err: null };

@@ -1813,6 +1813,14 @@ function destroyCharts(){
 }
 
 function tickerPref(){ try{ return JSON.parse(localStorage.getItem('tickerPref')||'{}'); }catch(e){ return {}; } }
+// the index bar order is also kept on the server, so it stays as edited after the browser is closed (browsers can clear their own storage on exit)
+function tickerSend(body){ try{ fetch('/api/prefs/ticker',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(()=>{}); }catch(e){} }
+function tickerSync(){ try{ fetch('/api/prefs/ticker',{cache:'no-store'}).then(r=>r.json()).then(j=>{
+  const loc=(()=>{ try{ return localStorage.getItem('tickerPref'); }catch(e){ return null; } })();
+  if(j&&j.pref&&Array.isArray(j.pref.order)){ const v=JSON.stringify({order:j.pref.order,hidden:j.pref.hidden||[]}); if(v!==loc){ try{ localStorage.setItem('tickerPref',v); }catch(e){} if(document.getElementById('tickerBar')) renderTicker(); } }
+  else if(loc){ try{ const o=JSON.parse(loc); if(o&&Array.isArray(o.order)) tickerSend({order:o.order,hidden:o.hidden||[]}); }catch(e){} } // first visit after this change: hand the browser's current order to the server
+}).catch(()=>{}); }catch(e){} }
+window.addEventListener('load',()=>setTimeout(tickerSync,1500));
 function applyTickerPref(rows){
   const p=tickerPref(), order=p.order||[], hidden=new Set(p.hidden||[]);
   const pos=s=>{ const i=order.indexOf(s); return i<0?1000+INDEX_LIST.findIndex(r=>r[0]===s):i; };
@@ -1835,7 +1843,7 @@ function openTickerEditor(){
   ov.innerHTML='<div class="ov-card" style="max-width:420px"><h3>Index bar</h3><div class="metric-sub" style="margin-bottom:8px;">Use the arrows to reorder. Untick to hide an index.</div><div id="tkList"></div><div style="display:flex;gap:8px;margin-top:14px;"><button class="btn" id="tkReset">Reset to default</button><button class="btn" id="tkDone" style="margin-left:auto;">Done</button></div></div>';
   document.body.appendChild(ov);
   const nm=s=>INDEX_LIST.find(r=>r[0]===s)[1];
-  function save(){ try{ localStorage.setItem('tickerPref',JSON.stringify({order,hidden:[...hidden]})); }catch(e){} renderTicker(); }
+  function save(){ try{ localStorage.setItem('tickerPref',JSON.stringify({order,hidden:[...hidden]})); }catch(e){} tickerSend({order,hidden:[...hidden]}); renderTicker(); }
   function draw(){
     ov.querySelector('#tkList').innerHTML=order.map((s,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);"><label style="flex:1;display:flex;gap:8px;align-items:center;cursor:pointer;"><input type="checkbox" data-s="${s}" ${hidden.has(s)?'':'checked'}> ${nm(s)}</label><button class="btn" data-up="${i}" ${i===0?'disabled':''} aria-label="Move up">&#9650;</button><button class="btn" data-dn="${i}" ${i===order.length-1?'disabled':''} aria-label="Move down">&#9660;</button></div>`).join('');
     ov.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.up; [order[i-1],order[i]]=[order[i],order[i-1]]; save(); draw(); });
@@ -1843,7 +1851,7 @@ function openTickerEditor(){
     ov.querySelectorAll('input[data-s]').forEach(c=>c.onchange=()=>{ if(c.checked) hidden.delete(c.dataset.s); else hidden.add(c.dataset.s); save(); });
   }
   draw();
-  ov.querySelector('#tkReset').onclick=()=>{ try{ localStorage.removeItem('tickerPref'); }catch(e){} ov.remove(); renderTicker(); };
+  ov.querySelector('#tkReset').onclick=()=>{ try{ localStorage.removeItem('tickerPref'); }catch(e){} tickerSend({reset:true}); ov.remove(); renderTicker(); };
   ov.querySelector('#tkDone').onclick=()=>ov.remove();
   ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
 }

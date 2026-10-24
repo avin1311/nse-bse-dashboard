@@ -2198,6 +2198,20 @@ async function getHistUpstox(sym, maxBars) {
   return toBars(rows).slice(-(maxBars || 500));
 }
 
+// Expiry days of the index derivatives, read from the live Upstox contract list (never assumed). Cached 30 minutes inside getOptionContracts.
+app.get('/api/index-expiries', async (req, res) => {
+  const today = istDate(0), out = {};
+  await Promise.all(['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY', 'BANKEX'].map(async u => {
+    try {
+      const { list } = await getOptionContracts(u), exps = [...new Set(list.map(c => c.expiry))].sort(), fut = exps.filter(e => e >= today);
+      if (!fut.length) return; const e = fut[0], mon = e.slice(0, 7), last = exps.filter(x => x.slice(0, 7) === mon).pop();
+      const nx = fut.find(x => x > e) || null;
+      out[u] = { expiry: e, dte: dayDiff(e, today), weekday: new Date(e + 'T00:00:00Z').toLocaleString('en-GB', { weekday: 'short', timeZone: 'UTC' }), monthly: e === last, next: nx, nextMonthly: (() => { const m = fut.map(x => x.slice(0, 7)); const ms = [...new Set(m)][0]; return exps.filter(x => x.slice(0, 7) === ms && x >= today).pop() || null; })() };
+    } catch (ex) { /* no contract list for this index: leave it out */ }
+  }));
+  res.json({ today, items: out });
+});
+
 // Index context for gating calls: daily trend bias plus today's move. Cached 3 minutes.
 let idxCtx = { t: 0, v: null };
 async function getIndexContext() {
@@ -2626,7 +2640,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-25-r58 (IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-25-r59 (expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

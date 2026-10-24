@@ -1826,13 +1826,20 @@ function applyTickerPref(rows){
   const pos=s=>{ const i=order.indexOf(s); return i<0?1000+INDEX_LIST.findIndex(r=>r[0]===s):i; };
   return rows.filter(r=>!hidden.has(r[3])).sort((a,b)=>pos(a[3])-pos(b[3]));
 }
+window.EXPIRIES={};
+function expLine(sym){ const x=window.EXPIRIES[sym]; if(!x) return ''; const d=x.expiry.slice(8)+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+x.expiry.slice(5,7)-1], tag=x.monthly?'monthly':'weekly';
+  if(x.dte===0) return '<span class="idx-name" style="font-size:10px;font-weight:700;color:var(--red,#e5484d)">EXPIRY TODAY ('+tag+')</span>';
+  return '<span class="idx-name" style="font-size:10px;color:var(--text3)">Expiry '+x.weekday+' '+d+' &middot; '+(x.dte===1?'tomorrow':x.dte+'d')+(x.monthly?' &middot; monthly':'')+'</span>'; }
+function expTitle(sym){ const x=window.EXPIRIES[sym]; return x?'. Next expiry '+x.weekday+' '+x.expiry+(x.monthly?' (monthly)':' (weekly)')+(x.nextMonthly&&!x.monthly?'. Monthly expiry '+x.nextMonthly:''):''; }
+async function refreshExpiries(){ try{ const r=await fetch('/api/index-expiries',{cache:'no-store'}); const j=await r.json(); if(j&&j.items){ window.EXPIRIES=j.items; renderTicker(); } }catch(e){} }
+window.addEventListener('load',()=>{ setTimeout(refreshExpiries,2500); setInterval(refreshExpiries,30*60000); });
 function renderTicker(liveRows){
   // before live prices arrive show the index names with dashes (never made-up levels)
   if(liveRows) window.TICKER_ROWS=liveRows;
   const base = window.TICKER_ROWS || INDEX_LIST.map(r=>[r[1].toUpperCase().replace('BSE ',''),null,null,r[0]]);
   const idx = applyTickerPref(base);
   document.getElementById('tickerBar').innerHTML = '<button class="btn" id="tickerEdit" title="Change the order of the indices or hide some" style="position:sticky;left:0;z-index:2;padding:4px 10px;font-size:12px;">Edit order</button>' + idx.map(([n,v,c,sym,raw])=>`
-    <div ${sym?`style="cursor:pointer" onclick="selectStock('${sym}')" title="Open ${n}"`:''}><span class="idx-name">${n}</span><span class="idx-val ${c==null?'':c>=0?'up':'down'}">${v==null?'&mdash;':v} <small>${c==null?'':raw!=null?chgTxt(raw,c):(c>=0?'+':'')+c.toFixed(2)+'%'}</small></span></div>`).join('');
+    <div ${sym?`style="cursor:pointer" onclick="selectStock('${sym}')" title="Open ${n}${expTitle(sym)}"`:''}><span class="idx-name">${n}</span><span class="idx-val ${c==null?'':c>=0?'up':'down'}">${v==null?'&mdash;':v} <small>${c==null?'':raw!=null?chgTxt(raw,c):(c>=0?'+':'')+c.toFixed(2)+'%'}</small></span>${expLine(sym)}</div>`).join('');
   document.getElementById('tickerEdit').onclick=openTickerEditor;
 }
 function openTickerEditor(){

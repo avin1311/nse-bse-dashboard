@@ -163,6 +163,7 @@ function parseChartPayload(json, requestedSymbol) {
     currency: meta.currency,
     marketState: meta.marketState,
     exchangeName: meta.exchangeName,
+    asOf: meta.regularMarketTime || (timestamps.length ? timestamps[timestamps.length - 1] : null),
     series
   };
 }
@@ -2601,7 +2602,7 @@ async function getMcGlobal() {
   const rows = {};
   (j.dataList || []).forEach(g => (g.data || []).forEach(a => {
     const price = Number(String(a[idx.price]).replace(/,/g, '')), pc = Number(String(a[idx.percent_change]).replace(/,/g, ''));
-    if (isFinite(price) && price > 0) rows[a[idx.symbol]] = { price, changePct: isFinite(pc) ? pc : 0, marketState: a[idx.state], source: 'moneycontrol' };
+    if (isFinite(price) && price > 0) rows[a[idx.symbol]] = { price, changePct: isFinite(pc) ? pc : 0, marketState: a[idx.state], asOf: Math.floor(Date.now() / 1000), source: 'moneycontrol' };
   }));
   mcCache = { t: Date.now(), rows };
   return rows;
@@ -2617,7 +2618,7 @@ app.get('/api/global-quotes', async (req, res) => {
         const c = await getChartData(d.y, '1d', '5m');
         if (!c || c.price == null) throw new Error('no price');
         const changePct = c.prevClose ? (c.price / c.prevClose - 1) * 100 : 0;
-        return { key: d.key, name: d.name, price: c.price, changePct, marketState: c.marketState, source: 'yahoo' };
+        return { key: d.key, name: d.name, price: c.price, changePct, marketState: c.marketState, asOf: c.asOf || null, source: 'yahoo' };
       } catch (e1) { try { return await fromMc(); } catch (e2) { throw new Error(e1.message + '; ' + e2.message); } }
     } catch (e) { return { key: d.key, name: d.name, error: String(e.message || e).slice(0, 120) }; }
   }));
@@ -2625,7 +2626,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-24-r57 (studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-25-r58 (IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

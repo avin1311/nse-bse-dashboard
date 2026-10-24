@@ -4768,12 +4768,15 @@ function startFallbackPoll(d) {
 }
 
 
+function istStamp(sec){ if(!sec) return ''; const d=new Date(sec*1000); try{ return d.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})+' IST'; }catch(e){ return ''; } }
+function istNow(){ try{ return new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata',weekday:'short',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST'; }catch(e){ return ''; } }
+setInterval(()=>{ const c=document.getElementById('istClock'); if(c) c.textContent=istNow(); },1000);
 function renderGlobalBar(items){
   const el=document.getElementById('globalBar'); if(!el) return;
-  el.innerHTML='<span class="idx-name" style="align-self:center;font-weight:600;padding-right:4px;" title="Overseas markets that influence the Indian open">GLOBAL</span>'+items.map(i=>{
+  el.innerHTML='<span class="idx-name" style="align-self:center;font-weight:600;padding-right:4px;" title="Overseas markets that influence the Indian open">GLOBAL<span id="istClock" style="display:block;font-weight:400;color:var(--text3);font-size:10px;white-space:nowrap">'+istNow()+'</span></span>'+items.map(i=>{
     if(i.error||i.price==null) return `<div title="Live price not available: ${(i.error||'').replace(/"/g,'')}"><span class="idx-name">${i.name}</span><span class="idx-val" style="color:var(--text3)">&mdash;</span></div>`;
-    const c=i.changePct||0, closed=i.marketState&&i.marketState!=='REGULAR'&&i.key!=='GIFTNIFTY';
-    return `<div title="${closed?'Market closed, showing last close':'Live'}"><span class="idx-name">${i.name}${closed?' (closed)':''}</span><span class="idx-val ${c>=0?'up':'down'}">${i.price.toLocaleString('en-IN',{maximumFractionDigits:2})} <small>${chgTxt(i.price,c)}</small></span></div>`;}).join('');
+    const c=i.changePct||0, closed=i.marketState&&i.marketState!=='REGULAR'&&i.key!=='GIFTNIFTY', st=istStamp(i.asOf);
+    return `<div title="${closed?'Market closed, showing last close':'Live'}${st?'. Last update '+st:''}"><span class="idx-name">${i.name}${closed?' (closed)':''}</span><span class="idx-val ${c>=0?'up':'down'}">${i.price.toLocaleString('en-IN',{maximumFractionDigits:2})} <small>${chgTxt(i.price,c)}</small></span>${st?'<span class="idx-name" style="font-size:10px;color:var(--text3)">'+st+'</span>':''}</div>`;}).join('');
 }
 async function refreshGlobalLive(){
   try{ const r=await fetch('/api/global-quotes',{cache:'no-store'}); const j=await r.json(); if(j.items) renderGlobalBar(j.items); }catch(e){ /* keep last values */ }

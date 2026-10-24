@@ -131,4 +131,77 @@ function aggregateTargets(all, nStocks) {
   rows.sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.side < b.side ? -1 : a.side > b.side ? 1 : a.stop - b.stop || a.target - b.target));
   return { stocks: nStocks, from: ts[0] || null, to: ts[ts.length - 1] || null, hold: HOLD, rows };
 }
-module.exports = { study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets };
+
+// ---- Target study v2: the same signals and baseline, split by market type and by entry filters (to see whether any filter lifts the hit rate above break-even)
+const DT2 = 0.4;
+function niftyMap(N) { // per Nifty session: that day's move, and whether it closed above its own 50-day average with a rising 20-day slope
+  const m = {}, cl = N.map(x => x.c);
+  for (let i = 1; i < N.length; i++) {
+    const day = Math.floor((N[i].t + 19800) / 86400), pct = (cl[i] / cl[i - 1] - 1) * 100; let tr = 0;
+    if (i >= 50) { const ma = cl.slice(i - 49, i + 1).reduce((a, b) => a + b, 0) / 50, ma20 = cl.slice(i - 19, i + 1).reduce((a, b) => a + b, 0) / 20, ma20p = i >= 25 ? cl.slice(i - 24, i - 4).reduce((a, b) => a + b, 0) / 20 : ma20; tr = cl[i] > ma && ma20 > ma20p ? 1 : cl[i] < ma && ma20 < ma20p ? -1 : 0; }
+    m[day] = { pct, dt: pct >= DT2 ? 'up' : pct <= -DT2 ? 'down' : 'flat', tr };
+  }
+  return m;
+}
+function feat(C, k, dir, NM) {
+  const day = Math.floor((C[k].t + 19800) / 86400), n = NM[day] || { dt: 'flat', tr: 0 }, f = new Set(['all']);
+  f.add('mkt-' + n.dt); f.add(n.tr === 0 ? 'trend-neutral' : n.tr === dir ? 'trend-with' : 'trend-against');
+  const vs = C.slice(Math.max(0, k - 20), k).map(x => x.v || 0), va = vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0, volHi = va > 0 && (C[k].v || 0) >= 1.5 * va; if (volHi) f.add('volume 1.5x');
+  const w = C.slice(Math.max(0, k - 251), k + 1), hi = Math.max(...w.map(x => x.h)), lo = Math.min(...w.map(x => x.l)), near = dir > 0 ? C[k].c >= hi * 0.95 : C[k].c <= lo * 1.05; if (near) f.add('near 52wk extreme');
+  const rng = C.slice(Math.max(0, k - 13), k + 1).reduce((a, x) => a + (x.h - x.l), 0) / Math.min(14, k + 1) / C[k].c * 100; if (rng >= 2) f.add('wide range (2%+/day)');
+  if (n.tr === dir && volHi) f.add('with trend AND volume');
+  if (n.tr === dir && near) f.add('with trend AND near extreme');
+  return [...f];
+}
+function targetStudy2(E, sym, C, cost, NM) {
+  const k0 = Math.max(130, C.length - 260), k1 = C.length - 1 - HOLD - 1; if (C.length < 200 || k1 <= k0) return [];
+  const sc = scores(E, sym, C, k0, k1), recs = [];
+  const add = (grp, k, dir) => { const fs = feat(C, k, dir, NM); SP.forEach(sp => TG.forEach(tg => { const r = outcome(C, k, dir, sp, tg, cost); fs.forEach(fl => recs.push({ g: grp, dir, sp, tg, t: C[k].t, o: r.o, ret: r.ret, fl })); })); };
+  for (let k = k0; k <= k1; k++) { const s = sc[k]; if (s && Math.abs(s.a) >= 3) add('signal', k, Math.sign(s.a)); if ((k - k0) % 5 === 0) { add('base', k, 1); add('base', k, -1); } }
+  return recs;
+}
+function aggregateTargets2(all, nStocks) {
+  const r2 = x => Math.round(x * 100) / 100, avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+  const ts = all.map(x => x.t).sort((a, b) => a - b), mid = ts[Math.floor(ts.length / 2)], key = {}, rows = [];
+  all.forEach(x => { const k = [x.g, x.dir > 0 ? 'BUY' : 'SELL', x.sp, x.tg, x.fl].join('|'); (key[k] = key[k] || []).push(x); });
+  Object.entries(key).forEach(([k, a]) => { const [g, side, sp, tg, fl] = k.split('|'); if (a.length < 30) return; const T = a.filter(x => x.o === 'T').length, S = a.filter(x => x.o === 'S').length, o = a.filter(x => x.t < mid), nw = a.filter(x => x.t >= mid);
+    rows.push({ group: g, side, stop: +sp, target: +tg, filter: fl, n: a.length, hitT: Math.round(T / a.length * 100), hitS: Math.round(S / a.length * 100), avg: r2(avg(a.map(x => x.ret))), older: r2(avg(o.map(x => x.ret))), newer: r2(avg(nw.map(x => x.ret))), nOld: o.length, nNew: nw.length, needWin: r2(((+sp + 0.15) / (+sp + +tg)) * 100) }); });
+  rows.forEach(r => { r.both = r.older > 0 && r.newer > 0; });
+  return { stocks: nStocks, from: ts[0] || null, to: ts[ts.length - 1] || null, hold: HOLD, rows, note: 'Signal and baseline trades by market type (Nifty daily move at the signal, +-0.4%), Nifty trend (above/below its 50-day average with the 20-day average rising/falling) and entry filters. 10 sessions, costs included. Many combinations are compared, so a few will look good by chance: only trust one that is positive in BOTH halves with a large n.' };
+}
+
+// ---- Options study (index spot proxy): the history of an option premium is not available, so each intraday index trade is replayed with a simple model:
+// option % move = delta x spot move / premium (delta 0.5, ATM premium = P % of spot), stop -12%, target +25% or +30%, out at 15:30, round-trip cost 2% of premium.
+// Theta (time decay) and gamma are ignored: decay would make the real result a little worse on slow days.
+const O_DELTA = 0.5, O_P = [0.5, 0.8], O_STOP = 12, O_TG = [25, 30], O_COST = 2;
+function optStudy(trades, bars) {
+  const idx = new Map(); bars.forEach((b, i) => idx.set(b.t, i)); const recs = [];
+  trades.forEach(tr => {
+    if (!tr.closed || !tr.entry) return; const dir = /^(BUY|LONG|UP|CALL)/i.test(tr.side) ? 1 : -1;
+    let i = idx.get(tr.t - 899); if (i == null) { i = bars.findIndex(b => b.t + 899 >= tr.t); if (i < 0) return; }
+    const day = Math.floor((tr.t + 19800) / 86400), e = tr.entry;
+    O_P.forEach(P => O_TG.forEach(TG => {
+      let o = 'E', ret = null, mfe = 0;
+      for (let j = i + 1; j < bars.length; j++) {
+        const b = bars[j]; if (Math.floor((b.t + 19800) / 86400) !== day) { ret = ret == null ? 0 : ret; break; }
+        const fav = O_DELTA * (dir > 0 ? (b.h - e) / e * 100 : (e - b.l) / e * 100) / P * 100, adv = O_DELTA * (dir > 0 ? (e - b.l) / e * 100 : (b.h - e) / e * 100) / P * 100; mfe = Math.max(mfe, fav);
+        if (adv >= O_STOP) { o = 'S'; ret = -O_STOP; break; }
+        if (fav >= TG) { o = 'T'; ret = TG; break; }
+        const last = Math.floor(((b.t + 19800) % 86400) / 60) >= 915 - 15; if (last) { ret = O_DELTA * dir * (b.c - e) / e * 100 / P * 100; break; }
+      }
+      if (ret == null) ret = 0; recs.push({ kind: (tr.sym || '') + ' ' + (tr.setup || tr.engine || 'idx') + ' ' + (dir > 0 ? 'CALL' : 'PUT'), k2: (tr.setup || tr.engine || 'idx') + ' ' + (dir > 0 ? 'CALL' : 'PUT'), dt: tr.dt || 'n/a', P, tg: TG, t: tr.t, o, ret: ret - O_COST, mfe });
+    }));
+  });
+  return recs;
+}
+function aggregateOpt(all) {
+  const r2 = x => Math.round(x * 100) / 100, avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+  const ts = all.map(x => x.t).sort((a, b) => a - b), mid = ts[Math.floor(ts.length / 2)], key = {}, rows = [];
+  const put = (k, x) => (key[k] = key[k] || []).push(x);
+  all.forEach(x => { [['ALL', 'all'], ['ALL', 'day ' + x.dt], [x.k2, 'all'], [x.k2, 'day ' + x.dt]].forEach(([g, d]) => put([g, d, x.P, x.tg].join('|'), x)); });
+  Object.entries(key).forEach(([k, a]) => { const [g, d, P, tg] = k.split('|'); if (a.length < 20) return; const T = a.filter(x => x.o === 'T').length, S = a.filter(x => x.o === 'S').length, o = a.filter(x => x.t < mid), nw = a.filter(x => x.t >= mid);
+    rows.push({ kind: g, when: d, premiumPct: +P, target: +tg, n: a.length, hitT: Math.round(T / a.length * 100), hitS: Math.round(S / a.length * 100), exitEOD: Math.round((a.length - T - S) / a.length * 100), avg: r2(avg(a.map(x => x.ret))), older: r2(avg(o.map(x => x.ret))), newer: r2(avg(nw.map(x => x.ret))), needWin: r2((O_STOP + O_COST) / (O_STOP + +tg) * 100) }); });
+  rows.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.when < b.when ? -1 : a.when > b.when ? 1 : a.premiumPct - b.premiumPct || a.target - b.target));
+  return { trades: all.length / (O_P.length * O_TG.length), from: ts[0] || null, to: ts[ts.length - 1] || null, rows, model: { delta: O_DELTA, premiumPctOfSpot: O_P, stop: O_STOP, targets: O_TG, cost: O_COST } };
+}
+module.exports = { study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };

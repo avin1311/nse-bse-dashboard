@@ -2625,7 +2625,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-23-r56 (target study: how often stocks reach +3 or +4 percent before a 2 or 3 percent stop; stop after T1 at entry plus costs; alert sound once; index bar order saved)';
+const BUILD = '2026-10-24-r57 (studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3347,6 +3347,46 @@ app.post('/api/agreement/target-study', async (req, res) => {
     const out = St.aggregateTargets(all, n); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
     tgStudy.result = out; tgStudy.at = out.at; tgStudy.progress = 'done'; await storeSet('store:target-study', out).catch(() => {});
   })().catch(e => { tgStudy.err = e.message; }).finally(() => { tgStudy.running = false; });
+});
+
+// ---- Target study v2 (market type + entry filters) and the options study (index spot proxy). After hours only, read-only.
+let tg2Study = { running: false, progress: '', result: null, at: null, err: null }, opStudy = { running: false, progress: '', result: null, at: null, err: null };
+storeGet('store:target-study2', null).then(v => { if (v && v.rows) { tg2Study.result = v; tg2Study.at = v.at || null; } }).catch(() => {});
+storeGet('store:options-study', null).then(v => { if (v && v.rows) { opStudy.result = v; opStudy.at = v.at || null; } }).catch(() => {});
+const studyBusy = () => tgStudy.running || agStudy.running || tg2Study.running || opStudy.running;
+const studyHours = () => { const p = istParts(); return p.dow >= 1 && p.dow <= 5 && p.mins >= 540 && p.mins <= 945; };
+app.get('/api/agreement/target-study2', (req, res) => res.json({ running: tg2Study.running, progress: tg2Study.progress, at: tg2Study.at, err: tg2Study.err, result: tg2Study.result }));
+app.post('/api/agreement/target-study2', async (req, res) => {
+  if (studyHours()) return res.status(409).json({ error: 'not during market hours (09:00-15:45 IST): it uses a lot of CPU' });
+  if (studyBusy()) return res.json({ busy: true, progress: tg2Study.progress });
+  const E = Engines.load(); if (!E) return res.status(500).json({ error: 'browser engines failed to load: ' + Engines.error() });
+  tg2Study = { ...tg2Study, running: true, progress: 'starting', err: null }; res.json({ started: true });
+  (async () => {
+    const St = require('./agstudy'), all = [], t0 = Date.now(); let n = 0;
+    const NM = St.niftyMap(toBars(await getUpstoxCandles('NIFTY', '1D')).filter(x => x.c > 0));
+    for (const sym of FNO_FALLBACK) {
+      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { all.push(...St.targetStudy2(E, sym, C, Calls.costPct('swing'), NM)); n++; } } catch (e) {}
+      tg2Study.progress = `${n} stocks done (${Math.round((Date.now() - t0) / 1000)} s)`; await new Promise(r => setTimeout(r, 20));
+    }
+    const out = St.aggregateTargets2(all, n); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
+    tg2Study.result = out; tg2Study.at = out.at; tg2Study.progress = 'done'; await storeSet('store:target-study2', out).catch(() => {});
+  })().catch(e => { tg2Study.err = e.message; }).finally(() => { tg2Study.running = false; });
+});
+app.get('/api/agreement/options-study', (req, res) => res.json({ running: opStudy.running, progress: opStudy.progress, at: opStudy.at, err: opStudy.err, result: opStudy.result }));
+app.post('/api/agreement/options-study', async (req, res) => {
+  if (studyHours()) return res.status(409).json({ error: 'not during market hours (09:00-15:45 IST): it uses a lot of CPU' });
+  if (studyBusy()) return res.json({ busy: true, progress: opStudy.progress });
+  opStudy = { ...opStudy, running: true, progress: 'starting', err: null }; res.json({ started: true });
+  (async () => {
+    const St = require('./agstudy'), all = [], t0 = Date.now(); let n = 0;
+    for (const u of INDEX_UNDERLYINGS) {
+      const h = await getIndex15mHistory(u), daily = toBars(await getUpstoxCandles(u, '1D')).slice(-1300);
+      const trades = await Calls.walkIndex(u, h.bars, { mode: 'intraday', dailyBars: daily }, yieldLoop);
+      all.push(...St.optStudy(trades.map(x => ({ ...x, sym: u })), h.bars)); n++; opStudy.progress = `${n} of ${INDEX_UNDERLYINGS.length} indices done`;
+    }
+    const out = St.aggregateOpt(all); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
+    opStudy.result = out; opStudy.at = out.at; opStudy.progress = 'done'; await storeSet('store:options-study', out).catch(() => {});
+  })().catch(e => { opStudy.err = e.message; }).finally(() => { opStudy.running = false; });
 });
 
 // ---- Trigger watch (Chart patterns "decision zone"): wait for a 15-minute close beyond a pattern's trigger level, then add

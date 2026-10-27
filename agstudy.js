@@ -204,4 +204,64 @@ function aggregateOpt(all) {
   rows.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.when < b.when ? -1 : a.when > b.when ? 1 : a.premiumPct - b.premiumPct || a.target - b.target));
   return { trades: all.length / (O_P.length * O_TG.length), from: ts[0] || null, to: ts[ts.length - 1] || null, rows, model: { delta: O_DELTA, premiumPctOfSpot: O_P, stop: O_STOP, targets: O_TG, cost: O_COST } };
 }
-module.exports = { study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };
+
+// ---- Research studies on daily history (read-only): relative-strength momentum, gap reversal vs continuation, and index behaviour by weekday (expiry day).
+const dayKey = t => Math.floor((t + 19800) / 86400);
+const r2_ = x => Math.round(x * 100) / 100, avg_ = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+
+// Momentum: every REB sessions rank the stocks on their return from L sessions ago to SKIP sessions ago; hold the top fifth (long) and the bottom fifth (short) for H sessions.
+function momentumStudy(D, cal, cost) {
+  const maps = {}; Object.entries(D).forEach(([sym, bars]) => { const m = new Map(); bars.forEach(b => m.set(dayKey(b.t), b.c)); maps[sym] = m; });
+  const days = cal.map(b => dayKey(b.t)), SKIP = 5, REB = 10, rows = [];
+  [60, 120, 250].forEach(L => [10, 21].forEach(H => {
+    const reb = [];
+    for (let i = L + SKIP; i + H < days.length; i += REB) {
+      const sc = [];
+      Object.keys(maps).forEach(sym => { const m = maps[sym], c0 = m.get(days[i]), cs = m.get(days[i - SKIP]), cl = m.get(days[i - L]), cf = m.get(days[i + H]); if (c0 > 0 && cs > 0 && cl > 0 && cf > 0) sc.push({ s: cs / cl - 1, f: (cf / c0 - 1) * 100 }); });
+      if (sc.length < 50) continue; sc.sort((a, b) => b.s - a.s); const q = Math.floor(sc.length / 5), top = sc.slice(0, q), bot = sc.slice(-q), all = avg_(sc.map(x => x.f));
+      reb.push({ t: cal[i].t, top: avg_(top.map(x => x.f)), bot: avg_(bot.map(x => x.f)), all, q });
+    }
+    if (reb.length < 6) return; const mid = reb[Math.floor(reb.length / 2)].t, half = (f, a) => a.length ? r2_(avg_(a.map(f))) : null;
+    const topN = r => r.top - cost, shortN = r => -r.bot - cost, ls = r => r.top - r.bot - 2 * cost;
+    rows.push({ lookback: L, hold: H, rebalances: reb.length, perLeg: reb[0].q, trades: reb.reduce((s, r) => s + r.q, 0), from: reb[0].t, to: reb[reb.length - 1].t,
+      topAvg: half(topN, reb), universeAvg: half(r => r.all, reb), bottomAvg: half(r => r.bot, reb), longVsUniverse: half(r => r.top - r.all, reb), shortAvg: half(shortN, reb), longShort: half(ls, reb),
+      topBeatUniversePct: Math.round(reb.filter(r => r.top > r.all).length / reb.length * 100), longShortPositivePct: Math.round(reb.filter(r => ls(r) > 0).length / reb.length * 100),
+      older: half(topN, reb.filter(r => r.t < mid)), newer: half(topN, reb.filter(r => r.t >= mid)), olderLS: half(ls, reb.filter(r => r.t < mid)), newerLS: half(ls, reb.filter(r => r.t >= mid)) });
+  }));
+  return rows;
+}
+
+// Gaps: a stock that opens 1%+ away from yesterday's close. Daily bars only: if the stop and the target both fall inside the day the stop is assumed first.
+function gapOutcome(b, dir, stopPct, tgtPct, cost) {
+  const o = b.o, st = o * (1 - dir * stopPct / 100), tg = o * (1 + dir * tgtPct / 100);
+  if (dir > 0 ? b.l <= st : b.h >= st) return -stopPct - cost;
+  if (dir > 0 ? b.h >= tg : b.l <= tg) return tgtPct - cost;
+  return dir * (b.c - o) / o * 100 - cost;
+}
+function gapStudy(D, nifty, cost) {
+  const ng = new Map(); for (let i = 1; i < nifty.length; i++) ng.set(dayKey(nifty[i].t), (nifty[i].o / nifty[i - 1].c - 1) * 100);
+  const ev = [];
+  Object.entries(D).forEach(([sym, bars]) => { for (let k = 1; k < bars.length; k++) { const b = bars[k], p = bars[k - 1]; if (!(b.o > 0 && p.c > 0)) continue; const gap = (b.o / p.c - 1) * 100; if (Math.abs(gap) < 1 || Math.abs(gap) > 12) continue;
+    const n = ng.get(dayKey(b.t)), broad = n != null && Math.sign(n) === Math.sign(gap) && Math.abs(n) >= 0.4, fade = -Math.sign(gap), ga = Math.abs(gap);
+    ev.push({ t: b.t, side: gap < 0 ? 'gap down' : 'gap up', bucket: ga < 2 ? '1-2%' : ga < 3 ? '2-3%' : '3%+', ctx: broad ? 'market-wide' : 'stock-specific',
+      V: { 'fade: back to yesterday close (stop 1%)': gapOutcome(b, fade, 1, ga, cost), 'fade: +1.5% (stop 1%)': gapOutcome(b, fade, 1, 1.5, cost), 'follow: 1.5% (stop 1%)': gapOutcome(b, -fade, 1, 1.5, cost), 'fade: hold to close': fade * (b.c - b.o) / b.o * 100 - cost, 'follow: hold to close': -fade * (b.c - b.o) / b.o * 100 - cost } }); } });
+  if (!ev.length) return { events: 0, rows: [] };
+  const ts = ev.map(e => e.t).sort((a, b) => a - b), mid = ts[Math.floor(ts.length / 2)], rows = [];
+  [['all', () => true], ['market-wide', e => e.ctx === 'market-wide'], ['stock-specific', e => e.ctx === 'stock-specific'], ['1-2%', e => e.bucket === '1-2%'], ['2-3%', e => e.bucket === '2-3%'], ['3%+', e => e.bucket === '3%+']].forEach(([lab, f]) => ['gap down', 'gap up'].forEach(side => {
+    const a = ev.filter(e => e.side === side && f(e)); if (a.length < 30) return;
+    Object.keys(a[0].V).forEach(v => { const x = a.map(e => e.V[v]), o = a.filter(e => e.t < mid).map(e => e.V[v]), nw = a.filter(e => e.t >= mid).map(e => e.V[v]);
+      rows.push({ group: lab, side, variant: v, n: a.length, win: Math.round(x.filter(y => y > 0).length / x.length * 100), avg: r2_(avg_(x)), older: r2_(avg_(o)), newer: r2_(avg_(nw)), both: avg_(o) > 0 && avg_(nw) > 0 }); }); }));
+  return { events: ev.length, from: ts[0], to: ts[ts.length - 1], rows };
+}
+
+// Index behaviour by weekday (the expiry weekday is read from the live contract list): range, direction, trend days.
+function expiryStudy(bars, splitDay) {
+  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], out = [];
+  [['since ' + new Date(splitDay * 86400000).toISOString().slice(0, 10), b => dayKey(b.t) >= splitDay], ['before', b => dayKey(b.t) < splitDay]].forEach(([lab, f]) => {
+    const g = {}; for (let k = 1; k < bars.length; k++) { const b = bars[k], p = bars[k - 1]; if (!f(b) || !(b.o > 0 && p.c > 0 && b.h > b.l)) continue; const wd = new Date(b.t * 1000 + 19800000).getUTCDay(); if (wd < 1 || wd > 5) continue;
+      (g[wd] = g[wd] || []).push({ rng: (b.h - b.l) / p.c * 100, oc: (b.c - b.o) / b.o * 100, gap: (b.o / p.c - 1) * 100, cc: (b.c / p.c - 1) * 100, trend: Math.abs(b.c - b.o) / (b.h - b.l) >= 0.6, closeTop: (b.c - b.l) / (b.h - b.l) >= 0.8, closeBot: (b.c - b.l) / (b.h - b.l) <= 0.2 }); }
+    Object.keys(g).forEach(wd => { const a = g[wd]; out.push({ period: lab, weekday: names[wd], n: a.length, avgRange: r2_(avg_(a.map(x => x.rng))), avgAbsOpenClose: r2_(avg_(a.map(x => Math.abs(x.oc)))), avgOpenClose: r2_(avg_(a.map(x => x.oc))), avgCloseVsPrev: r2_(avg_(a.map(x => x.cc))), avgAbsGap: r2_(avg_(a.map(x => Math.abs(x.gap)))), upPct: Math.round(a.filter(x => x.cc > 0).length / a.length * 100), trendDayPct: Math.round(a.filter(x => x.trend).length / a.length * 100), closeNearHighPct: Math.round(a.filter(x => x.closeTop).length / a.length * 100), closeNearLowPct: Math.round(a.filter(x => x.closeBot).length / a.length * 100) }); }); });
+  return out;
+}
+
+module.exports = { momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };

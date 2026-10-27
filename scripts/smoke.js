@@ -26,6 +26,11 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'),
   const trades = []; for (let d = 1; d < 40; d += 2) trades.push({ sym: 'NIFTY', t: bars[d * 25 + 3].t + 899, side: d % 4 === 1 ? 'BUY' : 'SELL', setup: 'x', closed: true, entry: bars[d * 25 + 3].c, dt: d % 3 ? 'up' : 'flat' });
   const A = St.aggregateOpt(St.optStudy(trades, bars)); okk = A.rows.length > 0 && A.rows.some(x => x.kind === 'ALL' && x.when === 'all' && x.n >= 20 && x.hitT + x.hitS + x.exitEOD >= 99); msg = ' (' + A.rows.length + ' rows)'; } catch (e) { msg = ': ' + e.message; }
   ok(okk, 'options study runs on synthetic data' + msg); }
+{ let okk = false, msg = ''; try { const St = require('../agstudy'); let sd = 3; const rnd = () => (sd = (sd * 1664525 + 1013904223) % 4294967296) / 4294967296; const mkB = () => { const B = []; let p = 100; for (let i = 0; i < 700; i++) { const o = p * (1 + (rnd() - 0.5) * 0.03); p = o * (1 + (rnd() - 0.5) * 0.03); B.push({ t: 1600000000 + i * 86400, o, h: Math.max(o, p) * 1.004, l: Math.min(o, p) * 0.996, c: p, v: 1 }); } return B; };
+  const D = {}; for (let i = 0; i < 60; i++) D['S' + i] = mkB(); const N = mkB();
+  const m = St.momentumStudy(D, N, 0.15), g = St.gapStudy(D, N, 0.1), e = St.expiryStudy(N, 18000);
+  okk = m.length > 0 && m.every(r => r.rebalances >= 6 && r.trades > 0) && g.events > 100 && g.rows.some(r => r.group === 'all' && r.side === 'gap down' && /fade/.test(r.variant)) && e.some(r => r.weekday === 'Tue'); msg = ' (' + m.length + ' momentum rows, ' + g.events + ' gaps)'; } catch (x) { msg = ': ' + x.message; }
+  ok(okk, 'research studies (momentum, gaps, weekdays) run on synthetic data' + msg); }
 { const C = require('../calls.js'); const mk = (t, o, h, l, c) => ({ t, o, h, l, c, v: 1 });
   const buy = C.track({ side: 'BUY', mode: 'swing', entry: 100, sl: 90, targets: [110, 120], t: 1000 }, [mk(2000, 100, 111, 99, 108), mk(3000, 108, 109, 94, 96)], 4000);
   const sell = C.track({ side: 'SELL', mode: 'intraday', entry: 200, sl: 210, targets: [190, 180], t: 1000 }, [mk(2000, 200, 201, 189, 192), mk(3000, 192, 201, 191, 199)], 4000);

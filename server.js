@@ -2641,7 +2641,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-27-r61 (stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-28-r62 (research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3367,10 +3367,12 @@ app.post('/api/agreement/target-study', async (req, res) => {
 });
 
 // ---- Target study v2 (market type + entry filters) and the options study (index spot proxy). After hours only, read-only.
+let rsStudy = { running: false, progress: '', result: null, at: null, err: null };
+storeGet('store:research-study', null).then(v => { if (v && v.momentum) { rsStudy.result = v; rsStudy.at = v.at || null; } }).catch(() => {});
 let tg2Study = { running: false, progress: '', result: null, at: null, err: null }, opStudy = { running: false, progress: '', result: null, at: null, err: null };
 storeGet('store:target-study2', null).then(v => { if (v && v.rows) { tg2Study.result = v; tg2Study.at = v.at || null; } }).catch(() => {});
 storeGet('store:options-study', null).then(v => { if (v && v.rows) { opStudy.result = v; opStudy.at = v.at || null; } }).catch(() => {});
-const studyBusy = () => tgStudy.running || agStudy.running || tg2Study.running || opStudy.running;
+const studyBusy = () => tgStudy.running || agStudy.running || tg2Study.running || opStudy.running || rsStudy.running;
 const studyHours = () => { const p = istParts(); return p.dow >= 1 && p.dow <= 5 && p.mins >= 540 && p.mins <= 945; };
 app.get('/api/agreement/target-study2', (req, res) => res.json({ running: tg2Study.running, progress: tg2Study.progress, at: tg2Study.at, err: tg2Study.err, result: tg2Study.result }));
 app.post('/api/agreement/target-study2', async (req, res) => {
@@ -3404,6 +3406,25 @@ app.post('/api/agreement/options-study', async (req, res) => {
     const out = St.aggregateOpt(all); out.at = Date.now(); out.tookS = Math.round((Date.now() - t0) / 1000);
     opStudy.result = out; opStudy.at = out.at; opStudy.progress = 'done'; await storeSet('store:options-study', out).catch(() => {});
   })().catch(e => { opStudy.err = e.message; }).finally(() => { opStudy.running = false; });
+});
+
+app.get('/api/research-study', (req, res) => res.json({ running: rsStudy.running, progress: rsStudy.progress, at: rsStudy.at, err: rsStudy.err, result: rsStudy.result }));
+app.post('/api/research-study', async (req, res) => {
+  if (studyHours()) return res.status(409).json({ error: 'not during market hours (09:00-15:45 IST): it uses a lot of CPU' });
+  if (studyBusy()) return res.json({ busy: true, progress: rsStudy.progress });
+  rsStudy = { ...rsStudy, running: true, progress: 'starting', err: null }; res.json({ started: true });
+  (async () => {
+    const St = require('./agstudy'), t0 = Date.now(), D = {}; let n = 0;
+    const nifty = toBars(await getUpstoxCandles('NIFTY', '1D')).filter(x => x.c > 0);
+    for (const sym of FNO_FALLBACK) { try { const C = (await getHistUpstox(sym, 1300)).filter(x => x.c > 0 && x.o > 0); if (C.length >= 300) { D[sym] = C; n++; } } catch (e) {} rsStudy.progress = `${n} stocks loaded (${Math.round((Date.now() - t0) / 1000)} s)`; await new Promise(r => setTimeout(r, 20)); }
+    rsStudy.progress = 'momentum'; await yieldLoop(); const momentum = St.momentumStudy(D, nifty, Calls.costPct('swing'));
+    rsStudy.progress = 'gaps'; await yieldLoop(); const gaps = St.gapStudy(D, nifty, Calls.costPct('intraday'));
+    rsStudy.progress = 'expiry days'; await yieldLoop(); const expiry = {};
+    for (const u of ['NIFTY', 'BANKNIFTY', 'SENSEX']) { try { const bars = toBars(await getUpstoxCandles(u, '1D')).filter(x => x.c > 0 && x.o > 0).slice(-1300); let wd = null; try { const { list } = await getOptionContracts(u); const e = [...new Set(list.map(c => c.expiry))].sort().find(x => x >= istDate(0)); wd = e ? new Date(e + 'T00:00:00Z').toLocaleString('en-GB', { weekday: 'long', timeZone: 'UTC' }) : null; } catch (e) {}
+      expiry[u] = { expiryWeekday: wd, bars: bars.length, from: bars[0].t, to: bars[bars.length - 1].t, rows: St.expiryStudy(bars, Math.floor(Date.UTC(2025, 8, 1) / 86400000)) }; } catch (e) { expiry[u] = { error: e.message }; } }
+    const out = { stocks: n, from: nifty[0].t, to: nifty[nifty.length - 1].t, momentum, gaps, expiry, at: Date.now(), tookS: Math.round((Date.now() - t0) / 1000) };
+    rsStudy.result = out; rsStudy.at = out.at; rsStudy.progress = 'done'; await storeSet('store:research-study', out).catch(() => {});
+  })().catch(e => { rsStudy.err = e.message; }).finally(() => { rsStudy.running = false; });
 });
 
 // ---- Trigger watch (Chart patterns "decision zone"): wait for a 15-minute close beyond a pattern's trigger level, then add

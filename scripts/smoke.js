@@ -29,7 +29,11 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'),
 { const C = require('../calls.js'); const mk = (t, o, h, l, c) => ({ t, o, h, l, c, v: 1 });
   const buy = C.track({ side: 'BUY', mode: 'swing', entry: 100, sl: 90, targets: [110, 120], t: 1000 }, [mk(2000, 100, 111, 99, 108), mk(3000, 108, 109, 94, 96)], 4000);
   const sell = C.track({ side: 'SELL', mode: 'intraday', entry: 200, sl: 210, targets: [190, 180], t: 1000 }, [mk(2000, 200, 201, 189, 192), mk(3000, 192, 201, 191, 199)], 4000);
-  ok(buy.closed && buy.status === 'BREAKEVEN' && buy.exit === 100.15 && Math.abs(buy.pnlPct) < 0.02 && sell.status === 'BREAKEVEN' && sell.exit === 199.8 && Math.abs(sell.pnlPct) < 0.02, 'after T1 the stop sits at entry plus costs and a stop-out there nets about zero'); }
+  ok(buy.closed && buy.status === 'PROFIT' && buy.exit === 105 && buy.pnlPct > 4.5 && sell.status === 'PROFIT' && sell.exit === 195 && sell.pnlPct > 2.3, 'after T1 the stop locks half the risk (capped half-way to T1), so a stop-out there books a profit');
+  const old = C.track({ id: 'OLD-1', side: 'BUY', mode: 'swing', entry: 100, sl: 90, targets: [110, 120], t: 1000 }, [mk(2000, 100, 111, 99, 108), mk(3000, 108, 109, 94, 96)], 4000);
+  ok(old.status === 'BREAKEVEN' && old.exit === 100.15, 'live calls created before the lock date keep the entry-plus-costs stop');
+  const gap = C.track({ side: 'BUY', mode: 'swing', entry: 100, sl: 95, targets: [110, 120], t: 1000 }, [mk(2000, 100, 101, 99, 100), mk(3000, 92, 93, 90, 91)], 4000), gapS = C.track({ side: 'SELL', mode: 'swing', entry: 100, sl: 105, targets: [90, 80], t: 1000 }, [mk(2000, 100, 101, 99, 100), mk(3000, 108, 109, 106, 108)], 4000);
+  ok(gap.exit === 92 && gap.status === 'SL_HIT' && gapS.exit === 108 && gapS.status === 'SL_HIT', 'a gap through the stop fills at the open, not at the stop price'); }
 ok(/function newsAgo\(/.test(html) && /function newsEsc\(/.test(html), 'news helpers defined');
 ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length === 4 && /id="scanView"/.test(html) && /id="portView"/.test(html), 'four stock tabs plus the Scanner and Portfolio pages');
 {
@@ -91,7 +95,7 @@ ok(/id="viewTabs"/.test(html) && (html.match(/class="vtab-pane"/g) || []).length
   }
   const call = { side: 'BUY', mode: 'swing', entry: 100, sl: 95, targets: [105, 110, 120], t: 0 };
   ok(C.track(call, [{ t: 1, h: 106, l: 94, c: 100 }], 1e9).status === 'SL_HIT', 'trade calls: SL assumed first when both hit in one bar');
-  ok(C.track(call, [{ t: 1, h: 106, l: 99, c: 105 }, { t: 2, h: 106, l: 100, c: 101 }], 1e9).status === 'BREAKEVEN', 'trade calls: stop trails to entry after T1');
+  ok(C.track(call, [{ t: 1, h: 106, l: 99, c: 105 }, { t: 2, h: 106, l: 100, c: 101 }], 1e9).status === 'PROFIT', 'trade calls: stop locks a profit after T1');
 }
 
 // 2. server behaviour

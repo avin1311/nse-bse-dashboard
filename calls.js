@@ -168,21 +168,36 @@ function evaluateV2(bars, mode, opts = {}) {
  */
 const COST = { intraday: Number(process.env.COST_INTRADAY_PCT) || 0.10, swing: Number(process.env.COST_SWING_PCT) || 0.15 }; // round-trip % (brokerage, charges, slippage)
 function costPct(mode) { return COST[mode] != null ? COST[mode] : COST.swing; }
+// After Target 1 the stop moves to a LOCKED profit, not back to entry: entry + LOCK_R x the original risk (never more than half-way to T1,
+// never less than the round-trip costs), so a stop-out there books a small gain. Live calls created before LOCK_FROM keep the older
+// "entry plus costs" stop so open positions do not change rules under you; the lab and tests (calls without an id) always use the lock.
+const LOCK_R = process.env.LOCK_R != null && process.env.LOCK_R !== '' ? Number(process.env.LOCK_R) : 0.5;
+const LOCK_FROM = process.env.LOCK_FROM != null && process.env.LOCK_FROM !== '' ? Number(process.env.LOCK_FROM) : Date.UTC(2026, 9, 27, 18, 30) / 1000; // 28 Oct 2026 00:00 IST
 function track(call, bars, nowSec) {
   const sgn = call.side === 'BUY' ? 1 : -1;
   let sl = call.sl, hit = 0, status = 'ACTIVE', exit = null, exitT = null, last = call.entry, best = call.entry;
-  let beSl = null; // the stop after T1: entry plus the costs, so a stop-out there still pays the brokerage and charges
+  let beSl = null; // the stop after T1 (locked profit, or entry plus costs for older live calls)
+  const useLock = !(call.id && call.t < LOCK_FROM) && LOCK_R > 0, risk0 = Math.abs(call.entry - call.sl), cost0 = call.costPct != null ? call.costPct : costPct(call.mode);
   const limitT = call.limitT || (call.mode === 'intraday' ? istDayEnd(call.t) : call.t + 30 * 86400);
   let j = upto(bars, call.t) + 1; const start = j;
   for (; j < bars.length; j++) {
     const b = bars[j];
     if (b.t > limitT) { status = 'EXPIRED'; exit = last; exitT = limitT; break; }
     const stopHit = sgn === 1 ? b.l <= sl : b.h >= sl;
-    if (stopHit) { status = hit >= 1 && sl === beSl ? 'BREAKEVEN' : (hit >= 1 || (call.trailAtr && sgn * (sl - call.entry) > 0) ? 'PROFIT' : 'SL_HIT'); exit = sl; exitT = b.t; break; }
+    if (stopHit) {
+      exit = b.o != null && (sgn === 1 ? b.o < sl : b.o > sl) ? b.o : sl; exitT = b.t; // a bar that opens beyond the stop (a gap) fills at the open, not at the stop price
+      if (hit >= 1 && sl === beSl) { const net = sgn * (exit - call.entry) / call.entry * 100 - cost0; status = net > 0.05 ? 'PROFIT' : net < -0.05 ? 'SL_HIT' : 'BREAKEVEN'; }
+      else status = hit >= 1 || (call.trailAtr && sgn * (sl - call.entry) > 0) ? 'PROFIT' : 'SL_HIT';
+      break;
+    }
     for (let i = hit; i < call.targets.length; i++) {
       const tHit = sgn === 1 ? b.h >= call.targets[i] : b.l <= call.targets[i];
       if (!tHit) break;
-      hit = i + 1; if (hit === 1) { const cv = call.entry * (call.costPct != null ? call.costPct : costPct(call.mode)) / 100; sl = beSl = sgn === 1 ? Math.ceil((call.entry + cv) * 100) / 100 : Math.floor((call.entry - cv) * 100) / 100; } else if (hit === 2) sl = call.targets[0]; // trail: entry + costs after T1, T1 after T2
+      hit = i + 1;
+      if (hit === 1) {
+        const cv = call.entry * cost0 / 100, t1d = Math.abs(call.targets[0] - call.entry), dist = useLock ? Math.max(cv, Math.min(LOCK_R * risk0, 0.5 * t1d)) : cv;
+        sl = beSl = sgn === 1 ? Math.ceil((call.entry + dist) * 100) / 100 : Math.floor((call.entry - dist) * 100) / 100;
+      } else if (hit === 2) sl = call.targets[0]; // after T2 the stop trails to T1
       if (hit === call.targets.length) { status = 'TARGET_HIT'; exit = call.targets[i]; exitT = b.t; }
     }
     last = b.c;

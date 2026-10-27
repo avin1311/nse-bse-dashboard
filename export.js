@@ -3,7 +3,7 @@
 // recalculates the file.
 const ExcelJS = require('exceljs');
 
-const STATUS = { SL_HIT: 'STOP HIT', TARGET_HIT: 'ALL TARGETS', PROFIT: 'PROFIT (trailed)', BREAKEVEN: 'AT ENTRY', EXPIRED: 'TIME EXIT', MANUAL_EXIT: 'MANUAL EXIT' };
+const STATUS = { SL_HIT: 'STOP HIT', TARGET_HIT: 'ALL TARGETS', PROFIT: 'PROFIT (locked or trailed)', BREAKEVEN: 'AT ENTRY', EXPIRED: 'TIME EXIT', MANUAL_EXIT: 'MANUAL EXIT' };
 const SRC = { agreement: 'Agreement', pattern: 'Pattern', screener: 'Screener' };
 const ist = t => new Date((t + 19800) * 1000);
 const dayStr = t => ist(t).toISOString().slice(0, 10);

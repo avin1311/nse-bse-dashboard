@@ -1987,12 +1987,12 @@ function callEvents(c, before) {
   for (let i = before.hit + 1; i <= (c.targetsHit || 0); i++) {
     const px = c.targets[i - 1];
     out.push({ ...base, id: c.id + ':T' + i, kind: 'T' + i, level: 'good', price: px, pnlPct: null,
-      text: `🎯 ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? '. Stop moved to entry plus costs.' : '') });
+      text: `🎯 ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) hit Target ${i} at ₹${px}` + (i === 1 ? (c.activeSl != null && (c.side === 'BUY' ? 1 : -1) * (c.activeSl - c.entry) / c.entry * 100 > (c.costPct || 0.1) + 0.1 ? `. Stop moved up to ₹${c.activeSl}, which locks a small profit.` : '. Stop moved to entry plus costs.') : '') });
   }
   if (c.closed && !before.closed && c.status !== 'TARGET_HIT') {
     const k = c.status === 'SL_HIT' ? 'SL' : c.status === 'EXPIRED' ? 'EXPIRED' : 'BE';
-    const icon = k === 'SL' ? '🛑' : k === 'EXPIRED' ? '⏱' : '⚪';
-    const word = k === 'SL' ? 'hit its stop loss' : k === 'EXPIRED' ? 'expired' : 'was stopped at entry plus costs (after a target)';
+    const icon = k === 'SL' ? '🛑' : k === 'EXPIRED' ? '⏱' : c.status === 'PROFIT' ? '✅' : '⚪';
+    const word = k === 'SL' ? 'hit its stop loss' : k === 'EXPIRED' ? 'expired' : c.status === 'PROFIT' ? 'was stopped at its locked profit (after a target)' : 'was stopped at entry plus costs (after a target)';
     out.push({ ...base, id: c.id + ':' + k, kind: k, level: k === 'SL' ? 'bad' : 'info', price: c.exit, pnlPct: c.pnlPct,
       text: `${icon} ${tag}<b>${c.symbol}</b> ${c.side} (${c.mode}) ${word} at ₹${c.exit} (${pct(c.pnlPct)})` });
   } else if (c.closed && !before.closed) {
@@ -2547,6 +2547,7 @@ async function runCallsCycle(force) {
       // unproven (paper) intraday calls: none on below-normal volume, and at most UNPROVEN_SIDE_MAX open on one side at a time
       // (19 same-side shorts on 19 Oct were really one bet on Nifty); proven kinds are not limited here
       if (!g.proven && f.mode === 'intraday') {
+        if (UNPROVEN_FLAT_BLOCK && dtI_ === 'flat') { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, 'unproven kind on a flat index day: skipped (27 Oct: 4 of 5 such calls lost)'); continue; }
         if (f.checks && f.checks.vol === false) { gateBlocked(`${f.symbol} ${f.mode} ${f.side} low volume`, gk, 'unproven call on below-normal volume: skipped'); continue; }
         if (open_.filter(c => c.mode === 'intraday' && c.unproven && c.side === f.side).length >= UNPROVEN_SIDE_MAX) { gateBlocked(`unproven ${f.side} cap`, gk, `already ${UNPROVEN_SIDE_MAX} open unproven intraday ${f.side === 'BUY' ? 'buys' : 'sells'}: no more until one closes`); continue; }
       }
@@ -2640,7 +2641,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-25-r60 (Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-27-r61 (stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2817,6 +2818,7 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on';
 const UNPROVEN_SIDE_MAX = Number(process.env.UNPROVEN_SIDE_MAX) || 5;
+const UNPROVEN_FLAT_BLOCK = process.env.UNPROVEN_FLAT_BLOCK !== 'off'; // no unproven intraday stock calls while the index day type is flat (UNPROVEN_FLAT_BLOCK=off restores them)
 // index option calls: 'strict' (default) = only kinds proven by the lab; 'paper' = unproven ones too (marked). Options lose
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
 const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing

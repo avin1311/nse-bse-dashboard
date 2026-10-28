@@ -1688,10 +1688,36 @@ async function getUpstoxCandles(sym, tf) {
   return rows;
 }
 const YF_TF = { '1m': ['5d', '1m'], '5m': ['5d', '5m'], '15m': ['1mo', '15m'], '30m': ['1mo', '30m'], '1h': ['6mo', '60m'], '1D': ['2y', '1d'], '1W': ['5y', '1wk'], '1M': ['max', '1mo'] };
+// Indices have no traded volume of their own. Borrow the near-month futures volume (same timestamps) so the chart's
+// Volume button shows something real; the note says so. Returns a short text for the page, or null.
+const idxVolCache = {};
+async function withIndexVolume(sym, tf, rows) {
+  try {
+    if (!rows.length || rows.some(r => r.v > 0)) return null;
+    const u = String(sym).toUpperCase().replace(/\s+/g, '');
+    const name = /BANK/.test(u) ? 'BANKNIFTY' : /SENSEX/.test(u) ? 'SENSEX' : /^(NIFTY|NIFTY50)$/.test(u) ? 'NIFTY' : null;
+    if (!name) return 'Volume: this symbol has no traded volume';
+    const ck = name + '|' + tf, c = idxVolCache[ck];
+    let fut = c && Date.now() - c.t < 20000 ? c.d : null;
+    if (!fut) {
+      const keys = (await getIndexFutKeys())[name] || [];
+      if (!keys.length) return 'Volume: index futures not found';
+      fut = await fetchCandlesForKey(keys[0].key, tf);
+      idxVolCache[ck] = { t: Date.now(), d: fut };
+    }
+    const m = new Map(fut.map(f => [f.t, f.v]));
+    let hit = 0; rows.forEach(r => { const v = m.get(r.t); if (v > 0) { r.v = v; hit++; } });
+    return hit ? 'Volume: near-month futures volume (the index itself has none)' : 'Volume: futures volume not available for this timeframe';
+  } catch (e) { return 'Volume: unavailable (' + e.message + ')'; }
+}
 app.get('/api/candles/:symbol', async (req, res) => {
   const sym = req.params.symbol; const tf = req.query.tf || '5m';
   const errors = [];
-  try { const rows = await getUpstoxCandles(sym, tf); return res.json({ symbol: sym, tf, source: 'upstox', series: rows }); }
+  try {
+    const rows = await getUpstoxCandles(sym, tf);
+    const vn = await withIndexVolume(sym, tf, rows);
+    return res.json({ symbol: sym, tf, source: 'upstox', series: rows, volNote: vn });
+  }
   catch (e) { errors.push('Upstox: ' + e.message); }
   // last-good data from Upstox (clearly flagged) beats a different vendor's numbers or an error
   const last = candleCache[sym + '|' + tf];
@@ -2641,7 +2667,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-28-r63 (chart patterns on 5 and 15-minute index candles: small swing scales; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-28-r64 (Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));

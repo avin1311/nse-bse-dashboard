@@ -5162,12 +5162,12 @@ const ProChart = (function(){
   /* ---------- data ---------- */
   function heikin(C){ const o=[]; C.forEach((x,i)=>{ const cl=(x.open+x.high+x.low+x.close)/4; const op=i?(o[i-1].open+o[i-1].close)/2:(x.open+x.close)/2; o.push({time:x.time,open:op,close:cl,high:Math.max(x.high,op,cl),low:Math.min(x.low,op,cl),volume:x.volume}); }); return o; }
   async function loadCandles(){
-    S.err=null; S.source=null; S.srcNote=null; let cs=[];
+    S.err=null; S.source=null; S.srcNote=null; S.volNote=null; let cs=[];
     try{
       const resp=await fetch('/api/candles/'+encodeURIComponent(S.sym)+'?tf='+encodeURIComponent(S.tf),{cache:'no-store'});
       const data=await resp.json(); if(!resp.ok||data.error||!data.series||data.series.length<3) throw new Error(data.error||'no data');
       cs=data.series.map(p=>({time:Math.floor(p.t)+IST,open:p.o,high:p.h,low:p.l,close:p.c,volume:p.v||0}));
-      S.real=true; S.source=data.source; S.srcNote=data.note||null;
+      S.real=true; S.source=data.source; S.srcNote=data.note||null; S.volNote=data.volNote||null;
     }catch(e){ S.real=false; S.err=e.message||String(e); cs=[]; }
     S.candles=cs;
   }
@@ -5201,7 +5201,7 @@ const ProChart = (function(){
     r.querySelector('#pcType').value=S.type;
     r.querySelector('#pcType').addEventListener('change',e=>{ S.type=e.target.value; lsSet('pcType',S.type); rebuildMain(); });
     r.querySelector('#pcLog').addEventListener('click',()=>{ S.log=!S.log; applyScale(); markBtns(); });
-    r.querySelector('#pcVol').addEventListener('click',()=>{ S.vol=!S.vol; lsSet('pcVol',S.vol); paintVolume(); markBtns(); });
+    r.querySelector('#pcVol').addEventListener('click',()=>{ S.vol=!S.vol; lsSet('pcVol',S.vol); paintVolume(); markBtns(); const none=!S.candles.some(c=>c.volume>0); S.volMsg=S.vol?(none?(S.volNote||'No volume data for this symbol'):'Volume bars on'):'Volume bars off'; markBtns(); clearTimeout(S.volT); S.volT=setTimeout(()=>{ S.volMsg=null; markBtns(); },4000); });
     r.querySelector('#pcIndBtn').addEventListener('click',()=>togglePanel('pcIndPanel'));
     r.querySelector('#pcStratBtn').addEventListener('click',()=>togglePanel('pcStratPanel'));
     r.querySelector('#pcColor').addEventListener('input',e=>{ S.color=e.target.value; if(S.sel!=null&&S.drawings[S.sel]){ S.drawings[S.sel].color=S.color; saveDrawings(); redraw(); } });
@@ -5220,7 +5220,7 @@ const ProChart = (function(){
     r.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===S.tool));
     const n=document.getElementById('pcNote'); if(n){
       const src = S.source==='upstox' ? '<span style="color:var(--green)">Upstox data</span>' : S.source==='yahoo' ? '<span style="color:var(--amber)">Yahoo fallback data (Upstox unavailable'+(S.srcNote?': '+S.srcNote.replace(/</g,'&lt;'):'')+')</span>' : (S.err?'<span style="color:var(--red)">No real data</span>':'Loading\u2026');
-      n.innerHTML=src+' &middot; times in IST &middot; scroll = zoom, drag = pan, drag the price/time axis to scale &middot; drawings are saved per symbol in this browser. Educational only.'; }
+      n.innerHTML=src+(S.volMsg?' &middot; <b style="color:var(--amber)">'+S.volMsg.replace(/</g,'&lt;')+'</b>':S.volNote?' &middot; '+S.volNote.replace(/</g,'&lt;'):'')+' &middot; times in IST &middot; scroll = zoom, drag = pan, drag the price/time axis to scale &middot; drawings are saved per symbol in this browser. Educational only.'; }
   }
 
   /* ---------- indicators panel ---------- */
@@ -6148,7 +6148,7 @@ const PatternEngine = (function(){
 const PatternUI = (function(){
   const $=id=>document.getElementById(id);
   // the four timeframes shown side by side: [tf, short name, bar word]
-  const TFS=[['15m','Intraday (15m)','15-min'],['1h','Hourly','1-hour'],['1D','Daily','daily'],['1W','Weekly','weekly']];
+  const TFS=[['15m','Intraday','15-min'],['1h','Hourly','1-hour'],['1D','Daily','daily'],['1W','Weekly','weekly']];
   const TFN={'15m':'Intraday','1h':'Hourly','1D':'Daily','1W':'Weekly'}, ORD={'15m':0,'1h':1,'1D':2,'1W':3};
   const FRESH={'15m':12,'1h':7,'1D':5,'1W':3};   // a breakout counts as recent for this many bars (~3 h, ~1 day, 1 week, 3 weeks)
   const FORM={'15m':30,'1h':24,'1D':20,'1W':10}; // a forming pattern counts as recent if its last swing point is this recent
@@ -6157,6 +6157,12 @@ const PatternUI = (function(){
   const S={hover:null,sym:null,tf:'1D',candles:[],res:null,chart:null,series:null,extra:[],priceLines:[],sel:null,filter:'all',show:'recent',bias:'all',open:{},loading:false,src:''};
   const M={sym:null,tf:{}}; // per timeframe: {candles, full, res, src, stale, err, chart, series, extra, priceLines, sel}
   const TR={};              // track records: 'SYM|tf' -> {state:'run'|'done', list}
+  // Intraday slot can show 15-min or 5-min candles: IV = 'auto' (15m, falls back to 5m when 15m has nothing recent) | '15m' | '5m'
+  let IV='auto'; try{ IV=localStorage.getItem('patIv')||'auto'; }catch(e){}
+  const ALT={};             // both intraday data sets for the loaded symbol: {'15m':T,'5m':T}
+  function mulOf(tf,C){ if(tf!=='15m'||!C||C.length<3) return 1; const d=[]; for(let i=Math.max(1,C.length-20);i<C.length;i++) d.push(C[i].t-C[i-1].t); d.sort((a,b)=>a-b); return (d[d.length>>1]||900)<=450?3:1; }
+  const frsh=(tf,C)=>FRESH[tf]*mulOf(tf,C), form=(tf,C)=>FORM[tf]*mulOf(tf,C);
+  const trKey=tf=>M.sym+'|'+tf+(tf==='15m'&&M.tf['15m']&&M.tf['15m'].iv==='5m'?'|5m':'');
   let LV=[];                // key levels shared by 2+ timeframes
   const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const biasCls=b=>b==='Bullish'?'up':b==='Bearish'?'down':'';
@@ -6183,12 +6189,12 @@ const PatternUI = (function(){
     let k=0; for(let j=i;j<C.length-1;j++) if(d(C[j+1].t)!==d(C[j].t)) k++;
     return k===1?'yesterday '+hm:new Date((t+19800)*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'UTC'})+' '+hm+' ('+k+' sessions ago)';
   }
-  function isRecent(p,tf,C){ if(p.status==='Failed') return false; const a=ageOf(p,C); return a.kind==='break'?a.bars<=FRESH[tf]:a.bars<=FORM[tf]; }
+  function isRecent(p,tf,C){ if(p.status==='Failed') return false; const a=ageOf(p,C); return a.kind==='break'?a.bars<=frsh(tf,C):a.bars<=form(tf,C); }
   window.__patHelp={isRecent:(p,tf,C)=>isRecent(p,tf,C),dirOf:p=>dirOf(p)}; // used by the breakout scanner
   function ageHtml(p,tf,C){
     const a=ageOf(p,C), ago=agoTxt(tf,C,a.i,a.bars);
     if(p.status==='Failed') return '<span class="pg-pill">failed</span>';
-    if(a.kind==='break'){ const stale=a.bars>FRESH[tf];
+    if(a.kind==='break'){ const stale=a.bars>frsh(tf,C);
       return '<span class="pg-pill '+(stale?'':'amb')+'">'+(p.status==='Weak break'?'low-volume break ':'broke out ')+ago+'</span>'+(stale?'<span class="pg-pill" title="Old breakout: the original entry is no longer fresh">stale</span>':''); }
     return '<span class="pg-pill">forming · last swing '+ago+'</span>';
   }
@@ -6203,9 +6209,9 @@ const PatternUI = (function(){
     return out.join(' &middot; ');
   }
   function trHtml(p,tf){ // suggestion 2: this pattern's own record on this chart
-    const r=TR[M.sym+'|'+tf]; if(!r) return ''; if(r.state!=='done') return '<span class="pg-sub">Track record on this chart: checking history…</span>';
+    const r=TR[trKey(tf)]; if(!r) return ''; if(r.state!=='done') return '<span class="pg-sub">Track record on this chart: checking history…</span>';
     const a=r.list.filter(o=>o.key===p.key&&(o.mode||'breakout')==='breakout');
-    const word=TFN[tf].toLowerCase()+' chart', nm=esc(M.sym);
+    const word=(tf==='15m'&&M.tf[tf]&&M.tf[tf].iv==='5m'?'5-min':TFN[tf].toLowerCase())+' chart', nm=esc(M.sym);
     if(!a.length) return '<span class="pg-sub">No past confirmed '+esc(p.name.replace(' (failed)',''))+' signals on the '+nm+' '+word+' ('+r.bars+' bars tested)</span>';
     const hit=a.filter(o=>o.outcome==='target').length, R=a.reduce((s,o)=>s+o.R,0)/a.length;
     return '<span class="pg-sub">Track record on the '+nm+' '+word+': <b class="'+(hit/a.length>=0.5?'up':'down')+'">'+hit+' of '+a.length+'</b> hit the target first &middot; avg <b class="'+(R>=0?'up':'down')+'">'+(R>=0?'+':'')+R.toFixed(2)+'R</b>'+(a.length<5?' <span class="pg-pill amb" title="Fewer than 5 past signals: treat as anecdotal">small sample</span>':'')+'</span>';
@@ -6337,22 +6343,34 @@ const PatternUI = (function(){
   }
 
   /* ---------- loading: all four timeframes at once ---------- */
-  async function fetchTf(sym,tf){
-    const resp=await fetch('/api/candles/'+encodeURIComponent(sym)+'?tf='+encodeURIComponent(tf),{cache:'no-store'});
+  async function fetchTf(sym,tf,iv){
+    const resp=await fetch('/api/candles/'+encodeURIComponent(sym)+'?tf='+encodeURIComponent(iv||tf),{cache:'no-store'});
     const data=await resp.json();
     if(!resp.ok||!data.series||!data.series.length) throw new Error(data.error||'no candles returned');
     const full=data.series.filter(p=>p&&p.c>0).map(p=>({t:p.t,o:p.o||p.c,h:p.h||p.c,l:p.l||p.c,c:p.c,v:p.v||0}));
     return {full,candles:tf==='1D'?full.slice(-320):full.slice(-600),src:data.source,stale:data.stale?data.ageSec:null};
   }
+  function hasRecent(T,tf){ return !!(T&&T.res&&!T.err&&T.res.patterns.some(p=>isRecent(p,tf,T.candles))); }
+  function pickIv(){ const a=ALT['15m'], b=ALT['5m'];
+    if(IV==='5m'&&b&&!b.err) return b; if(IV==='15m'&&a&&!a.err) return a;
+    if(a&&!a.err&&(hasRecent(a,'15m')||!b||b.err||!hasRecent(b,'15m'))) return a; return b&&!b.err?b:a; }
+  function renderIvBtns(){ const h=$('pgIvs'); if(!h) return; const T=M.tf['15m'], cur=T&&T.iv||'15m';
+    h.innerHTML=['15m','5m'].map(v=>'<button class="btn" data-iv="'+v+'" style="padding:1px 7px;font-size:11px;'+(cur===v?'background:var(--accent,#2f6fed);color:#fff;':'')+'">'+v+'</button>').join('')+(IV==='auto'&&cur==='5m'?' <span class="pg-sub" title="No recent formation on the 15-min chart, so the 5-min one is shown">auto: 5m</span>':''); }
+  function swapIv(v){ IV=v; try{ localStorage.setItem('patIv',v); }catch(e){} if(!ALT['15m']) return;
+    destroyMini('15m'); M.tf['15m']=pickIv(); refresh(); renderIvBtns(); if(S.tf==='15m') setDetail('15m'); trackRecords(M.sym); }
   async function load(sym){
     if(!sectionReady()) return;
     sym=(sym||$('patSym').value||currentSym()).trim().toUpperCase(); $('patSym').value=sym;
     S.loading=true; S.sym=M.sym=sym; S.sel=null;
-    TFS.forEach(([tf])=>destroyMini(tf)); M.tf={};
+    TFS.forEach(([tf])=>destroyMini(tf)); M.tf={}; delete ALT['15m']; delete ALT['5m'];
     $('patStatus').textContent='Loading '+sym+' on 4 timeframes…';
     buildGrid();
     await Promise.all(TFS.map(async([tf])=>{
-      try{ const r=await fetchTf(sym,tf); if(M.sym!==sym) return; M.tf[tf]={...r,res:PatternEngine.detect(r.candles),extra:[],priceLines:[],sel:null}; }
+      try{
+        if(tf==='15m'){ // fetch both intraday sets, then choose which one the card shows
+          const mk=async iv=>{ try{ const r=await fetchTf(sym,tf,iv); return {...r,iv,res:PatternEngine.detect(r.candles),extra:[],priceLines:[],sel:null}; }catch(e){ return {candles:[],full:[],res:null,err:e.message,iv,extra:[],priceLines:[],sel:null}; } };
+          const [a,b]=await Promise.all([mk('15m'),mk('5m')]); if(M.sym!==sym) return; ALT['15m']=a; ALT['5m']=b; M.tf[tf]=pickIv();
+        } else { const r=await fetchTf(sym,tf); if(M.sym!==sym) return; M.tf[tf]={...r,res:PatternEngine.detect(r.candles),extra:[],priceLines:[],sel:null}; } }
       catch(e){ if(M.sym!==sym) return; M.tf[tf]={candles:[],full:[],res:null,err:e.message,extra:[],priceLines:[],sel:null}; }
       if(M.sym===sym) card(tf);
     }));
@@ -6360,7 +6378,7 @@ const PatternUI = (function(){
     S.loading=false;
     const ok=TFS.filter(([tf])=>M.tf[tf]&&!M.tf[tf].err), src=new Set(ok.map(([tf])=>M.tf[tf].src)), stale=ok.filter(([tf])=>M.tf[tf].stale!=null);
     $('patStatus').innerHTML=esc(sym)+' &middot; '+ok.length+' of 4 timeframes loaded &middot; data: '+[...src].map(x=>x==='upstox'?'Upstox':x==='yahoo'?'Yahoo (fallback)':esc(x)).join(', ')+(stale.length?' <span class="sim-tag">STALE: '+stale.map(([tf])=>TFN[tf]).join(', ')+' (last good Upstox data)</span>':'');
-    refresh(); setDetail(S.tf); trackRecords(sym);
+    refresh(); renderIvBtns(); setDetail(S.tf); trackRecords(sym);
     try{ window.dispatchEvent(new CustomEvent('pat:loaded',{detail:{sym,zone:zoneData()}})); }catch(e){}
   }
   function refresh(){ if(!M.sym) return; const ag=mtf(); LV=levels(); $('pgLevels').innerHTML=levelsHtml(); $('pgZone').innerHTML=zoneHtml();
@@ -6369,23 +6387,23 @@ const PatternUI = (function(){
   async function trackRecords(sym){
     const order=[S.tf,...TFS.map(x=>x[0]).filter(t=>t!==S.tf)];
     for(const tf of order){ const T=M.tf[tf]; if(M.sym!==sym) return; if(!T||T.err||!T.full.length) continue;
-      const k=sym+'|'+tf; if(TR[k]&&TR[k].state==='done') continue;
+      const k=trKey(tf); if(TR[k]&&TR[k].state==='done') continue;
       const C=tf==='1D'?T.full.slice(-750):T.full.slice(-700);
       TR[k]={state:'run'}; card(tf,true);
-      try{ const list=await PatternEngine.walkAsync(C,{step:tf==='1W'?2:4,horizon:HOR[tf]}); TR[k]={state:'done',list,bars:C.length}; }catch(e){ TR[k]={state:'done',list:[],bars:C.length}; }
+      try{ const list=await PatternEngine.walkAsync(C,{step:tf==='1W'?2:4,horizon:HOR[tf]*mulOf(tf,C)}); TR[k]={state:'done',list,bars:C.length}; }catch(e){ TR[k]={state:'done',list:[],bars:C.length}; }
       if(M.sym!==sym) return; card(tf,true); if(tf===S.tf) render(); }
   }
 
   /* ---------- the 2x2 grid of cards ---------- */
   function buildGrid(){
-    $('pgGrid').innerHTML=TFS.map(([tf,name])=>'<div class="pg-card" id="pgCard-'+tf+'"><div class="pg-card-h"><b>'+name+'</b><span class="pg-sub" id="pgMeta-'+tf+'">loading…</span><span id="pgBiasChip-'+tf+'"></span><button class="btn pg-open" data-open="'+tf+'">Detailed view &#9656;</button></div><div class="pg-mini" id="pgMini-'+tf+'"></div><div id="pgList-'+tf+'"><div class="pg-sub" style="padding:6px;">Loading candles…</div></div></div>').join('');
+    $('pgGrid').innerHTML=TFS.map(([tf,name])=>'<div class="pg-card" id="pgCard-'+tf+'"><div class="pg-card-h"><b>'+name+'</b>'+(tf==='15m'?'<span id="pgIvs" style="display:inline-flex;gap:3px;"></span>':'')+'<span class="pg-sub" id="pgMeta-'+tf+'">loading…</span><span id="pgBiasChip-'+tf+'"></span><button class="btn pg-open" data-open="'+tf+'">Detailed view &#9656;</button></div><div class="pg-mini" id="pgMini-'+tf+'"></div><div id="pgList-'+tf+'"><div class="pg-sub" style="padding:6px;">Loading candles…</div></div></div>').join('');
     $('pgMtf').innerHTML=''; $('pgLevels').innerHTML=''; $('pgZone').innerHTML='';
   }
   function card(tf,keepChart){
     const T=M.tf[tf], meta=$('pgMeta-'+tf), list=$('pgList-'+tf); if(!meta||!T) return;
     if(T.err){ meta.textContent='not available'; list.innerHTML='<div class="pg-sub" style="padding:6px;"><span class="down">Could not load '+TFN[tf].toLowerCase()+' candles:</span> '+esc(T.err)+'</div>'; $('pgMini-'+tf).innerHTML=''; return; }
     const C=T.candles, last=C[C.length-1];
-    meta.innerHTML=C.length+' '+TFS.find(x=>x[0]===tf)[2]+' bars &middot; last '+(tf==='1D'||tf==='1W'?new Date((last.t+19800)*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'UTC'}):agoTxt(tf,C,C.length-1,0));
+    meta.innerHTML=C.length+' '+(tf==='15m'&&T.iv==='5m'?'5-min':TFS.find(x=>x[0]===tf)[2])+' bars &middot; last '+(tf==='1D'||tf==='1W'?new Date((last.t+19800)*1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'UTC'}):agoTxt(tf,C,C.length-1,0));
     const b=tfBias(tf); $('pgBiasChip-'+tf).innerHTML=b&&b.dir>0?'<span class="pg-pill up">&#9650; bullish</span>':b&&b.dir<0?'<span class="pg-pill down">&#9660; bearish</span>':'<span class="pg-pill">neutral</span>';
     const vis=listFor(tf), hidden=T.res.patterns.length-vis.length, ag=M._ag||{up:[],dn:[]};
     if(T.sel==null||!vis.some(v=>v.i===T.sel)) T.sel=vis.length?vis[0].i:null;
@@ -6485,7 +6503,7 @@ const PatternUI = (function(){
       let warn='';
       if(p.status!=='Forming'&&p.status!=='Failed'&&p.entry!=null&&p.stop!=null&&C.length){ const lastC=C[C.length-1].c; const toStop=(p.bias==='Bullish'?(p.entry-lastC):(lastC-p.entry))/Math.abs(p.entry-p.stop);
         if(toStop>=0.6) warn='<div class="metric-sub" style="color:var(--amber)">&#9888; Price has moved '+Math.round(Math.min(toStop,1.5)*100)+'% of the way to the stop &mdash; this setup is failing. Use the Trade planner below for a fresh plan.</div>';
-        else if(p.barsSince!=null&&p.barsSince>FRESH[S.tf]) warn='<div class="metric-sub">The entry is the breakout level from '+p.barsSince+' bars ago. For a fresh entry at today\'s price use the Trade planner below.</div>'; }
+        else if(p.barsSince!=null&&p.barsSince>frsh(S.tf,S.candles)) warn='<div class="metric-sub">The entry is the breakout level from '+p.barsSince+' bars ago. For a fresh entry at today\'s price use the Trade planner below.</div>'; }
       const ag=M._ag||{up:[],dn:[]}, d=dirOf(p), others=(d>0?ag.up:d<0?ag.dn:[]).filter(x=>x!==S.tf);
       return '<tr class="pat-row'+(S.sel===i?' sel':'')+'" data-i="'+i+'"><td><b>'+esc(p.name)+'</b> <span class="pat-type">'+p.type+'</span>'+(p.scale==='minor'?' <span class="pat-type" title="Found at a finer swing scale, so treat it as lower-weight">minor swing</span>':'')+
         (others.length?'<div><span class="pg-pill mtf">&#10003; also '+(d>0?'bullish':'bearish')+' on '+others.map(x=>TFN[x]).join(' + ')+'</span></div>':'')+'<div class="metric-sub">'+(S.sel===i?'shown on chart':'hover to preview · click to pin')+'</div></td>'+
@@ -6612,6 +6630,7 @@ const PatternUI = (function(){
     grid.addEventListener('click',e=>{
       if(e.target.closest('[data-addmon]')) return;
       const sa=e.target.closest('[data-showall]'); if(sa){ e.preventDefault(); $('pgShow').querySelector('[data-v=all]').click(); return; }
+      const iv=e.target.closest('[data-iv]'); if(iv){ swapIv(iv.dataset.iv); return; }
       const o=e.target.closest('[data-open]'); if(o){ setDetail(o.dataset.open); $('patChart').scrollIntoView({behavior:'smooth',block:'center'}); return; }
       const r=e.target.closest('.pg-row'); if(!r) return; const tf=r.dataset.tf, i=+r.dataset.i, T=M.tf[tf];
       T.sel=i; card(tf,true); setDetail(tf,i); $('patChart').scrollIntoView({behavior:'smooth',block:'center'});

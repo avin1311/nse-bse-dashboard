@@ -10,7 +10,14 @@ const VARIANTS = [
   { key: 'now10',     label: 'Now + exit at day 10',                                  lock: 0,   trail: false, t2: true,  hold: 10,  flip: false },
   { key: 'lock10',    label: 'Lock 0.5 risk + exit at day 10',                        lock: 0.5, trail: false, t2: true,  hold: 10,  flip: false },
   { key: 'nowFlip',   label: 'Now + exit when the agreement flips the other way',     lock: 0,   trail: false, t2: true,  hold: LIM, flip: true },
-  { key: 'lockFlip10', label: 'Lock 0.5 risk + flip exit + day 10',                   lock: 0.5, trail: false, t2: true,  hold: 10,  flip: true }
+  { key: 'lockFlip10', label: 'Lock 0.5 risk + flip exit + day 10',                   lock: 0.5, trail: false, t2: true,  hold: 10,  flip: true },
+  // stop ladders BEFORE Target 1 (progress = best close in units of the original risk; stops only ever tighten; after T1 the 0.5 lock applies)
+  { key: 'ladA',      label: 'Ladder A: best close +0.5 risk -> stop to entry',                          lock: 0.5, trail: false, t2: true,  hold: LIM, flip: false, lad: { s1: 0.5 } },
+  { key: 'ladB',      label: 'Ladder B: +0.5 -> entry; +0.75 -> entry + 0.3 risk',                       lock: 0.5, trail: false, t2: true,  hold: LIM, flip: false, lad: { s1: 0.5, s2: 0.75, l2: 0.3 } },
+  { key: 'ladC',      label: 'Ladder C (earlier, tighter): +0.35 -> entry; +0.6 -> entry + 0.2 risk',    lock: 0.5, trail: false, t2: true,  hold: LIM, flip: false, lad: { s1: 0.35, s2: 0.6, l2: 0.2 } },
+  { key: 'ladD',      label: 'Ladder D (later, looser): +0.7 -> entry; +0.9 -> entry + 0.3 risk',        lock: 0.5, trail: false, t2: true,  hold: LIM, flip: false, lad: { s1: 0.7, s2: 0.9, l2: 0.3 } },
+  { key: 'ladBstale', label: 'Ladder B + stale rule (5 sessions under +0.3 risk -> stop 0.5 risk from entry)', lock: 0.5, trail: false, t2: true, hold: LIM, flip: false, lad: { s1: 0.5, s2: 0.75, l2: 0.3, stale: 5 } },
+  { key: 'ladBtrail', label: 'Ladder B + after T1 trail 1.5 ATR, no T2',                                 lock: 0.5, trail: true,  t2: false, hold: LIM, flip: false, lad: { s1: 0.5, s2: 0.75, l2: 0.3 } }
 ];
 function weeklyOf(C) { const W = []; let cur = null; C.forEach(b => { const d = new Date((b.t + 19800) * 1000), wk = Math.floor((d.getTime() / 86400000 + 3) / 7); if (!cur || cur.wk !== wk) { cur = { wk, t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 }; W.push(cur); } else { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v || 0; } cur.last = b.t; }); return W; }
 function scoreOf(sig, p, b, w) { const s = /buy/.test(sig || '') ? 1 : /sell/.test(sig || '') ? -1 : 0; let a = s + p + b; if (w && a !== 0 && Math.sign(w) === Math.sign(a)) a += Math.sign(a); return a; }
@@ -37,18 +44,25 @@ function scores(E, sym, C, k0, k1) {
 
 function sim(C, k, dir, atr, v, sc, cost) {
   const entry = C[k].c, risk = R_ATR * atr, T1 = entry + dir * risk, T2 = entry + dir * 2 * risk;
-  let stop = entry - dir * risk, hit1 = false, best = entry, exit = null, xi = null;
+  let stop = entry - dir * risk, hit1 = false, best = entry, exit = null, xi = null, mfe = 0;
   const end = Math.min(C.length - 1, k + v.hold);
   for (let j = k + 1; j <= end; j++) {
     const b = C[j];
     if (dir > 0 ? b.l <= stop : b.h >= stop) { exit = stop; xi = j; break; }
-    if (!hit1 && (dir > 0 ? b.h >= T1 : b.l <= T1)) { hit1 = true; stop = v.trail ? entry : entry + dir * v.lock * risk; }
+    if (!hit1 && (dir > 0 ? b.h >= T1 : b.l <= T1)) { hit1 = true; stop = entry + dir * v.lock * risk; }
     if (hit1 && v.t2 && (dir > 0 ? b.h >= T2 : b.l <= T2)) { exit = T2; xi = j; break; }
     if (v.trail && hit1) { best = dir > 0 ? Math.max(best, b.c) : Math.min(best, b.c); const ns = best - dir * risk; if (dir > 0 ? ns > stop : ns < stop) stop = ns; }
+    if (v.lad && !hit1) {
+      mfe = Math.max(mfe, dir * (b.c - entry) / risk);
+      const tight = ns => { if (dir > 0 ? ns > stop : ns < stop) stop = ns; };
+      if (v.lad.s2 != null && mfe >= v.lad.s2) tight(entry + dir * v.lad.l2 * risk); else if (mfe >= v.lad.s1) tight(entry);
+      if (v.lad.stale && j - k >= v.lad.stale && mfe < 0.3) tight(entry - dir * 0.5 * risk);
+    }
     if (v.flip && sc[j] && Math.abs(sc[j].a) >= 3 && Math.sign(sc[j].a) === -dir) { exit = b.c; xi = j; break; }
   }
   if (exit == null) { xi = end; exit = C[end].c; }
-  return { ret: dir * (exit - entry) / entry * 100 - cost, hold: xi - k, xi };
+  let mx = mfe; for (let j = k + 1; j <= xi; j++) mx = Math.max(mx, dir * (C[j].c - entry) / risk); // best close seen, in risk units (for the give-back count)
+  return { ret: dir * (exit - entry) / entry * 100 - cost, hold: xi - k, xi, mfe: mx };
 }
 
 function study(E, sym, C, cost) {
@@ -59,7 +73,7 @@ function study(E, sym, C, cost) {
     const s = sc[k]; if (!s || Math.abs(s.a) < 3) continue;
     let atr = null; try { atr = E.B.atrAt(C, k, 14); } catch (e) {} if (!(atr > 0)) continue;
     const dir = Math.sign(s.a), rec = { sym, t: C[k].t, k, a: s.a, dir, score: s.score || 0, r: {} };
-    VARIANTS.forEach(v => { if (free[v.key] != null && k < free[v.key]) { rec.r[v.key] = null; return; } const o = sim(C, k, dir, atr, v, sc, cost); rec.r[v.key] = { ret: o.ret, hold: o.hold }; free[v.key] = o.xi + 1; });
+    VARIANTS.forEach(v => { if (free[v.key] != null && k < free[v.key]) { rec.r[v.key] = null; return; } const o = sim(C, k, dir, atr, v, sc, cost); rec.r[v.key] = { ret: o.ret, hold: o.hold, mfe: o.mfe }; free[v.key] = o.xi + 1; });
     sigs.push(rec);
   }
   return sigs;
@@ -73,7 +87,7 @@ function aggregate(all, nStocks) {
     if (!taken.length) return { key: v.key, label: v.label, n: 0 };
     const w = taken.filter(x => x.ret > 0), l = taken.filter(x => x.ret <= 0), grossW = w.reduce((s, x) => s + x.ret, 0), grossL = -l.reduce((s, x) => s + x.ret, 0);
     return { key: v.key, label: v.label, n: taken.length, win: Math.round(w.length / taken.length * 100), avg: r2(avg(taken.map(x => x.ret))), avgWin: r2(avg(w.map(x => x.ret))), avgLoss: r2(avg(l.map(x => x.ret))), pf: grossL > 0 ? r2(grossW / grossL) : null,
-      avgHold: r2(avg(taken.map(x => x.hold))), older: r2(avg(taken.filter(x => x.t < mid).map(x => x.ret))), newer: r2(avg(taken.filter(x => x.t >= mid).map(x => x.ret))),
+      avgHold: r2(avg(taken.map(x => x.hold))), nGb: taken.filter(x => x.mfe >= 0.5).length, gb: (() => { const a = taken.filter(x => x.mfe >= 0.5); return a.length ? Math.round(a.filter(x => x.ret < 0).length / a.length * 100) : null; })(), older: r2(avg(taken.filter(x => x.t < mid).map(x => x.ret))), newer: r2(avg(taken.filter(x => x.t >= mid).map(x => x.ret))),
       buyAvg: r2(avg(taken.filter(x => x.dir > 0).map(x => x.ret))), sellAvg: r2(avg(taken.filter(x => x.dir < 0).map(x => x.ret))), nBuy: taken.filter(x => x.dir > 0).length, nSell: taken.filter(x => x.dir < 0).length,
       s3: r2(avg(taken.filter(x => Math.abs(x.a) === 3).map(x => x.ret))), n3: taken.filter(x => Math.abs(x.a) === 3).length, s4: r2(avg(taken.filter(x => Math.abs(x.a) >= 4).map(x => x.ret))), n4: taken.filter(x => Math.abs(x.a) >= 4).length };
   });

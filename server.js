@@ -2667,7 +2667,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-28-r64 (Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-28-r65 (stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3303,31 +3303,43 @@ app.post('/api/agreement/rule', async (req, res) => {
 });
 app.get('/api/agreement', async (req, res) => { const R = await agRule(); res.json({ rule: R.rule, using: R.v.key, passed: R.passed, at: AG_AT, engines: Engines.load() ? 'ok' : Engines.error(), state: agState }); });
 app.post('/api/agreement/run', async (req, res) => { if (!(req.body && req.body.dry)) return res.status(400).json({ error: 'only dry runs can be started by hand' }); try { res.json(await runAgreement({ dry: true })); } catch (e) { res.status(500).json({ error: e.message }); } });
+// every real run is kept (last 40) so the page can show proof that the scan ran, how many stocks it checked and what happened to each signal
+async function agLogRun(r) { try { const day = new Date(r.at + 19800000).toISOString().slice(0, 10), list = await storeGet('store:agreement-runs', []); await storeSet('store:agreement-runs', [{ ...r, day }, ...(Array.isArray(list) ? list : [])].slice(0, 40)); } catch (e) {} }
+app.get('/api/agreement/runs', async (req, res) => { try { res.json({ runs: await storeGet('store:agreement-runs', []), state: agState }); } catch (e) { res.status(500).json({ error: e.message }); } });
 async function runAgreement(opts = {}) {
   const E = Engines.load(); if (!E) throw new Error('browser engines failed to load: ' + Engines.error());
   if (agState.running) return { busy: true }; agState.running = true;
-  const t0 = Date.now(), { v, passed } = await agRule(), out = [];
+  const t0 = Date.now(), { v, passed } = await agRule(), out = []; let scanned = 0, noData = 0;
   try {
     for (const sym of FNO_FALLBACK) {
-      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { const r = agEval(E, sym, C, v); if (Math.abs(r.a) >= v.N) out.push(r); } } catch (e) {}
+      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { scanned++; const r = agEval(E, sym, C, v); if (Math.abs(r.a) >= v.N) out.push(r); } else noData++; } catch (e) { noData++; }
       await new Promise(r => setImmediate(r));
     }
     out.sort((p, q) => Math.abs(q.a) - Math.abs(p.a) || (q.a > 0 ? (q.score || 0) - (p.score || 0) : (p.score || 0) - (q.score || 0)));
-    const added = [], skipped = [];
+    const added = [], skipped = [], why = {}; // why[sym] = what happened to each signal, for the run log
     if (!opts.dry) {
       const db = await loadCalls(), day = Math.floor((Date.now() / 1000 + 19800) / 86400);
       let room = AG_MAX_DAY - db.filter(c => c.manual && srcOf(c) === 'agreement' && Math.floor((c.t + 19800) / 86400) === day).length;
       for (const r of out) {
-        if (room <= 0) break;
+        if (room <= 0) { why[r.sym] = { st: 'skipped', why: 'daily limit of ' + AG_MAX_DAY + ' new items reached' }; continue; }
         const dir = Math.sign(r.a); let sl = r.atr ? r.price - dir * 1.5 * r.atr : undefined, target = r.atr ? r.price + dir * 3 * r.atr : undefined; const pt = r.pt;
         if (v.X === 'pat' && pt && pt.d === dir && pt.stop && pt.target) { sl = pt.stop; target = pt.target; }
         const lab = 'Agreement ' + (dir > 0 ? '▲' : '▼').repeat(Math.min(Math.abs(r.a), 4)) + ' (' + Math.abs(r.a) + ' agree)';
         const note = lab + ': screener ' + r.sigLabel + (pt && pt.d === dir ? ', ' + pt.name : '') + (r.bk && r.bk.type === 'break' ? ', broke ' + r.bk.name : '') + (r.w && Math.sign(r.w) === dir ? ', weekly breakout agrees' : '') + '. Checked at 15:05 on the daily candle. Rule set ' + v.key + '.' + (passed ? '' : ' Paper: the agreement test has not passed yet.');
         const res = await addManualItem({ source: 'agreement', symbol: r.sym, side: dir > 0 ? 'BUY' : 'SELL', mode: 'swing', label: lab, note, sl, target, notify: true, paper: !passed });
-        if (res.status === 200) { added.push(r.sym); room--; } else skipped.push(r.sym + ': ' + (res.body && res.body.error));
+        if (res.status === 200) { added.push(r.sym); room--; why[r.sym] = { st: 'added', why: 'new item added to the monitor' }; }
+        else {
+          skipped.push(r.sym + ': ' + (res.body && res.body.error));
+          const side = dir > 0 ? 'BUY' : 'SELL', open = db.find(c => c.manual && !c.closed && c.symbol === r.sym && srcOf(c) === 'agreement' && c.side === side);
+          const recent = db.find(c => c.manual && srcOf(c) === 'agreement' && c.symbol === r.sym && c.side === side && Date.now() / 1000 - c.t < 5 * 86400);
+          why[r.sym] = open ? { st: 'holds', why: 'signal still holds; the call from ' + new Date((open.t + 19800) * 1000).toISOString().slice(0, 10) + ' is still open (entry ' + open.entry + ')', since: open.t, entry: open.entry }
+            : recent ? { st: 'holds', why: 'same signal fired within the last 5 days (closed ' + (recent.status || '') + '), not repeated', since: recent.t, entry: recent.entry }
+            : { st: 'skipped', why: (res.body && res.body.error) || 'not added' };
+        }
       }
     }
-    agState.last = { at: Date.now(), tookS: Math.round((Date.now() - t0) / 1000), rule: v.key, passed, dry: !!opts.dry, found: out.map(r => ({ sym: r.sym, a: r.a, sig: r.sigLabel, pattern: r.pt ? (r.pt.d > 0 ? '▲ ' : r.pt.d < 0 ? '▼ ' : '') + r.pt.name : null, breakout: r.bk && r.bk.type === 'break' ? (r.bk.d > 0 ? '▲ ' : '▼ ') + r.bk.name : null, weekly: r.w || 0 })), added, skipped };
+    agState.last = { at: Date.now(), tookS: Math.round((Date.now() - t0) / 1000), rule: v.key, passed, dry: !!opts.dry, found: out.map(r => ({ sym: r.sym, a: r.a, sig: r.sigLabel, pattern: r.pt ? (r.pt.d > 0 ? '▲ ' : r.pt.d < 0 ? '▼ ' : '') + r.pt.name : null, breakout: r.bk && r.bk.type === 'break' ? (r.bk.d > 0 ? '▲ ' : '▼ ') + r.bk.name : null, weekly: r.w || 0, ...(why[r.sym] || (opts.dry ? { st: 'dry', why: 'dry run: nothing added' } : {})) })), added, skipped, scanned, noData, total: FNO_FALLBACK.length };
+    if (!opts.dry) await agLogRun(agState.last);
     return agState.last;
   } finally { agState.running = false; }
 }
@@ -3335,7 +3347,7 @@ setInterval(() => { const p = istParts(); if (p.dow === 0 || p.dow === 6 || p.mi
   const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10); if (agState.day === day || agState.running) return;
   storeGet('store:agreement-ran', null).catch(() => null).then(d => { if (d === day) { agState.day = day; return; } agState.day = day;
     runAgreement().then(r => storeSet('store:agreement-ran', day).catch(() => {}))
-      .catch(e => { agState.last = { at: Date.now(), err: e.message }; sendTelegram('⚠️ Agreement check failed today: ' + e.message).catch(() => {}); }); });
+      .catch(e => { agState.last = { at: Date.now(), err: e.message }; agLogRun(agState.last); sendTelegram('⚠️ Agreement check failed today: ' + e.message).catch(() => {}); }); });
 }, 60000).unref();
 
 // ---- Index bar order (Edit order on the ticker): kept on the server so it survives closing the browser, clearing site data or opening the dashboard on another device

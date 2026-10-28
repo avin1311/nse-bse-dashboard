@@ -31,6 +31,10 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'),
   const m = St.momentumStudy(D, N, 0.15), g = St.gapStudy(D, N, 0.1), e = St.expiryStudy(N, 18000);
   okk = m.length > 0 && m.every(r => r.rebalances >= 6 && r.trades > 0) && g.events > 100 && g.rows.some(r => r.group === 'all' && r.side === 'gap down' && /fade/.test(r.variant)) && e.some(r => r.weekday === 'Tue'); msg = ' (' + m.length + ' momentum rows, ' + g.events + ' gaps)'; } catch (x) { msg = ': ' + x.message; }
   ok(okk, 'research studies (momentum, gaps, weekdays) run on synthetic data' + msg); }
+{ const E = require('../engines').load(); let okk = false; if (E) { const pts = [[0, 22300], [60, 22300], [100, 22600], [115, 22545], [135, 22650], [150, 22548], [170, 22605], [185, 22540], [200, 22470]]; const C = []; let sd = 9; const rnd = () => (sd = (sd * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    for (let i = 0; i <= 200; i++) { let k = 0; while (k < pts.length - 2 && i > pts[k + 1][0]) k++; const [i0, p0] = pts[k], [i1, p1] = pts[k + 1]; const base = p0 + (p1 - p0) * (i - i0) / (i1 - i0), o = base + (rnd() - 0.5) * 14, c = base + (rnd() - 0.5) * 14; C.push({ t: 1790000000 + i * 300, o, c, h: Math.max(o, c) + rnd() * 9, l: Math.min(o, c) - rnd() * 9, v: 0 }); }
+    try { okk = E.PatternEngine.detect(C).patterns.some(p => p.key === 'hs'); } catch (e) {} }
+  ok(okk, 'chart patterns: a head and shoulders only 0.4% tall on 5-minute index candles is found (small swing scales)'); }
 { const C = require('../calls.js'); const mk = (t, o, h, l, c) => ({ t, o, h, l, c, v: 1 });
   const buy = C.track({ side: 'BUY', mode: 'swing', entry: 100, sl: 90, targets: [110, 120], t: 1000 }, [mk(2000, 100, 111, 99, 108), mk(3000, 108, 109, 94, 96)], 4000);
   const sell = C.track({ side: 'SELL', mode: 'intraday', entry: 200, sl: 210, targets: [190, 180], t: 1000 }, [mk(2000, 200, 201, 189, 192), mk(3000, 192, 201, 191, 199)], 4000);

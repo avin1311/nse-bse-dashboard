@@ -74,7 +74,7 @@ window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); window.__
   .cm-cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:14px;align-items:start;} @media(max-width:900px){.cm-cols{grid-template-columns:1fr;}}
   .cm-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;} .cm-box h4{margin:0 0 8px;font-size:14px;}
   .cm-row{display:grid;grid-template-columns:minmax(90px,1.1fr) 1.3fr 1fr 1fr;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--border);font-size:12px;} .cm-row:first-of-type{border-top:0;}
-  .cm-src{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--border);color:var(--text2);vertical-align:2px;} .cm-src-pattern{color:#a78bfa;border-color:#a78bfa55;} .cm-src-agreement{color:#38bdf8;border-color:#38bdf855;} .cm-src-screener{color:#38bdf8;border-color:#38bdf855;} .cm-src-calls{color:var(--amber);}
+  .cm-src{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--border);color:var(--text2);vertical-align:2px;} .cm-src-shadow{color:#f59e0b;border-color:#f59e0b55;} .cm-src-pattern{color:#a78bfa;border-color:#a78bfa55;} .cm-src-agreement{color:#38bdf8;border-color:#38bdf855;} .cm-src-screener{color:#38bdf8;border-color:#38bdf855;} .cm-src-calls{color:var(--amber);}
   .cm-kpis.cm-k5{grid-template-columns:repeat(5,1fr);} @media(max-width:560px){.cm-kpis.cm-k5{grid-template-columns:repeat(2,1fr);}}
   .cm-done{opacity:.92;} .cm-ex>div{margin-bottom:2px;} .cm-exl{display:inline-block;min-width:34px;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text2);} .cm-stat{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;border:1px solid currentColor;vertical-align:2px;}
   .cm-row b{font-size:14px;} .cm-sub{color:var(--text2);font-size:11px;} .cm-b{color:var(--green);} .cm-s{color:var(--red);}
@@ -3086,7 +3086,7 @@ window.cbtBtn=function(c){
   const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
   let data=null, view=null, timer=null, sndMode=LS.get('cmSoundMode','auto'), actx=null, inited=false, srcF=LS.get('cmSrc','all'), typF=LS.get('cmType','all');
   const kindOf=c=>c.kind==='option'?'option':'stock', TYP={stock:'Stocks',option:'Index options'};
-  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scanner',agreement:'Agreement'}, srcOf=c=>c.source||'calls';
+  const SRC={calls:'Trade Calls',pattern:'Chart patterns',screener:'Scanner',agreement:'Agreement',shadow:'Shadow (filtered)'}, srcOf=c=>c.source||'calls';
   const pickSum=x=>!x?null:srcF==='all'?x:(x.bySource?x.bySource[srcF]:(srcF==='calls'?x:null));
   // ---- sound (Web Audio; needs one click to unlock) ----
   function ensureAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} return actx; }
@@ -3164,7 +3164,7 @@ window.cbtBtn=function(c){
     const toSl=Math.abs(c.ltp-c.activeSl)/c.ltp*100, toT=nxt!=null?Math.abs(nxt-c.ltp)/c.ltp*100:null;
     const ST={SL_HIT:['STOP LOSS HIT','cm-s'],TARGET_HIT:['ALL TARGETS HIT','cm-b'],PROFIT:['EXITED IN PROFIT (locked or trailed stop)','cm-b'],BREAKEVEN:['EXITED AT ENTRY + COSTS','' ],EXPIRED:['TIME EXIT',''],MANUAL_EXIT:['MANUAL EXIT','']}[c.status]||[c.status,''];
     const tl=c.targets[c.targets.length-1];
-    const st=srcOf(c), tag=`<span class="cm-src cm-src-${st}" title="${esc(c.label||'')}">${st==='calls'?(c.kind==='option'?'Index option':'Trade call'):st==='pattern'?'Pattern':st==='agreement'?'Agreement '+esc((c.label||'').replace(/^Agreement\s*/,'').split(' ')[0]):'Screener'}</span>${c.unproven?` <span class="cm-src" style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">Unproven</span>`:''}`;
+    const st=srcOf(c), tag=`<span class="cm-src cm-src-${st}" title="${esc(c.label||'')}">${st==='calls'?(c.kind==='option'?'Index option':'Trade call'):st==='pattern'?'Pattern':st==='agreement'?'Agreement '+esc((c.label||'').replace(/^Agreement\s*/,'').split(' ')[0]):st==='shadow'?'Shadow':'Screener'}</span>${c.unproven?` <span class="cm-src" style="color:var(--amber);border-color:var(--amber)" title="${esc(c.gateReason||'')}">Unproven</span>`:''}`;
     return `<div class="cm-row${done?' cm-done':''}"><div><b class="cm-open" data-cmopen="${esc(c.kind==='option'?(c.underlying||''):c.symbol)}" title="Open ${esc(c.kind==='option'?(c.underlying||c.symbol):c.symbol)} for analysis" style="cursor:pointer;text-decoration:underline dotted;">${esc(c.symbol)} &#8599;</b> ${tag}${done?` <span class="cm-stat ${ST[1]}">${ST[0]}</span>`:''}${c.manual&&c.label?`<div class="cm-sub">${esc(c.label)}</div>`:''}<div class="cm-sub"><span class="${c.side==='BUY'?'cm-b':'cm-s'}">${c.side}</span> · ${c.mode==='intraday'?'Intraday':c.kind==='option'?'Multi-day':'Swing'} · ${esc(c.riskLabel)}</div>${c.kind==='option'?`<div class="cm-sub">Expiry <b>${esc(c.expiryLabel)}</b>${c.lotSize?' · lot '+c.lotSize:''}</div><div class="cm-sub">Exit if ${esc(c.underlying)} closes ${c.dir==='BUY'?'below':'above'} ${Number(c.spotSl).toLocaleString('en-IN')}</div>`:''}<div class="cm-sub">${dt(c.t)}</div><div style="margin-top:4px">${c.manual||c.restored?`${!done&&c.status==='ACTIVE'?`<button class="btn" data-cmexit="${esc(c.id)}" style="font-size:11px;padding:3px 8px;margin-right:4px;" title="Close at the live price; counts in results and the daily summary">Exit now</button>`:''}<button class="btn" data-cmrm="${esc(c.id)}" style="font-size:11px;padding:3px 8px;" title="Delete without recording an exit (not counted anywhere)">✕ Remove</button>`:window.cbtBtn(c)}</div></div>
       <div><div class="cm-bar"><i style="left:${pos(c.sl)}%;width:${Math.abs(pos(c.entry)-pos(c.sl))}%;background:rgba(255,90,106,.45)"></i><i style="left:${Math.min(pos(c.entry),pos(tl))}%;width:${Math.abs(pos(tl)-pos(c.entry))}%;background:rgba(31,191,117,.45)"></i><span class="cm-mark" style="left:calc(${pos(px)}% - 1px)"></span></div>
         <div class="cm-sub">SL ${num(c.activeSl)}${c.targetsHit?' (trailed)':''} · Entry ${num(c.entry)} · T${(c.targetsHit||0)+1} ${nxt!=null?num(nxt):'—'}</div></div>
@@ -3187,7 +3187,7 @@ window.cbtBtn=function(c){
   // an exit at the entry price is breakeven (its small minus is only costs), never a loss
   const wlb=a=>{ const W=a.filter(c=>c.status!=='BREAKEVEN'&&c.pnlPct>0.05).length, L=a.filter(c=>c.status!=='BREAKEVEN'&&c.pnlPct<-0.05).length; return {w:W,l:L,be:a.length-W-L,net:Math.round(a.reduce((s,c)=>s+(c.pnlPct||0),0)*100)/100}; };
   const splitTxt=a=>{ const st=a.filter(c=>kindOf(c)==='stock'), op=a.filter(c=>kindOf(c)==='option'); if(!st.length||!op.length) return ''; return 'stocks '+sg(wlb(st).net)+' · index options '+sg(wlb(op).net)+' of premium'; };
-  function monSnap(){ const inF=c=>(srcF==='all'||srcOf(c)===srcF)&&(typF==='all'||kindOf(c)===typF);
+  function monSnap(){ const inF=c=>(srcF==='all'?srcOf(c)!=='shadow':srcOf(c)===srcF)&&(typF==='all'||kindOf(c)===typF);
     const act=(data.active||[]).filter(inF), shut=(data.closed||[]).filter(inF), today=pickSum(data.today), r=x=>Math.round(x*100)/100;
     const now=new Date().toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
     const k=wlb(shut);
@@ -3236,7 +3236,7 @@ window.cbtBtn=function(c){
     }catch(err){ say('Could not copy: '+err.message); } }
   function draw(){
     if(!view) return; const b=view.querySelector('#cmBody'); if(!data){ b.innerHTML='<div class="metric-sub">Loading…</div>'; return; }
-    const inF=c=>(srcF==='all'||srcOf(c)===srcF)&&(typF==='all'||kindOf(c)===typF);
+    const inF=c=>(srcF==='all'?srcOf(c)!=='shadow':srcOf(c)===srcF)&&(typF==='all'||kindOf(c)===typF);
     const shut=(data.closed||[]).filter(inF);
     const act=(data.active||[]).filter(inF), evs=(data.events||[]).filter(inF), today=pickSum(data.today), eod=(data.eod||[]).map(x=>({x,y:pickSum(x)})).filter(o=>o.y);
     const chip=(v,l)=>`<span class="tc-chip ${srcF===v?'on':''}" data-cmsrc="${v}">${l}${v!=='all'?' ('+(data.active||[]).filter(c=>srcOf(c)===v).length+')':''}</span>`;
@@ -3244,7 +3244,7 @@ window.cbtBtn=function(c){
     const pn=act.reduce((s,c)=>s+(c.pnlPct||0),0), K=wlb(shut), spl=splitTxt(shut);
     const sec=(a,f)=>a.filter(f);
     b.innerHTML=`
-      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scanner')}${chip('agreement','Agreement')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
+      <div class="tc-bar" style="margin-bottom:10px;">${chip('all','All')}${chip('calls','Trade Calls')}${chip('pattern','Chart patterns (price action)')}${chip('screener','Scanner')}${chip('agreement','Agreement')}${chip('shadow','Shadow (filtered)')}<span style="width:12px"></span>${tchip('all','All types')}${tchip('stock','Stocks')}${tchip('option','Index options')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"><button class="btn" data-cmcopy="text" style="font-size:12px;padding:5px 10px;">📋 Copy summary as text</button><button class="btn" data-cmcopy="image" style="font-size:12px;padding:5px 10px;">🖼 Copy summary as image</button><span class="metric-sub" id="cmCopyMsg">${srcF==='all'?'Copies everything shown below':'Copies the '+SRC[srcF]+' view'}</span></div>
       <div class="cm-kpis cm-k5" style="margin-bottom:12px;"><div>Watching<b>${act.length}</b></div><div>Closed today<b>${shut.length} <span style="font-size:11px;font-weight:400">(${K.w}W / ${K.l}L / ${K.be} BE, ${sg(K.net)})</span></b>${spl?`<div class="cm-sub" style="font-size:10.5px;">${spl}</div>`:''}</div><div>In profit<b class="cm-b">${sec(act,c=>c.pnlPct>0.05).length}</b></div><div>In loss<b class="cm-s">${sec(act,c=>c.pnlPct<-0.05).length}</b></div><div>Combined running<b class="${pn>0?'cm-b':pn<0?'cm-s':''}">${sg(Math.round(pn*100)/100)}</b></div></div>
       <div class="cm-cols"><div>

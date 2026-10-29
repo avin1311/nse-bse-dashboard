@@ -2030,7 +2030,7 @@ async function applyTrack(c) {
   const before = { hit: c.targetsHit || 0, closed: !!c.closed };
   await trackCall(c);
   if (c.closed && !before.closed) c.closedAt = c.exitT || Math.floor(Date.now() / 1000);
-  for (const e of callEvents(c, before)) await emitEvent(e, true);
+  for (const e of callEvents(c, before)) await emitEvent(e, srcOf(c) !== 'shadow'); // shadow items never send alerts
 }
 // Intraday calls are squared off at INTRADAY_EXIT (default 15:20 IST) at the live price, instead of waiting for the next scan.
 const INTRADAY_EXIT_MIN = (() => { const m = /^(\d{1,2}):(\d{2})$/.exec(process.env.INTRADAY_EXIT || '15:20'); return m ? +m[1] * 60 + +m[2] : 920; })();
@@ -2047,7 +2047,7 @@ async function squareOffIntraday() {
         const sg = c.side === 'BUY' ? 1 : -1, cost = c.costPct != null ? c.costPct : Calls.costPct(c.mode), gross = sg * (q.price - c.entry) / c.entry * 100;
         Object.assign(c, { status: 'EXPIRED', closed: true, exit: Math.round(q.price * 100) / 100, ltp: Math.round(q.price * 100) / 100, exitT: now, closedAt: now, grossPct: Math.round(gross * 100) / 100, pnlPct: Math.round((gross - cost) * 100) / 100 });
         changed = true;
-        await emitEvent({ id: c.id + ':EXPIRED', callId: c.id, source: srcOf(c), symbol: c.symbol, side: c.side, mode: c.mode, kind: 'EXPIRED', level: 'info', t: now, price: c.exit, pnlPct: c.pnlPct, text: `⏰ Intraday time exit ${Math.floor(INTRADAY_EXIT_MIN / 60)}:${String(INTRADAY_EXIT_MIN % 60).padStart(2, '0')}: ${c.side} ${c.symbol} at ${c.exit} (${c.pnlPct > 0 ? '+' : ''}${c.pnlPct}%)` }, true);
+        await emitEvent({ id: c.id + ':EXPIRED', callId: c.id, source: srcOf(c), symbol: c.symbol, side: c.side, mode: c.mode, kind: 'EXPIRED', level: 'info', t: now, price: c.exit, pnlPct: c.pnlPct, text: `⏰ Intraday time exit ${Math.floor(INTRADAY_EXIT_MIN / 60)}:${String(INTRADAY_EXIT_MIN % 60).padStart(2, '0')}: ${c.side} ${c.symbol} at ${c.exit} (${c.pnlPct > 0 ? '+' : ''}${c.pnlPct}%)` }, srcOf(c) !== 'shadow');
       } catch (e) { /* retry next minute */ }
     }
     if (changed) await saveCalls();
@@ -2146,7 +2146,7 @@ app.post('/api/settings/risk', async (req, res) => {
   try { await storeSet('store:risk-settings', riskCfg); } catch (e) {}
   res.json({ ok: true, ...riskCfg });
 });
-const SOURCES = { calls: 'Trade Calls', pattern: 'Chart patterns (price action)', screener: 'Screener & scans', agreement: 'Agreement (screener + pattern + breakout, paper)' };
+const SOURCES = { shadow: 'Shadow (a filter would have blocked these; tracked to test the filters)', calls: 'Trade Calls', pattern: 'Chart patterns (price action)', screener: 'Screener & scans', agreement: 'Agreement (screener + pattern + breakout, paper)' };
 const srcOf = c => c.source || 'calls';
 function buildEod(db, events, day, src) {
   if (src) { db = db.filter(c => srcOf(c) === src); const ids = new Set(db.map(c => c.id)); events = events.filter(e => ids.has(e.callId)); }
@@ -2565,20 +2565,24 @@ async function runCallsCycle(force) {
     for (const f of (stopToday ? [] : found)) {
       if (CAPS_ON && (quota[f.mode] <= 0 || cnt(f.mode, f.side) >= SIDE_CAP[f.mode])) continue;
       const gk = f.gateKey || `stk|${f.mode}|${f.side}|${f.setup || 'trend'}`, g = gateCheck(gk);
-      if (!g.ok) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, g.reason); continue; }
+      // A filter no longer throws a call away: it is created anyway as a tracked "shadow" item (no alert, not in the Trade Calls stats),
+      // so the record shows whether each filter really helps. Only the first reason is kept.
+      let shadow = null; const block = (what, reason) => { gateBlocked(what, gk, reason); if (!shadow) shadow = reason; };
+      if (!g.ok) block(`${f.symbol} ${f.mode} ${f.side}`, g.reason);
       if (f.mode === 'intraday' && ((gate.kinds || {})[gk] || {}).params?.safety) { // safety block, only where the lab chose it: no sell while the sector index is up 0.7%+ above its open (mirror for buys)
         const ix = sectorOf(f.symbol), sm = await getSectorMove(ix);
-        if (sm && !Calls.safetyOk(f.side, sm.pct, sm.aboveOpen)) { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, `safety: ${SECTOR_LABEL[ix] || ix} is ${sm.pct > 0 ? 'up' : 'down'} ${Math.abs(sm.pct).toFixed(2)}% and ${sm.pct > 0 ? 'above' : 'below'} its open, no ${f.side === 'SELL' ? 'sell' : 'buy'} against it`); continue; }
+        if (sm && !Calls.safetyOk(f.side, sm.pct, sm.aboveOpen)) block(`${f.symbol} ${f.mode} ${f.side}`, `safety: ${SECTOR_LABEL[ix] || ix} is ${sm.pct > 0 ? 'up' : 'down'} ${Math.abs(sm.pct).toFixed(2)}% and ${sm.pct > 0 ? 'above' : 'below'} its open, no ${f.side === 'SELL' ? 'sell' : 'buy'} against it`);
       }
       // unproven (paper) intraday calls: none on below-normal volume, and at most UNPROVEN_SIDE_MAX open on one side at a time
       // (19 same-side shorts on 19 Oct were really one bet on Nifty); proven kinds are not limited here
       if (!g.proven && f.mode === 'intraday') {
-        if (UNPROVEN_FLAT_BLOCK && dtI_ === 'flat') { gateBlocked(`${f.symbol} ${f.mode} ${f.side}`, gk, 'unproven kind on a flat index day: skipped (27 Oct: 4 of 5 such calls lost)'); continue; }
-        if (f.checks && f.checks.vol === false) { gateBlocked(`${f.symbol} ${f.mode} ${f.side} low volume`, gk, 'unproven call on below-normal volume: skipped'); continue; }
-        if (open_.filter(c => c.mode === 'intraday' && c.unproven && c.side === f.side).length >= UNPROVEN_SIDE_MAX) { gateBlocked(`unproven ${f.side} cap`, gk, `already ${UNPROVEN_SIDE_MAX} open unproven intraday ${f.side === 'BUY' ? 'buys' : 'sells'}: no more until one closes`); continue; }
+        if (UNPROVEN_FLAT_BLOCK && dtI_ === 'flat') block(`${f.symbol} ${f.mode} ${f.side}`, 'unproven kind on a flat index day (27 Oct: 4 of 5 such calls lost)');
+        if (f.checks && f.checks.vol === false) block(`${f.symbol} ${f.mode} ${f.side} low volume`, 'unproven call on below-normal volume');
+        if (open_.filter(c => c.mode === 'intraday' && c.unproven && c.side === f.side).length >= UNPROVEN_SIDE_MAX) block(`unproven ${f.side} cap`, `already ${UNPROVEN_SIDE_MAX} open unproven intraday ${f.side === 'BUY' ? 'buys' : 'sells'}`);
       }
       // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
       if (db.some(c => !c.manual && c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
+      if (shadow && (db.some(c => srcOf(c) === 'shadow' && c.symbol === f.symbol && c.mode === f.mode && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400))) || db.filter(c => srcOf(c) === 'shadow' && c.mode === f.mode && dayNo(c.t) === today).length >= SHADOW_MAX_DAY)) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) continue; // stale: price has already run away
       // swing signals come from yesterday's close; skip when today's price is already moving against the idea
@@ -2586,6 +2590,7 @@ async function runCallsCycle(force) {
       const d = ltp - f.entry; const rb = x => Math.round((x + d) * 20) / 20;
       const call = { id: f.symbol + '-' + f.mode + '-' + nowSec, symbol: f.symbol, side: f.side, mode: f.mode, entry: rb(f.entry), sl: rb(f.sl), targets: f.targets.map(rb), trailAtr: f.trailAtr || undefined, riskLabel: f.riskLabel, riskPct: f.riskPct, score: f.score, setup: f.setup || 'trend', engine: f.engine || 'v3', rs: f.rs == null ? null : f.rs, costPct: Calls.costPct(f.mode), checks: f.checks, analysis: f.analysis, t: nowSec, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null };
       Object.assign(call, { status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: ltp, exit: null, pnlPct: 0, closed: false, provenOn: keyParts(gk).dt || null });
+      if (shadow) { Object.assign(call, { manual: true, source: 'shadow', label: 'Filter: ' + shadow, id: 'shadow-' + call.id, shadowKey: gk }); db.push(call); continue; } // tracked, no alert, no sizing, no cap use
       sizeCall(call); db.push(call); open_.push(call); quota[f.mode]--;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}` }, false);
       notes.push(`${call.unproven ? '🧪 UNPROVEN (paper) ' : ''}🆕 ${call.side} ${call.symbol} (${call.mode}) entry ₹${call.entry}${call.qty ? ' · qty ' + call.qty + ' (₹' + call.riskRs.toLocaleString('en-IN') + ' at risk)' : ''}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}`);
@@ -2667,7 +2672,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-28-r65 (stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-10-30-r66 (filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2844,6 +2849,7 @@ const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.
 const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
 const CAPS_ON = process.env.CALLS_CAPS === 'on';
 const UNPROVEN_SIDE_MAX = Number(process.env.UNPROVEN_SIDE_MAX) || 5;
+const SHADOW_MAX_DAY = Number(process.env.SHADOW_MAX_DAY) || 6; // shadow items per mode per day (keeps the record manageable)
 const UNPROVEN_FLAT_BLOCK = process.env.UNPROVEN_FLAT_BLOCK !== 'off'; // no unproven intraday stock calls while the index day type is flat (UNPROVEN_FLAT_BLOCK=off restores them)
 // index option calls: 'strict' (default) = only kinds proven by the lab; 'paper' = unproven ones too (marked). Options lose
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.

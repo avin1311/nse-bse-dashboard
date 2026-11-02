@@ -2151,7 +2151,7 @@ const srcOf = c => c.source || 'calls';
 function buildEod(db, events, day, src) {
   if (src) { db = db.filter(c => srcOf(c) === src); const ids = new Set(db.map(c => c.id)); events = events.filter(e => ids.has(e.callId)); }
   const r2 = x => Math.round(x * 100) / 100;
-  const slim = c => ({ symbol: c.symbol, kind: c.kind || 'stock', source: srcOf(c), side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0 });
+  const slim = c => ({ symbol: c.symbol, kind: c.kind || 'stock', source: srcOf(c), side: c.side, mode: c.mode, status: c.status, entry: c.entry, exit: c.exit, ltp: c.ltp, pnlPct: c.pnlPct, targetsHit: c.targetsHit || 0, proven: srcOf(c) === 'calls' ? (c.unproven === false ? true : c.unproven === true ? false : null) : null, t: c.t, exitT: c.exitT || c.closedAt || null });
   const created = db.filter(c => istDateKey(c.t) === day);
   const closed = db.filter(c => c.closed && istDateKey(c.closedAt || c.exitT || c.t) === day);
   const active = db.filter(c => !c.closed);
@@ -2169,6 +2169,7 @@ function buildEod(db, events, day, src) {
     created: { total: created.length, buy: created.filter(c => c.side === 'BUY').length, sell: created.filter(c => c.side === 'SELL').length, intraday: created.filter(c => c.mode === 'intraday').length, swing: created.filter(c => c.mode === 'swing').length },
     closed: { total: closed.length, wins: wins.length, losses: losses.length, flat: closed.length - wins.length - losses.length, netPct: r2(sum(closed)), winRate: wins.length + losses.length ? r2(wins.length / (wins.length + losses.length) * 100) : null },
     byType: { stocks: part(c => c.kind !== 'option'), options: part(c => c.kind === 'option') },
+    byProof: { proven: part(c => srcOf(c) === 'calls' && c.unproven === false), unproven: part(c => srcOf(c) === 'calls' && c.unproven !== false) }, // Trade Calls only: lab-proven kinds vs paper kinds, as tagged when each call was created
     targetHits: evs.filter(e => /^T\d$/.test(e.kind)).length, slHits: evs.filter(e => e.kind === 'SL').length,
     active: { total: active.length, openPnlPct: r2(sum(active)), inProfit: active.filter(c => c.pnlPct > 0.05).length, inLoss: active.filter(c => c.pnlPct < -0.05).length, list: active.map(slim) },
     best: sorted[0] ? slim(sorted[0]) : null, worst: sorted.length ? slim(sorted[sorted.length - 1]) : null,
@@ -2186,6 +2187,7 @@ function eodText(x) {
   if (x.byType) { const S = x.byType.stocks, O = x.byType.options;
     if (S.closed || S.open) t += `  Stocks: ${S.closed} closed (${S.wins}W/${S.losses}L/${S.flat} BE), net ${sg(S.netPct)}\n`;
     if (O.closed || O.open) t += `  Index options: ${O.closed} closed (${O.wins}W/${O.losses}L/${O.flat} BE), net ${sg(O.netPct)} of premium\n`; }
+  if (x.byProof && !x.source || x.byProof && x.source === 'all') { const P = x.byProof.proven, U = x.byProof.unproven; t += `  Trade Calls by proof: proven ${P.created} new / ${P.closed} closed (net ${sg(P.netPct)}) · unproven (paper) ${U.created} new / ${U.closed} closed (net ${sg(U.netPct)})\n`; }
   t += `Targets hit: ${x.targetHits}, stops hit: ${x.slHits}\n`;
   t += `Still open: ${x.active.total} (${x.active.inProfit} in profit, ${x.active.inLoss} in loss, combined running ${sg(x.active.openPnlPct)})\n`;
   if (x.best) t += `Best: ${x.best.symbol} ${sg(x.best.pnlPct)}\n`;
@@ -2460,6 +2462,12 @@ async function runCallsCycle(force) {
     // 1) update outcomes of active calls
     for (const c of db.filter(x => !x.closed)) await applyTrack(c);
     try { await trackShadows(); } catch (e) {}
+    try { // probation record per kind: this server's closed calls, stock shadow items and option watch-only items of that kind
+      const rec = {}, add = (k, p) => { if (!k || p == null) return; k = String(k).split('@')[0]; const o = rec[k] = rec[k] || { n: 0, sum: 0 }; o.n++; o.sum += p; };
+      db.forEach(c => { if (c.closed) add(srcOf(c) === 'shadow' ? c.shadowKey : (c.manual ? null : c.gateKey), c.pnlPct); });
+      (await loadShadow()).forEach(c => { if (c.closed) add(c.gateKey, c.pnlPct); });
+      Object.values(rec).forEach(o => o.avg = Math.round(o.sum / o.n * 100) / 100); liveRec = rec;
+    } catch (e) {}
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
     const universe = FNO_FALLBACK;
@@ -2672,7 +2680,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-10-30-r66 (filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-11-02-r67 (stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2846,7 +2854,13 @@ async function backtestIndexCall(spec, supplied) {
 // ============================================================
 const GATE_MIN = { idx_intraday: Number(process.env.GATE_IDX_INTRADAY_MIN) || 0.05, idx_swing: Number(process.env.GATE_IDX_SWING_MIN) || 0.25,
   stk_intraday: Number(process.env.GATE_STK_INTRADAY_MIN) || 0.03, stk_swing: Number(process.env.GATE_STK_SWING_MIN) || 0.10 };
-const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || 30;
+const LAB_STRICT = process.env.LAB_STRICT !== 'off'; // stricter proof bar (LAB_STRICT=off restores the old one)
+const GATE_MIN_TRADES = Number(process.env.GATE_MIN_TRADES) || (LAB_STRICT ? 100 : 30);
+const LAB_NEWER_MIN = Number(process.env.LAB_NEWER_MIN) || 30, LAB_T = Number(process.env.LAB_T) || 1.65;
+// A kind that passes the lab is only LIVE-proven after a probation: at least PROBATION_N closed live or watch trades of that kind (paper calls and shadow
+// items both count) with a positive average. Until then it is labelled "testing" and its calls stay paper.
+const PROBATION_N = Number(process.env.PROBATION_N) || 30;
+let liveRec = {}; // kind key -> { n, avg } from this server's own closed calls, refreshed every scan
 const CAPS_ON = process.env.CALLS_CAPS === 'on';
 const UNPROVEN_SIDE_MAX = Number(process.env.UNPROVEN_SIDE_MAX) || 5;
 const SHADOW_MAX_DAY = Number(process.env.SHADOW_MAX_DAY) || 6; // shadow items per mode per day (keeps the record manageable)
@@ -2895,9 +2909,9 @@ function accum(map, trades, keyFn, cutoff) {
     const k0 = keyFn(x);
     for (const k of x.dt ? [k0, k0 + '@' + x.dt] : [k0]) { // every kind is also measured per market type (up / down / sideways days)
       let a = map.get(k);
-      if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, w: 0, l: 0, t0: x.t, t1: x.t }; map.set(k, a); }
+      if (!a) { a = { n: 0, sum: 0, oN: 0, oSum: 0, oSq: 0, nN: 0, nSum: 0, nSq: 0, w: 0, l: 0, t0: x.t, t1: x.t }; map.set(k, a); }
       a.n++; a.sum += x.pnlPct; if (x.t < a.t0) a.t0 = x.t; if (x.t > a.t1) a.t1 = x.t; // the period the trades span
-      if (x.t < cutoff) { a.oN++; a.oSum += x.pnlPct; a.oSq += x.pnlPct * x.pnlPct; } else { a.nN++; a.nSum += x.pnlPct; }
+      if (x.t < cutoff) { a.oN++; a.oSum += x.pnlPct; a.oSq += x.pnlPct * x.pnlPct; } else { a.nN++; a.nSum += x.pnlPct; a.nSq += x.pnlPct * x.pnlPct; }
       if (x.status !== 'BREAKEVEN') { if (x.pnlPct > 0.05) a.w++; else if (x.pnlPct < -0.05) a.l++; }
     }
   }
@@ -2907,7 +2921,9 @@ function statsOf(a) {
   if (!a || !a.n) return { n: 0, avg: null, older: null, newer: null, olderN: 0, newerN: 0, winRate: null, olderLcb: null };
   let lcb = null; // conservative score for choosing rules: older-half average minus one standard error, so a lucky handful of trades cannot win
   if (a.oN >= 2) { const m = a.oSum / a.oN, v = Math.max(0, (a.oSq - a.oN * m * m) / (a.oN - 1)); lcb = m - Math.sqrt(v) / Math.sqrt(a.oN); }
-  return { from: a.t0, to: a.t1, n: a.n, avg: r(a.sum / a.n), older: a.oN ? r(a.oSum / a.oN) : null, newer: a.nN ? r(a.nSum / a.nN) : null, olderN: a.oN, newerN: a.nN, winRate: a.w + a.l ? Math.round(a.w / (a.w + a.l) * 100) : null, olderLcb: lcb };
+  let newerT = null; // t-statistic of the NEWER half: the rule was chosen on the older half, so the newer half is the honest test
+  if (a.nN >= 2) { const m = a.nSum / a.nN, v = Math.max(0, ((a.nSq || 0) - a.nN * m * m) / (a.nN - 1)); newerT = v > 0 ? m / (Math.sqrt(v) / Math.sqrt(a.nN)) : (m > 0 ? 9 : 0); }
+  return { newerT: newerT == null ? null : r(newerT), from: a.t0, to: a.t1, n: a.n, avg: r(a.sum / a.n), older: a.oN ? r(a.oSum / a.oN) : null, newer: a.nN ? r(a.nSum / a.nN) : null, olderN: a.oN, newerN: a.nN, winRate: a.w + a.l ? Math.round(a.w / (a.w + a.l) * 100) : null, olderLcb: lcb };
 }
 function pickKinds(kinds, fam, combos, perCombo, cutoff) {
   const min = GATE_MIN[fam === 'index_intraday' || fam === 'index_cross' ? 'idx_intraday' : fam === 'index_swing' ? 'idx_swing' : fam === 'stock_intraday' || fam === 'stock_secmom' || fam === 'stock_atrsq' || fam === 'stock_atrsq5' || fam === 'stock_gapgo' || fam === 'stock_fade' ? 'stk_intraday' : 'stk_swing'];
@@ -2921,6 +2937,11 @@ function pickKinds(kinds, fam, combos, perCombo, cutoff) {
     if (st.n < GATE_MIN_TRADES) why.push(`only ${st.n} past trades (need ${GATE_MIN_TRADES})`);
     if (st.avg == null || st.avg <= min) why.push(`average ${st.avg == null ? '—' : (st.avg > 0 ? '+' : '') + st.avg + '%'} is not above +${min}%`);
     if (!(st.older > 0) || !(st.newer > 0) || st.newerN < 5) why.push('not profitable in both the older and the newer half');
+    if (LAB_STRICT) { // stricter bar: enough trades on the half the rule never saw, a real average there, and a margin over luck
+      if (st.newerN < LAB_NEWER_MIN) why.push(`only ${st.newerN} trades on the newer half the rule never saw (need ${LAB_NEWER_MIN})`);
+      else if (st.newerT == null || st.newerT < LAB_T) why.push(`newer-half result is not clearly above luck (t ${st.newerT == null ? '—' : st.newerT}, need ${LAB_T})`);
+      if (st.newer != null && st.newer <= min) why.push(`newer-half average ${st.newer}% is not above +${min}%`);
+    }
     const set = keyParts(key).setup, bars = fam === 'index_swing' || fam === 'stock_swing' ? 'daily candles' : set === 'x5' ? '5-minute candles' : '15-minute candles';
     kinds[key] = { label: gateLabel(key), fam, bars, params: combos[win.ci], paramsText: paramsLabel(combos[win.ci]), tested: combos.length, min, ...st,
       pass: !why.length, reason: why.length ? why.join('; ') : 'passed', current: cand[defIdx].st, cutoff };
@@ -3063,8 +3084,9 @@ function gateCheck(key) {
   const k = gate.t && gate.kinds[key];
   if (isRetired(k)) return { ok: false, proven: false, retired: true, reason: retireReason(k) };
   const reason = !gate.t ? (gate.building ? 'strategy lab still running' : 'strategy lab not run yet') : !k ? 'no past trades of this kind' : k.reason;
-  const proven = !!(k && k.pass);
-  return { ok: proven || GATE_MODE !== 'strict', proven, reason: proven ? 'passed' : reason };
+  let proven = !!(k && k.pass), why = reason;
+  if (proven && LAB_STRICT) { const lr = liveRec[String(key).split('@')[0]]; if (!lr || lr.n < PROBATION_N || !(lr.avg > 0)) { proven = false; why = `testing: lab passed, live record ${lr ? lr.n : 0} of ${PROBATION_N} trades${lr && lr.n >= PROBATION_N ? ', average ' + lr.avg + '%' : ''}`; } }
+  return { ok: proven || GATE_MODE !== 'strict', proven, reason: proven ? 'passed' : why };
 }
 // parameter sets to evaluate live for one family: one per kind found by the lab, else the current defaults
 // dt = today's market type ('up' / 'down' / 'flat'): a kind proven only on that type of day is added (proven ones first)

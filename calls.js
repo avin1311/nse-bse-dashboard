@@ -915,7 +915,7 @@ function mkAgg(a) {
     winRate: w.length + l.length ? r2(w.length / (w.length + l.length) * 100) : null, avgPct: a.length ? r2(sum / a.length) : null, totalPct: r2(sum), avgWin: r2(avg(w)), avgLoss: r2(avg(l)) };
 }
 function tradeOf(sym, call, ev, st, bias) {
-  return { sym, t: call.t, side: ev.side, setup: ev.setup || 'trend', risk: ev.riskLabel, status: st.status, pnlPct: st.pnlPct, grossPct: st.grossPct, closed: st.closed, bias, entry: ev.entry, exit: st.exit, exitT: st.exitT, targetsHit: st.targetsHit };
+  return { sym, t: call.t, side: ev.side, setup: ev.setup || 'trend', risk: ev.riskLabel, status: st.status, pnlPct: st.pnlPct, grossPct: st.grossPct, closed: st.closed, bias, entry: ev.entry, sl: ev.sl, exit: st.exit, exitT: st.exitT, targetsHit: st.targetsHit };
 }
 async function walkSwing(sym, bars, opts, yieldFn) {
   const out = [], far = 4e9; let freeFrom = 0, cnt = 0;

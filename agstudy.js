@@ -188,23 +188,27 @@ function aggregateTargets2(all, nStocks) {
 // option % move = delta x spot move / premium (delta 0.5, ATM premium = P % of spot), stop -12%, target +25% or +30%, out at 15:30, round-trip cost 2% of premium.
 // Theta (time decay) and gamma are ignored: decay would make the real result a little worse on slow days.
 const O_DELTA = 0.5, O_P = [0.5, 0.8], O_STOP = 12, O_TG = [25, 30], O_COST = 2;
+// Stop styles tested on the same index trades: a premium stop of 10 / 20 / 30 %, the index-level stop alone (exit when a 15-minute bar CLOSES beyond
+// the call's own stop level, which is how the live index-option rule works), and the index-level stop with a -50 % premium disaster stop.
+const O_STOPS = [{ k: 'prem10', p: 10, spot: false }, { k: 'prem20', p: 20, spot: false }, { k: 'prem30', p: 30, spot: false }, { k: 'spot', p: null, spot: true }, { k: 'spot+prem50', p: 50, spot: true }];
 function optStudy(trades, bars) {
   const idx = new Map(); bars.forEach((b, i) => idx.set(b.t, i)); const recs = [];
   trades.forEach(tr => {
     if (!tr.closed || !tr.entry) return; const dir = /^(BUY|LONG|UP|CALL)/i.test(tr.side) ? 1 : -1;
     let i = idx.get(tr.t - 899); if (i == null) { i = bars.findIndex(b => b.t + 899 >= tr.t); if (i < 0) return; }
     const day = Math.floor((tr.t + 19800) / 86400), e = tr.entry;
-    O_P.forEach(P => O_TG.forEach(TG => {
+    O_P.forEach(P => O_TG.forEach(TG => O_STOPS.forEach(SS => {
       let o = 'E', ret = null, mfe = 0;
       for (let j = i + 1; j < bars.length; j++) {
         const b = bars[j]; if (Math.floor((b.t + 19800) / 86400) !== day) { ret = ret == null ? 0 : ret; break; }
         const fav = O_DELTA * (dir > 0 ? (b.h - e) / e * 100 : (e - b.l) / e * 100) / P * 100, adv = O_DELTA * (dir > 0 ? (e - b.l) / e * 100 : (b.h - e) / e * 100) / P * 100; mfe = Math.max(mfe, fav);
-        if (adv >= O_STOP) { o = 'S'; ret = -O_STOP; break; }
+        if (SS.p != null && adv >= SS.p) { o = 'S'; ret = -SS.p; break; }
+        if (SS.spot && tr.sl != null && (dir > 0 ? b.c <= tr.sl : b.c >= tr.sl)) { o = 'S'; ret = Math.max(-100, O_DELTA * dir * (b.c - e) / e * 100 / P * 100); break; }
         if (fav >= TG) { o = 'T'; ret = TG; break; }
         const last = Math.floor(((b.t + 19800) % 86400) / 60) >= 915 - 15; if (last) { ret = O_DELTA * dir * (b.c - e) / e * 100 / P * 100; break; }
       }
-      if (ret == null) ret = 0; recs.push({ kind: (tr.sym || '') + ' ' + (tr.setup || tr.engine || 'idx') + ' ' + (dir > 0 ? 'CALL' : 'PUT'), k2: (tr.setup || tr.engine || 'idx') + ' ' + (dir > 0 ? 'CALL' : 'PUT'), dt: tr.dt || 'n/a', P, tg: TG, t: tr.t, o, ret: ret - O_COST, mfe });
-    }));
+      if (ret == null) ret = 0; recs.push({ kind: (tr.sym || '') + ' ' + (tr.setup || tr.engine || 'idx') + ' ' + (dir > 0 ? 'CALL' : 'PUT'), k2: (tr.setup || tr.engine || 'idx') + ' ' + (dir > 0 ? 'CALL' : 'PUT'), dt: tr.dt || 'n/a', P, tg: TG, sk: SS.k, sp: SS.p, t: tr.t, o, ret: Math.max(-100, ret - O_COST), mfe });
+    })));
   });
   return recs;
 }
@@ -212,11 +216,11 @@ function aggregateOpt(all) {
   const r2 = x => Math.round(x * 100) / 100, avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
   const ts = all.map(x => x.t).sort((a, b) => a - b), mid = ts[Math.floor(ts.length / 2)], key = {}, rows = [];
   const put = (k, x) => (key[k] = key[k] || []).push(x);
-  all.forEach(x => { [['ALL', 'all'], ['ALL', 'day ' + x.dt], [x.k2, 'all'], [x.k2, 'day ' + x.dt]].forEach(([g, d]) => put([g, d, x.P, x.tg].join('|'), x)); });
-  Object.entries(key).forEach(([k, a]) => { const [g, d, P, tg] = k.split('|'); if (a.length < 20) return; const T = a.filter(x => x.o === 'T').length, S = a.filter(x => x.o === 'S').length, o = a.filter(x => x.t < mid), nw = a.filter(x => x.t >= mid);
-    rows.push({ kind: g, when: d, premiumPct: +P, target: +tg, n: a.length, hitT: Math.round(T / a.length * 100), hitS: Math.round(S / a.length * 100), exitEOD: Math.round((a.length - T - S) / a.length * 100), avg: r2(avg(a.map(x => x.ret))), older: r2(avg(o.map(x => x.ret))), newer: r2(avg(nw.map(x => x.ret))), needWin: r2((O_STOP + O_COST) / (O_STOP + +tg) * 100) }); });
-  rows.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.when < b.when ? -1 : a.when > b.when ? 1 : a.premiumPct - b.premiumPct || a.target - b.target));
-  return { trades: all.length / (O_P.length * O_TG.length), from: ts[0] || null, to: ts[ts.length - 1] || null, rows, model: { delta: O_DELTA, premiumPctOfSpot: O_P, stop: O_STOP, targets: O_TG, cost: O_COST } };
+  all.forEach(x => { [['ALL', 'all'], ['ALL', 'day ' + x.dt], [x.k2, 'all'], [x.k2, 'day ' + x.dt]].forEach(([g, d]) => put([g, d, x.P, x.tg, x.sk].join('|'), x)); });
+  Object.entries(key).forEach(([k, a]) => { const [g, d, P, tg, sk] = k.split('|'); const sp = (O_STOPS.find(z => z.k === sk) || {}).p; if (a.length < 20) return; const T = a.filter(x => x.o === 'T').length, S = a.filter(x => x.o === 'S').length, o = a.filter(x => x.t < mid), nw = a.filter(x => x.t >= mid);
+    rows.push({ kind: g, when: d, premiumPct: +P, target: +tg, stop: sk, n: a.length, hitT: Math.round(T / a.length * 100), hitS: Math.round(S / a.length * 100), exitEOD: Math.round((a.length - T - S) / a.length * 100), avg: r2(avg(a.map(x => x.ret))), older: r2(avg(o.map(x => x.ret))), newer: r2(avg(nw.map(x => x.ret))), needWin: sp != null ? r2((sp + O_COST) / (sp + +tg) * 100) : null }); });
+  rows.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.when < b.when ? -1 : a.when > b.when ? 1 : a.premiumPct - b.premiumPct || a.target - b.target || (a.stop < b.stop ? -1 : a.stop > b.stop ? 1 : 0)));
+  return { trades: all.length / (O_P.length * O_TG.length * O_STOPS.length), from: ts[0] || null, to: ts[ts.length - 1] || null, rows, model: { delta: O_DELTA, premiumPctOfSpot: O_P, stops: O_STOPS.map(z => z.k), targets: O_TG, cost: O_COST } };
 }
 
 // ---- Research studies on daily history (read-only): relative-strength momentum, gap reversal vs continuation, and index behaviour by weekday (expiry day).

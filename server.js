@@ -2343,7 +2343,7 @@ async function addShadow(f, gk, reason, nowSec, st) {
   const L = await loadShadow(); if (!shadowDb) return;
   const dayNo = t => Math.floor((t + 19800) / 86400), today = dayNo(nowSec);
   if (L.some(c => c.underlying === f.u && c.mode === f.mode && (!c.closed || nowSec - (c.closedAt || c.t) < 3600))) return; // one at a time per index and mode
-  if (L.some(c => c.underlying === f.u && c.dir === f.side && c.mode === f.mode && c.status === 'SL_HIT' && dayNo(c.closedAt || c.t) === today)) return;
+  if (L.filter(c => c.underlying === f.u && c.dir === f.side && c.mode === f.mode && c.status === 'SL_HIT' && dayNo(c.closedAt || c.t) === today).length >= REENTRY_MAX) return;
   try {
     const q = await getUpstoxLTPC(await dataKeyFor(f.u)); const ltp = q.price;
     if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) return;
@@ -2388,9 +2388,10 @@ async function runIndexScan(db, notes) {
       const dtS = Calls.biasDt(dailyBias);
       if (mins >= 570 && mins <= 925) {
         const D = daily.slice(-400), P = Calls.prep(D);
+        const sw = st.swing = st.swing || { checked: 0, signals: 0, regimeBlocked: 0 };
         for (const k of liveKinds('index_swing', ['idx|swing|BUY|pullback', 'idx|swing|BUY|breakout', 'idx|swing|SELL|pullback', 'idx|swing|SELL|breakout'], dtS)) {
-          const ev = Calls.evalIndexAt(P, D.length - 1, 'swing', { bias: dailyBias, ...k.params, ...sideSetup(k.key) });
-          if (ev && regimeLive(ev.side, k.params.regime)) found.push({ u, gateKey: k.key, ...ev });
+          sw.checked++; const ev = Calls.evalIndexAt(P, D.length - 1, 'swing', { bias: dailyBias, ...k.params, ...sideSetup(k.key) });
+          if (ev) { sw.signals++; if (regimeLive(ev.side, k.params.regime)) found.push({ u, gateKey: k.key, ...ev }); else sw.regimeBlocked++; }
         }
       }
       if (mins >= 560 && mins <= 845 && process.env.CALLS_INTRADAY !== 'off') { // EMA 20/50 crossover (5- and 15-minute)
@@ -2436,7 +2437,7 @@ async function runIndexScan(db, notes) {
     if (CAPS_ON && peers.filter(c => c.mode === f.mode && dayNo(c.t) === today).length >= DAY_CAP[f.mode]) continue;
     if (peers.some(c => c.underlying === f.u && c.closed && nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 3600 : 2 * 86400))) continue;
     // no second try in the same direction on an index after a stop today (the idea already failed)
-    if (optCalls.some(c => c.underlying === f.u && c.dir === f.side && c.mode === f.mode && c.closed && c.status === 'SL_HIT' && dayNo(c.closedAt || c.t) === today)) { st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ': already stopped out in this direction today'); continue; }
+    if (optCalls.filter(c => c.underlying === f.u && c.dir === f.side && c.mode === f.mode && c.closed && c.status === 'SL_HIT' && dayNo(c.closedAt || c.t) === today).length >= REENTRY_MAX) { st.skipped.push(f.u + ' ' + f.mode + ' ' + f.side + ': stopped out ' + REENTRY_MAX + ' time(s) in this direction today'); continue; }
     try {
       const q = await getUpstoxLTPC(await dataKeyFor(f.u)); const ltp = q.price;
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) { st.skipped.push(f.u + ': price already ran away from the signal'); continue; }
@@ -2445,7 +2446,7 @@ async function runIndexScan(db, notes) {
       if (wall && wall.against && process.env.OI_WALL === 'block') { gateBlocked(`${f.u} ${f.mode} ${f.side} oi`, gk, `open-interest wall at ${wall.strike} (${wall.distPct}% away, ${wall.ratio}x typical OI)`); continue; }
       const call = await buildOptionCall(f.u, f, ltp, nowSec); if (wall) call.oiWall = wall;
       Object.assign(call, { provenOn: keyParts(gk).dt || null, status: 'ACTIVE', targetsHit: 0, activeSl: call.sl, ltp: call.entry, exit: null, pnlPct: 0, closed: false, gateKey: gk, unproven: !g.proven, gateReason: g.proven ? null : g.reason, params: (gate.kinds[gk] || {}).paramsText || null });
-      sizeCall(call); db.push(call); optCalls.push(call); made[f.mode]++;
+      if (g.proven) sizeCall(call); db.push(call); optCalls.push(call); made[f.mode]++;
       await emitEvent({ id: call.id + ':NEW', callId: call.id, symbol: call.symbol, side: call.side, mode: call.mode, kind: 'NEW', level: 'info', t: nowSec, price: call.entry, pnlPct: null, text: `🆕 BUY ${call.symbol} (${call.mode}) premium ₹${call.entry}, expiry ${call.expiryLabel}` }, false);
       notes.push(`${call.unproven ? '🧪 <b>UNPROVEN (paper)</b> ' : ''}🆕 BUY <b>${call.symbol}</b> (${call.mode === 'swing' ? 'multi-day' : 'intraday'}) expiry ${call.expiryLabel}\nPremium ₹${call.entry}${call.lots ? ' · ' + call.lots + ' lot' + (call.lots > 1 ? 's' : '') + ' (₹' + call.riskRs.toLocaleString('en-IN') + ' at risk' + (call.overRisk ? ', above your limit' : '') + ')' : ''}, SL ₹${call.sl}, T1 ₹${call.targets[0]}, T2 ₹${call.targets[1]}, T3 ₹${call.targets[2]}. Exit if ${f.u} ${f.side === 'BUY' ? 'closes below' : 'closes above'} ${call.spotSl}${call.holdDays ? ', or in ' + call.holdDays + ' days' : ', and by 15:15'}.`);
     } catch (e) { st.skipped.push(f.u + ' ' + f.mode + ': ' + e.message); }
@@ -2463,10 +2464,10 @@ async function runCallsCycle(force) {
     for (const c of db.filter(x => !x.closed)) await applyTrack(c);
     try { await trackShadows(); } catch (e) {}
     try { // probation record per kind: this server's closed calls, stock shadow items and option watch-only items of that kind
-      const rec = {}, add = (k, p) => { if (!k || p == null) return; k = String(k).split('@')[0]; const o = rec[k] = rec[k] || { n: 0, sum: 0 }; o.n++; o.sum += p; };
-      db.forEach(c => { if (c.closed) add(srcOf(c) === 'shadow' ? c.shadowKey : (c.manual ? null : c.gateKey), c.pnlPct); });
-      (await loadShadow()).forEach(c => { if (c.closed) add(c.gateKey, c.pnlPct); });
-      Object.values(rec).forEach(o => o.avg = Math.round(o.sum / o.n * 100) / 100); liveRec = rec;
+      const rec = {}, add = (k, p, t) => { if (!k || p == null) return; k = String(k).split('@')[0]; const o = rec[k] = rec[k] || { n: 0, sum: 0, list: [] }; o.n++; o.sum += p; o.list.push([t || 0, p]); };
+      db.forEach(c => { if (c.closed) add(srcOf(c) === 'shadow' ? c.shadowKey : (c.manual ? null : c.gateKey), c.pnlPct, c.closedAt || c.exitT || c.t); });
+      (await loadShadow()).forEach(c => { if (c.closed) add(c.gateKey, c.pnlPct, c.closedAt || c.exitT || c.t); });
+      Object.values(rec).forEach(o => { o.avg = Math.round(o.sum / o.n * 100) / 100; const l = o.list.sort((a, b) => a[0] - b[0]).slice(Math.floor(o.n / 2)); o.newer = l.length ? Math.round(l.reduce((x, y) => x + y[1], 0) / l.length * 100) / 100 : null; delete o.list; }); liveRec = rec;
     } catch (e) {}
     // 2) look for new setups
     const { dow, mins } = istParts(); const open = dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930;
@@ -2680,7 +2681,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-11-04-r69 (early-signal study (squeeze, accumulation, relative strength, oversold pullback vs the lagging 55-day break) and the same setups tracked daily as shadow items at 15:05; options study compares premium stops 10/20/30%, index-level stop and index stop with a 50% premium floor; stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-11-04-r70 (index options: unproven signals issue labelled paper calls again, a second try after a stop (60 minutes later), live paper probation instead of the 100-trade history bar, swing scan counters, index gap and squeeze study; early-signal study (squeeze, accumulation, relative strength, oversold pullback vs the lagging 55-day break) and the same setups tracked daily as shadow items at 15:05; options study compares premium stops 10/20/30%, index-level stop and index stop with a 50% premium floor; stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -2860,6 +2861,7 @@ const LAB_NEWER_MIN = Number(process.env.LAB_NEWER_MIN) || 30, LAB_T = Number(pr
 // A kind that passes the lab is only LIVE-proven after a probation: at least PROBATION_N closed live or watch trades of that kind (paper calls and shadow
 // items both count) with a positive average. Until then it is labelled "testing" and its calls stay paper.
 const PROBATION_N = Number(process.env.PROBATION_N) || 30;
+const IDX_PROBATION = process.env.IDX_PROBATION !== 'off'; // index options: proven after PROBATION_N live paper trades with a positive average and newer half (IDX_PROBATION=off needs the lab bar)
 let liveRec = {}; // kind key -> { n, avg } from this server's own closed calls, refreshed every scan
 const CAPS_ON = process.env.CALLS_CAPS === 'on';
 const UNPROVEN_SIDE_MAX = Number(process.env.UNPROVEN_SIDE_MAX) || 5;
@@ -2867,7 +2869,8 @@ const SHADOW_MAX_DAY = Number(process.env.SHADOW_MAX_DAY) || 6; // shadow items 
 const UNPROVEN_FLAT_BLOCK = process.env.UNPROVEN_FLAT_BLOCK !== 'off'; // no unproven intraday stock calls while the index day type is flat (UNPROVEN_FLAT_BLOCK=off restores them)
 // index option calls: 'strict' (default) = only kinds proven by the lab; 'paper' = unproven ones too (marked). Options lose
 // ~25% of premium on every miss, so unproven option calls are far costlier than unproven stock calls.
-const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'strict').toLowerCase(); // count limits on calls; off by default during paper testing
+const REENTRY_MAX = process.env.INDEX_REENTRY === 'off' ? 1 : 2; // stops allowed per index, direction and mode per day: after one stop a second try is allowed once the 60-minute wait is over (INDEX_REENTRY=off restores one)
+const INDEX_GATE = (process.env.CALLS_INDEX_GATE || 'paper').toLowerCase(); // count limits on calls; off by default during paper testing
 let gate = { t: 0, building: false, progress: '', err: null, kinds: {} };
 storeGet('store:calls-gate', null).then(g => { if (g && g.kinds && g.labVersion >= 14 && !gate.t) gate = { ...g, building: false, needsRebuild: g.labVersion !== 16 }; if (gate.needsRebuild) setTimeout(() => maybeBuildGate(), 20000); }).catch(() => {}); // older (pre-lab) results are ignored, so the lab runs
 const SETUP_NAME = { atrsq: 'ATR volatility trend', atrsq5: 'ATR volatility trend (5-min)', orb: 'opening-range break', pullback: 'pullback', breakout: '20-day breakout', trend: 'trend pullback', bounce: 'counter-trend bounce', orbvwap: 'opening-range break + VWAP', pdhl: 'previous-day high/low break', squeeze: 'tight-range breakout', trendday: 'trend day', vwap: 'VWAP rejection / hold', x5: '5-min EMA 20/50 crossover', x15: '15-min EMA 20/50 crossover', secmom: 'sector momentum', gapgo: 'gap and go', fade: 'range fade (sideways days)' };
@@ -3086,7 +3089,12 @@ function gateCheck(key) {
   const reason = !gate.t ? (gate.building ? 'strategy lab still running' : 'strategy lab not run yet') : !k ? 'no past trades of this kind' : k.reason;
   let proven = !!(k && k.pass), why = reason;
   if (proven && LAB_STRICT) { const lr = liveRec[String(key).split('@')[0]]; if (!lr || lr.n < PROBATION_N || !(lr.avg > 0)) { proven = false; why = `testing: lab passed, live record ${lr ? lr.n : 0} of ${PROBATION_N} trades${lr && lr.n >= PROBATION_N ? ', average ' + lr.avg + '%' : ''}`; } }
-  return { ok: proven || GATE_MODE !== 'strict', proven, reason: proven ? 'passed' : why };
+  if (!proven && LAB_STRICT && IDX_PROBATION && String(key).startsWith('idx|') && k) { // index options: the lab history is too short for the 100-trade bar, so a live paper record decides
+    const lr = liveRec[String(key).split('@')[0]];
+    if (lr && lr.n >= PROBATION_N && lr.avg > 0 && lr.newer > 0) { proven = true; why = `index probation passed: ${lr.n} paper trades, average ${lr.avg}%, newer half ${lr.newer}%`; }
+    else why = `index probation: ${lr ? lr.n : 0} of ${PROBATION_N} paper trades${lr && lr.n >= PROBATION_N ? ', average ' + lr.avg + '%, newer half ' + lr.newer + '%' : ''}`;
+  }
+  return { ok: proven || GATE_MODE !== 'strict', proven, reason: proven ? (why.startsWith('index probation passed') ? why : 'passed') : why };
 }
 // parameter sets to evaluate live for one family: one per kind found by the lab, else the current defaults
 // dt = today's market type ('up' / 'down' / 'flat'): a kind proven only on that type of day is added (proven ones first)
@@ -3515,7 +3523,7 @@ app.post('/api/research-study', async (req, res) => {
     rsStudy.progress = 'early signals'; await yieldLoop(); const early = St.earlyStudy(D, nifty, Calls.costPct('swing'));
     rsStudy.progress = 'expiry days'; await yieldLoop(); const expiry = {};
     for (const u of ['NIFTY', 'BANKNIFTY', 'SENSEX']) { try { const bars = toBars(await getUpstoxCandles(u, '1D')).filter(x => x.c > 0 && x.o > 0).slice(-1300); let wd = null; try { const { list } = await getOptionContracts(u); const e = [...new Set(list.map(c => c.expiry))].sort().find(x => x >= istDate(0)); wd = e ? new Date(e + 'T00:00:00Z').toLocaleString('en-GB', { weekday: 'long', timeZone: 'UTC' }) : null; } catch (e) {}
-      expiry[u] = { expiryWeekday: wd, bars: bars.length, from: bars[0].t, to: bars[bars.length - 1].t, rows: St.expiryStudy(bars, Math.floor(Date.UTC(2025, 8, 1) / 86400000)) }; } catch (e) { expiry[u] = { error: e.message }; } }
+      expiry[u] = { expiryWeekday: wd, bars: bars.length, from: bars[0].t, to: bars[bars.length - 1].t, rows: St.expiryStudy(bars, Math.floor(Date.UTC(2025, 8, 1) / 86400000)), early: St.indexEarly(bars, Calls.IDX_COST) }; } catch (e) { expiry[u] = { error: e.message }; } }
     const out = { stocks: n, from: nifty[0].t, to: nifty[nifty.length - 1].t, momentum, gaps, early, expiry, at: Date.now(), tookS: Math.round((Date.now() - t0) / 1000) };
     rsStudy.result = out; rsStudy.at = out.at; rsStudy.progress = 'done'; await storeSet('store:research-study', out).catch(() => {});
   })().catch(e => { rsStudy.err = e.message; }).finally(() => { rsStudy.running = false; });

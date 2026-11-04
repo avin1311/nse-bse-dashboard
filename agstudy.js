@@ -340,4 +340,28 @@ function earlyStudy(D, nifty, cost) {
   return { rows, stocks: Object.keys(D).length, from: nifty[0].t, to: nifty[nifty.length - 1].t };
 }
 
-module.exports = { earlyStudy, earlyNow, EARLY_NAME, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };
+// Index early-signal study (daily bars of one index): gap days (open 0.4%+ away from the last close: follow it or fade it, same-day exit at the close) and
+// volatility squeezes (narrowest day of 7 inside the lowest 20% of 120 days, in the trend direction; 1 ATR stop, 1.5 ATR target, 3 sessions).
+// Spot-level: the option adds its own cost and decay. cost = round-trip cost of the spot trade in %.
+function indexEarly(bars, cost) {
+  const n = bars.length, acc = {}, put = (key, label, side, t, ret) => { const a = acc[key + '|' + side] || (acc[key + '|' + side] = { key, label, side, r: [] }); a.r.push({ t, ret }); };
+  if (n < 200) return { rows: [], bars: n };
+  const rng = bars.map(b => (b.h - b.l) / b.c * 100), tr = bars.map((b, i) => i ? Math.max(b.h - b.l, Math.abs(b.h - bars[i - 1].c), Math.abs(b.l - bars[i - 1].c)) : b.h - b.l);
+  const sma = (i, L) => { let s = 0; for (let j = i - L + 1; j <= i; j++) s += bars[j].c; return s / L; };
+  for (let k = 130; k < n - 4; k++) {
+    const b = bars[k], gap = (b.o / bars[k - 1].c - 1) * 100;
+    if (Math.abs(gap) >= 0.4) { const d = gap > 0 ? 1 : -1; put('gapgo', 'Gap day, follow the gap (enter at the open, exit at the close)', d > 0 ? 'BUY' : 'SELL', b.t, d * (b.c - b.o) / b.o * 100 - cost); put('gapfade', 'Gap day, fade the gap (enter at the open, exit at the close)', d > 0 ? 'SELL' : 'BUY', b.t, -d * (b.c - b.o) / b.o * 100 - cost); }
+    let nr7 = true; for (let j = k - 6; j < k; j++) if (rng[j] <= rng[k]) nr7 = false;
+    if (nr7) { let a10 = 0; for (let j = k - 9; j <= k; j++) a10 += rng[j]; a10 /= 10; let ge = 0, tot = 0; for (let q = k - 119; q <= k; q++) { let a = 0; for (let j = q - 9; j <= q; j++) a += rng[j]; if (a / 10 >= a10) ge++; tot++; }
+      const s50 = sma(k, 50), s50b = sma(k - 5, 50), d = b.c > s50 && s50 > s50b ? 1 : b.c < s50 && s50 < s50b ? -1 : 0;
+      if (ge / tot >= 0.8 && d) { let atr = 0; for (let j = k - 13; j <= k; j++) atr += tr[j]; atr /= 14; const sp = atr / b.c * 100, e = b.c, st = e * (1 - d * sp / 100), tg = e * (1 + d * 1.5 * sp / 100); let ret = d * (bars[k + 3].c - e) / e * 100;
+        for (let j = k + 1; j <= k + 3; j++) { const x = bars[j]; if (d > 0 ? x.l <= st : x.h >= st) { ret = -sp; break; } if (d > 0 ? x.h >= tg : x.l <= tg) { ret = 1.5 * sp; break; } }
+        put('squeeze', 'Squeeze in trend direction (1 ATR stop, 1.5 ATR target, 3 sessions)', d > 0 ? 'BUY' : 'SELL', b.t, ret - cost); } }
+  }
+  const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null, vr = x => { const m = mean(x); return x.length > 1 ? x.reduce((s, y) => s + (y - m) ** 2, 0) / (x.length - 1) : 0; };
+  const rows = Object.values(acc).map(a => { const r = a.r.sort((x, y) => x.t - y.t), m = Math.floor(r.length / 2), od = r.slice(0, m).map(x => x.ret), nv = r.slice(m).map(x => x.ret), w = r.filter(x => x.ret > 0).length;
+    return { key: a.key, label: a.label, side: a.side, n: r.length, from: r[0].t, to: r[r.length - 1].t, win: Math.round(w / r.length * 100), avg: r2_(mean(r.map(x => x.ret))), older: r2_(mean(od)), newer: r2_(mean(nv)), newerT: nv.length > 2 && vr(nv) > 0 ? r2_(mean(nv) / Math.sqrt(vr(nv) / nv.length)) : null }; }).sort((x, y) => (y.newer === null ? -99 : y.newer) - (x.newer === null ? -99 : x.newer));
+  return { rows, bars: n, from: bars[0].t, to: bars[n - 1].t };
+}
+
+module.exports = { indexEarly, earlyStudy, earlyNow, EARLY_NAME, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };

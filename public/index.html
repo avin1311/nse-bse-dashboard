@@ -836,6 +836,12 @@ window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); window.__
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><select id="oiExpiry" title="Expiry"></select><button class="btn" id="oiRefresh">&#8635; Refresh</button></div></div>
     <div id="oiBody"><div class="metric-sub">Open the Derivatives tab of an F&amp;O stock or index to see its open interest.</div></div>
   </section>
+  <section id="sec-flow" class="panel">
+    <div class="panel-head"><h3>Option flow &mdash; buying and selling pressure</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><select id="flowSym" title="Index"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="SENSEX">SENSEX</option></select>
+      <select id="flowWin" title="Compare with"><option value="5">last 5 min</option><option value="15" selected>last 15 min</option><option value="30">last 30 min</option></select><button class="btn" id="flowRefresh">&#8635; Refresh</button></div></div>
+    <div id="flowBody"><div class="metric-sub">Loading option flow&hellip;</div></div>
+  </section>
   <section id="sec-options" class="panel">
     <div class="panel-head"><h3>Options &amp; futures scanning</h3></div>
     <p class="desc">Real Upstox option-chain data once <code>UPSTOX_ACCESS_TOKEN</code> is configured. The "signal" here is the standard OI-buildup classification traders use (Long/Short Buildup, Long Unwinding, Short Covering) &mdash; derived from price direction + open-interest direction together, since RSI/MACD-style indicators don't translate meaningfully to option premiums. The very first scan of any stock/expiry shows "No comparison yet" since there's nothing prior to compare against &mdash; scan again a few minutes later to see real classifications.</p>
@@ -2294,6 +2300,36 @@ async function renderOI(d,expiry){
   box.innerHTML=cards+`<div class="oi-read">${read.map(x=>'<div>'+x+'</div>').join('')}</div>`+ladder
     +`<div class="metric-sub" style="margin-top:8px;">Expiry ${esc0(o.expiry)}${o.lot?' &middot; lot '+o.lot:''} &middot; Upstox option chain${o.market!=='open'?' (market closed: last values)':''} &middot; OI change is against the previous day's close. Shaded cells are in the money. How option writers are positioned, not a prediction.</div>`;
 }
+
+
+// ---- Option flow (server snapshots every minute: ATM and 3 strikes either side, calls and puts) ----
+let flowSeq=0, flowTimer=null;
+function flowXTxt(o){ if(!o||(o.x==null&&!o.note)) return '<span class="metric-sub">&mdash;</span>'; const c=o.who==='buyers'?'up':'down'; return o.x==null?`<span class="${c}">${esc0(o.note)}</span>`:`<b class="${c}">${o.x.toFixed(1)}&times;</b> <span class="${c}">${o.who}</span>`; }
+function flowReadTxt(c){ if(!c.read) return '<span class="metric-sub">&hellip;</span>'; const col=c.bias>0?'up':c.bias<0?'down':'', ar=c.bias>0?'&#9650; ':c.bias<0?'&#9660; ':''; return `<span class="${col}">${ar}${c.read}</span>`; }
+function flowDp(c){ return c.dp==null?'<span class="metric-sub">&mdash;</span>':`<span class="${c.dp>0?'up':c.dp<0?'down':''}">${c.dp>0?'+':''}${fmt(c.dp,2)}</span>`; }
+function flowSide(c){ return `<td>${c.ltp!=null?fmt(c.ltp,2):'&mdash;'}<div class="metric-sub">${flowDp(c)}</div></td><td>${c.dOi==null?'&mdash;':'<span class="'+(c.dOi>0?'':'')+'">'+oiSg(c.dOi)+'</span>'}<div class="metric-sub">of ${oiFmt(c.oi)}</div></td><td>${flowReadTxt(c)}</td><td>${flowXTxt(c)}<div class="metric-sub">${oiFmt(c.bq)} bid &middot; ${oiFmt(c.aq)} offer${c.x5!=null?'<br>5 best: '+c.x5.toFixed(1)+'&times; '+c.who5:''}</div></td>`; }
+async function loadFlow(){
+  const box=document.getElementById('flowBody'); if(!box) return; const sym=document.getElementById('flowSym').value, w=document.getElementById('flowWin').value, seq=++flowSeq;
+  let o; try{ const r=await fetch('/api/optflow/'+sym+'?w='+w,{cache:'no-store'}); o=await r.json(); if(!r.ok||o.error) throw new Error(o.error||('HTTP '+r.status)); }
+  catch(e){ if(seq!==flowSeq) return; box.innerHTML='<div class="metric-sub" style="color:var(--amber)">Option flow unavailable: '+esc0(e.message)+'</div>'; return; }
+  if(seq!==flowSeq) return;
+  const V=o.verdict, tm=t=>new Date(t).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'}), dt=t=>new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'});
+  const vc=V.name==='Bullish'?'up':V.name==='Bearish'?'down':'', ready=o.win!=null;
+  const head=ready?`<div class="oi-read"><div><b class="${vc}" style="font-size:16px;">${V.name==null?'Not enough history yet':V.name+' pressure'}</b>${V.net!=null?' <span class="metric-sub">score '+(V.net>0?'+':'')+V.net.toFixed(2)+' (−1 to +1), '+(o.win)+' min compared'+(o.win<o.wantWin?' (history is still building, '+o.wantWin+' min asked)':'')+'</span>':''}</div>
+    <div>Call writing wall <b class="down">${o.res??'&mdash;'}</b> &middot; put support <b class="up">${o.sup??'&mdash;'}</b> &middot; PCR ${o.pcr!=null?o.pcr.toFixed(2):'&mdash;'} &middot; whole order book: calls ${flowXTxt(o.book.ce)}, puts ${flowXTxt(o.book.pe)}</div></div>`
+    :`<div class="oi-read"><div>First snapshot taken at ${tm(o.at)}. A reading needs at least 2 minutes of history; the server adds one snapshot a minute while the market is open.</div></div>`;
+  const body=`<div style="overflow-x:auto;"><table class="oi-tbl"><thead><tr><th colspan="4" style="text-align:center;" class="down">CALLS</th><th></th><th colspan="4" style="text-align:center;" class="up">PUTS</th></tr>
+    <tr><th>Premium<br><span class="metric-sub">change</span></th><th>OI change</th><th>Reading</th><th>Buyers vs sellers</th><th style="text-align:center;">Strike</th><th>Premium<br><span class="metric-sub">change</span></th><th>OI change</th><th>Reading</th><th>Buyers vs sellers</th></tr></thead><tbody>${o.rows.map(r=>`<tr class="${r.atm?'oi-atm':''}">${flowSide(r.ce)}<td style="text-align:center;font-weight:700;">${r.k}${r.atm?' <span class="metric-sub">ATM</span>':''}</td>${flowSide(r.pe)}</tr>`).join('')}</tbody></table></div>`;
+  const L=o.log, lg=(n)=>{ const b=L.by[n]; if(!b||!b.n) return n+': none yet'; const d=b.m15; return n+': '+b.n+(b.n===1?' reading':' readings')+(d.n?', next 15 min the index moved the same way '+d.hit+'% of '+d.n+' (average '+(d.avg>0?'+':'')+d.avg+'%)':', not scored yet'); };
+  const log=`<div class="metric-sub" style="margin-top:8px;"><b>Logbook</b> (${o.symbol}, ${L.n?dt(L.from)+' to '+dt(L.to):'no readings yet'}): ${lg('Bullish')} &middot; ${lg('Bearish')}. Each change of verdict is logged with the index level and scored 15 and 30 minutes later, to find out whether this works.</div>`;
+  const how=`<div class="metric-sub" style="margin-top:6px;">Reading = premium and open interest together over the chosen window: <b>Buying</b> premium up, OI up &middot; <b>Writing</b> premium down, OI up &middot; <b>Covering</b> premium up, OI down &middot; <b>Unwinding</b> premium down, OI down. For puts the colours flip (put writing is bullish). <b>Buyers vs sellers</b> = total bid quantity &divide; total offer quantity in the order book, as the multiple of the larger side (4.2&times; buyers = bids are 4.2 times the offers); it is shown for reference and is not in the score, because market makers can add or pull quotes in seconds. Expiry ${esc0(o.expiry)} &middot; updated ${tm(o.at)} IST${o.market!=='open'?' (market closed: last values)':''} &middot; ${o.snaps} snapshots since ${tm(o.since)}.</div>`;
+  box.innerHTML=head+body+log+how;
+}
+(function flowInit(){ let last=0; const vis=()=>{ const p=document.getElementById('vtab-derivatives'); return p&&p.style.display!=='none'&&!document.hidden; };
+  const go=()=>{ last=Date.now(); loadFlow(); };
+  const start=()=>{ const s=document.getElementById('flowSym'), w=document.getElementById('flowWin'), b=document.getElementById('flowRefresh'); if(!s) return; s.onchange=w.onchange=go; b.onclick=go; clearInterval(flowTimer); flowTimer=setInterval(()=>{ if(vis()&&Date.now()-last>28000) go(); },2000); };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+})();
 
 function renderPeers(d){
   if(isIndexSym(d.symbol) && window.idxMembers && idxMembers(d.symbol)) return; // index: filled by renderIndexFund

@@ -1841,7 +1841,7 @@ async function getOiSnapshot(symbol, wantExpiry) {
   const lot = ((contracts || []).find(c => c.lot_size) || {}).lot_size || null;
   const chain = await upstoxGet(`/option/chain?instrument_key=${encodeURIComponent(key)}&expiry_date=${expiry}`);
   const side = o => { const m = (o && o.market_data) || {}, g = (o && o.option_greeks) || {};
-    return { oi: m.oi || 0, prevOi: m.prev_oi != null ? m.prev_oi : null, chg: m.prev_oi != null ? (m.oi || 0) - m.prev_oi : null, vol: m.volume || 0, ltp: m.ltp != null ? m.ltp : null, ltpChg: (m.ltp != null && m.close_price) ? m.ltp - m.close_price : null, iv: g.iv != null ? g.iv : null }; };
+    return { key: (o && o.instrument_key) || null, oi: m.oi || 0, prevOi: m.prev_oi != null ? m.prev_oi : null, chg: m.prev_oi != null ? (m.oi || 0) - m.prev_oi : null, vol: m.volume || 0, ltp: m.ltp != null ? m.ltp : null, ltpChg: (m.ltp != null && m.close_price) ? m.ltp - m.close_price : null, iv: g.iv != null ? g.iv : null }; };
   let spot = null;
   const strikes = (chain || []).map(r => { if (r.underlying_spot_price) spot = r.underlying_spot_price; return { strike: r.strike_price, ce: side(r.call_options), pe: side(r.put_options) }; }).filter(x => x.strike != null).sort((a, b) => a.strike - b.strike);
   if (!strikes.length) throw new Error('Upstox returned an empty option chain');
@@ -1872,6 +1872,86 @@ function oiWallFor(v, dir) {
     .sort((a, b) => oiOf(b) - oiOf(a))[0];
   return { against: !!cand, strike: cand ? cand.strike : null, distPct: cand ? Math.round(Math.abs(cand.strike / sp - 1) * 10000) / 100 : null, ratio: cand ? Math.round(oiOf(cand) / med * 10) / 10 : null, pcr: v.totals.pcr, expiry: v.expiry };
 }
+
+// ---- Option flow: buying and selling pressure at the strikes around the price (ATM and 3 strikes either side, calls and puts).
+// Every minute in market hours the server takes one snapshot per index: premium, open interest, volume and the order book (total bid and offer
+// quantity, and the 5 best levels) of those 14 contracts. A reading compares the latest snapshot with one N minutes earlier (premium and OI
+// together: buying / writing / covering / unwinding); the bid:offer quantities are shown as "N times" but kept out of the verdict because
+// market makers can add or pull quotes in seconds. Every change of verdict is logged with the index level and scored 15 and 30 minutes later.
+const FLOW_ON = process.env.OPT_FLOW !== 'off';
+const FLOW_SYMS = (process.env.FLOW_SYMBOLS || 'NIFTY,BANKNIFTY,SENSEX').split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+const FLOW_RING = 420, FLOW_SAVE = 100, flowState = {}; let flowLog = null;
+async function flowLoad(sym) { const f = flowState[sym] = flowState[sym] || { ring: [], loaded: false, n: 0 }; if (!f.loaded) { f.loaded = true; try { const v = await storeGet('store:optflow:' + sym, null); if (Array.isArray(v)) f.ring = v.filter(x => x && x.t && Date.now() - x.t < 36 * 3600e3); } catch (e) {} } return f; }
+async function flowLogLoad() { if (!flowLog) { let v = null; try { v = await storeGet('store:optflow-log', null); } catch (e) {} flowLog = { items: v && Array.isArray(v.items) ? v.items : [] }; } return flowLog; }
+async function flowSnapshot(sym) {
+  const f = await flowLoad(sym), oi = await getOiSnapshot(sym), st = oi.strikes, ai = Math.max(0, st.findIndex(x => x.strike === oi.atm)), rows = st.slice(Math.max(0, ai - 3), ai + 4);
+  const keys = []; rows.forEach(r => { if (r.ce.key) keys.push(r.ce.key); if (r.pe.key) keys.push(r.pe.key); });
+  const byKey = {}; if (keys.length) { const q = await upstoxGet('/market-quote/quotes?instrument_key=' + encodeURIComponent(keys.join(','))); Object.entries(q || {}).forEach(([k, e]) => { if (e) { if (e.instrument_token) byKey[e.instrument_token] = e; byKey[k] = e; } }); }
+  const sum = a => (Array.isArray(a) ? a : []).reduce((t, x) => t + (Number(x && x.quantity) || 0), 0);
+  const leg = c => { const e = c.key ? (byKey[c.key] || byKey[c.key.replace('|', ':')]) : null, d = (e && e.depth) || {};
+    return { l: e && e.last_price != null ? e.last_price : c.ltp, p: c.ltp != null && c.ltpChg != null ? Math.round((c.ltp - c.ltpChg) * 100) / 100 : null, o: e && e.oi != null ? e.oi : c.oi, v: e && e.volume != null ? e.volume : c.vol,
+      bq: e ? Number(e.total_buy_quantity) || 0 : 0, aq: e ? Number(e.total_sell_quantity) || 0 : 0, b5: sum(d.buy), a5: sum(d.sell) }; };
+  const snap = { t: Date.now(), spot: oi.spot, atm: oi.atm, expiry: oi.expiry, pcr: oi.totals && oi.totals.pcr, res: oi.resistance[0] && oi.resistance[0].strike, sup: oi.support[0] && oi.support[0].strike, s: rows.map(r => ({ k: r.strike, ce: leg(r.ce), pe: leg(r.pe) })) };
+  f.ring.push(snap); if (f.ring.length > FLOW_RING) f.ring.splice(0, f.ring.length - FLOW_RING);
+  if (++f.n % 5 === 0) storeSet('store:optflow:' + sym, f.ring.slice(-FLOW_SAVE)).catch(() => {});
+  return snap;
+}
+const flowX = (b, a) => { b = b || 0; a = a || 0; if (!(b > 0) && !(a > 0)) return null; if (!(a > 0)) return { x: null, who: 'buyers', note: 'no sellers quoted' }; if (!(b > 0)) return { x: null, who: 'sellers', note: 'no buyers quoted' }; return b >= a ? { x: Math.round(b / a * 10) / 10, who: 'buyers' } : { x: Math.round(a / b * 10) / 10, who: 'sellers' }; };
+// premium and OI together: Buying (premium up, OI up), Writing (premium down, OI up), Covering (premium up, OI down), Unwinding (premium down, OI down)
+function flowRead(side, lp, dp, oi, dOi) {
+  const relP = Math.abs(dp) / Math.max(lp - dp, 1), relO = Math.abs(dOi) / Math.max(oi - dOi, 1);
+  if (!(relP >= 0.01) || !(relO >= 0.005)) return { r: 'Flat', sc: 0 };
+  const r = dp > 0 ? (dOi > 0 ? 'Buying' : 'Covering') : (dOi > 0 ? 'Writing' : 'Unwinding'), base = { Buying: 1, Covering: 0.5, Writing: -1, Unwinding: -0.5 }[r];
+  return { r, sc: side === 'ce' ? base : -base }; // bullish for calls = buying; for puts the reverse
+}
+function flowView(sym, winMin) {
+  const f = flowState[sym], ring = f && f.ring; if (!ring || !ring.length) return null;
+  const cur = ring[ring.length - 1], target = cur.t - winMin * 60000; let base = null;
+  for (let i = ring.length - 1; i >= 0; i--) if (ring[i].t <= target) { base = ring[i]; break; }
+  if (!base && ring.length > 1 && cur.t - ring[0].t >= 120000) base = ring[0];
+  const bm = {}; if (base) base.s.forEach(x => bm[x.k] = x);
+  let num = 0, den = 0; const side = (k, side, c) => { const b = bm[k] && bm[k][side], dp = b && c.l != null && b.l != null ? Math.round((c.l - b.l) * 100) / 100 : null, dOi = b ? c.o - b.o : null;
+    const rd = dp != null ? flowRead(side, c.l, dp, c.o, dOi) : { r: null, sc: 0 }; if (dp != null) { num += rd.sc * Math.abs(dOi); den += Math.abs(dOi); }
+    const t = flowX(c.bq, c.aq), t5 = flowX(c.b5, c.a5);
+    return { ltp: c.l, dayChg: c.p != null && c.l != null ? Math.round((c.l - c.p) * 100) / 100 : null, dp, oi: c.o, dOi, read: rd.r, bias: rd.sc, vol: c.v, bq: c.bq, aq: c.aq, x: t && t.x, who: t && t.who, note: t && t.note, x5: t5 && t5.x, who5: t5 && t5.who }; };
+  const rows = cur.s.map(r => ({ k: r.k, atm: r.k === cur.atm, ce: side(r.k, 'ce', r.ce), pe: side(r.k, 'pe', r.pe) }));
+  const net = den > 0 ? Math.round(num / den * 100) / 100 : null, name = net == null ? null : net >= 0.3 ? 'Bullish' : net <= -0.3 ? 'Bearish' : 'Mixed';
+  const tot = sd => { let b = 0, a = 0; cur.s.forEach(r => { b += r[sd].bq || 0; a += r[sd].aq || 0; }); return { bq: b, aq: a, ...(flowX(b, a) || {}) }; };
+  return { symbol: sym, expiry: cur.expiry, spot: cur.spot, atm: cur.atm, at: cur.t, win: base ? Math.round((cur.t - base.t) / 6000) / 10 : null, wantWin: winMin, snaps: ring.length, since: ring[0].t, res: cur.res, sup: cur.sup, pcr: cur.pcr, rows, verdict: { name, net }, book: { ce: tot('ce'), pe: tot('pe') } };
+}
+async function flowLogic(sym) { // log a change of verdict, then score older entries 15 and 30 minutes on
+  const L = await flowLogLoad(), f = flowState[sym], v = flowView(sym, 15); if (!v || !f) return; const now = Date.now();
+  f.verdicts = (f.verdicts || []).concat(v.verdict.name).slice(-2); const nm = v.verdict.name;
+  if (f.verdicts.length === 2 && f.verdicts[0] === f.verdicts[1] && nm && f.stable !== nm) { if (nm !== 'Mixed') L.items.push({ t: v.at, sym, v: nm, net: v.verdict.net, spot: v.spot }); f.stable = nm; } // two snapshots in a row agree, and it differs from the last stable verdict
+  const at = (t0) => { const r = f.ring; for (let i = 0; i < r.length; i++) if (r[i].t >= t0) return r[i]; return null; };
+  L.items.forEach(e => { if (e.sym !== sym) return; for (const [k, mins] of [['m15', 15], ['m30', 30]]) if (e[k] == null && now >= e.t + mins * 60000) { const s = at(e.t + mins * 60000); if (s && s.t - (e.t + mins * 60000) < 180000 && e.spot > 0) e[k] = Math.round((s.spot / e.spot - 1) * 10000) / 100; } });
+  if (L.items.length > 300) L.items.splice(0, L.items.length - 300);
+  storeSet('store:optflow-log', L).catch(() => {});
+}
+function flowLogSummary(sym) {
+  const items = (flowLog && flowLog.items || []).filter(x => !sym || x.sym === sym), out = { n: items.length, from: items.length ? items[0].t : null, to: items.length ? items[items.length - 1].t : null, by: {} };
+  for (const nm of ['Bullish', 'Bearish']) { const g = items.filter(x => x.v === nm), sg = nm === 'Bullish' ? 1 : -1; const row = { n: g.length };
+    for (const k of ['m15', 'm30']) { const d = g.filter(x => x[k] != null); row[k] = { n: d.length, hit: d.length ? Math.round(d.filter(x => sg * x[k] > 0).length / d.length * 100) : null, avg: d.length ? Math.round(d.reduce((a, x) => a + sg * x[k], 0) / d.length * 100) / 100 : null }; }
+    out.by[nm] = row; }
+  return out;
+}
+async function flowTick() {
+  if (!FLOW_ON || !upstoxTokens().length) return; const { dow, mins } = istParts(); if (dow === 0 || dow === 6 || mins < 555 || mins > 931) return;
+  for (const sym of FLOW_SYMS) { try { await flowSnapshot(sym); await flowLogic(sym); } catch (e) { (flowState[sym] = flowState[sym] || { ring: [] }).err = e.message; } await new Promise(r => setTimeout(r, 500)); }
+}
+if (FLOW_ON) setInterval(() => { flowLogLoad().then(flowTick).catch(() => {}); }, 60000).unref();
+app.get('/api/optflow/:symbol', async (req, res) => {
+  const sym = String(req.params.symbol || '').toUpperCase(); if (!FLOW_SYMS.includes(sym)) return res.status(400).json({ error: 'option flow is kept for ' + FLOW_SYMS.join(', ') });
+  const w = [5, 15, 30].includes(Number(req.query.w)) ? Number(req.query.w) : 15;
+  try {
+    if (!upstoxTokens().length) return res.status(503).json({ error: 'Upstox is not connected', symbol: sym });
+    const f = await flowLoad(sym); await flowLogLoad();
+    if (!f.ring.length || Date.now() - f.ring[f.ring.length - 1].t > 180000) { if (!f.busy) { f.busy = true; try { await flowSnapshot(sym); } finally { f.busy = false; } } }
+    const v = flowView(sym, w); if (!v) return res.status(502).json({ error: 'no snapshot yet', symbol: sym });
+    res.json({ ...v, market: marketState(), build: BUILD, log: flowLogSummary(sym), err: f.err || null });
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, symbol: sym }); }
+});
+app.get('/api/optflow-log', async (req, res) => { await flowLogLoad(); res.json({ summary: flowLogSummary(null), items: flowLog.items.slice(-60).reverse() }); });
 app.get('/api/oi/:symbol', async (req, res) => {
   const symbol = String(req.params.symbol || '').toUpperCase().replace(/[^A-Z0-9&_-]/g, '');
   try {
@@ -2681,7 +2761,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-11-04-r70 (index options: unproven signals issue labelled paper calls again, a second try after a stop (60 minutes later), live paper probation instead of the 100-trade history bar, swing scan counters, index gap and squeeze study; early-signal study (squeeze, accumulation, relative strength, oversold pullback vs the lagging 55-day break) and the same setups tracked daily as shadow items at 15:05; options study compares premium stops 10/20/30%, index-level stop and index stop with a 50% premium floor; stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-11-04-r70 (option flow card: buying and selling pressure at ATM and 3 strikes either side with the bid-to-offer multiple and a scored logbook; index options: unproven signals issue labelled paper calls again, a second try after a stop (60 minutes later), live paper probation instead of the 100-trade history bar, swing scan counters, index gap and squeeze study; early-signal study (squeeze, accumulation, relative strength, oversold pullback vs the lagging 55-day break) and the same setups tracked daily as shadow items at 15:05; options study compares premium stops 10/20/30%, index-level stop and index stop with a 50% premium floor; stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3649,7 +3729,7 @@ app.get('/api/calls', async (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-if (process.env.CALLS_TEST_HOOKS) global.__hooks = { buildOptionCall, pickExpiry, trackCall, runIndexScan, backtestIndexCall, loadCalls, getOptionContracts, callsState };
+if (process.env.CALLS_TEST_HOOKS) global.__hooks = { flowView, flowState, flowRead, flowX, flowLogic, flowLogSummary, flowLogLoad, buildOptionCall, pickExpiry, trackCall, runIndexScan, backtestIndexCall, loadCalls, getOptionContracts, callsState };
 // Upstox daily tokens expire at 3:30 am IST; reload today's login token after a restart.
 function oauthExpiry(t) { const ist = t + 19800000, d = new Date(ist); const cut = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 3, 30); return (ist < cut ? cut : cut + 86400000) - 19800000; }
 (async () => { try { const o = await storeGet('upstox:oauth', null); if (o && o.token && Date.now() < oauthExpiry(o.t)) { process.env.UPSTOX_OAUTH_TOKEN = o.token; if (UpstoxClient) initUpstoxAuth(); console.log('Restored today\'s Upstox login token'); setTimeout(() => { try { maybeBuildGate(); } catch (e) {} }, 30000); } } catch (e) {} })();

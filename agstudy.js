@@ -282,6 +282,33 @@ function expiryStudy(bars, splitDay) {
   return out;
 }
 
+// The early-signal rules at bar k (also used live). Returns [key, direction] pairs: break (lagging control), coil, accum, rs, pull.
+function earlySigs(C, k, rng, nifty, nm) {
+  const out = [], e = C[k].c; let hi = -Infinity, lo = Infinity; for (let j = k - 55; j < k; j++) { hi = Math.max(hi, C[j].h); lo = Math.min(lo, C[j].l); }
+  const sma = (i, L) => { let t = 0; for (let j = i - L + 1; j <= i; j++) t += C[j].c; return t / L; };
+  const s50 = sma(k, 50), s50b = sma(k - 5, 50), up = e > s50 && s50 > s50b, dn = e < s50 && s50 < s50b;
+  if (e > hi) out.push(['break', 1]); if (e < lo) out.push(['break', -1]);
+  let nr7 = true; for (let j = k - 6; j < k; j++) if (rng[j] <= rng[k]) nr7 = false;
+  if (nr7) { let a10 = 0; for (let j = k - 9; j <= k; j++) a10 += rng[j]; a10 /= 10; let ge = 0, tot = 0; for (let q = k - 119; q <= k; q++) { let a = 0; for (let j = q - 9; j <= q; j++) a += rng[j]; if (a / 10 >= a10) ge++; tot++; }
+    if (ge / tot >= 0.8) { if (up && e > hi * 0.95 && e <= hi) out.push(['coil', 1]); if (dn && e < lo * 1.05 && e >= lo) out.push(['coil', -1]); } }
+  let uv = 0, dv = 0; for (let j = k - 9; j <= k; j++) { const v = C[j].v || 0; if (C[j].c >= C[j - 1].c) uv += v; else dv += v; }
+  if (uv + dv > 0) { if (uv / Math.max(dv, 1) >= 1.25 && e < hi && e >= hi * 0.97 && e > s50) out.push(['accum', 1]); if (dv / Math.max(uv, 1) >= 1.25 && e > lo && e <= lo * 1.03 && e < s50) out.push(['accum', -1]); }
+  const ni = nm.get(dayKey(C[k].t)), nj = nm.get(dayKey(C[k - 20].t));
+  if (ni !== undefined && nj !== undefined) { const nr = (nifty[ni].c / nifty[nj].c - 1) * 100, sr = (e / C[k - 20].c - 1) * 100;
+    if (sr - nr >= 5 && nr <= 1 && e >= hi * 0.96 && e <= hi) out.push(['rs', 1]); if (nr - sr >= 5 && nr >= -1 && e <= lo * 1.04 && e >= lo) out.push(['rs', -1]); }
+  let g = 0, l = 0; for (let j = k - 2; j <= k; j++) { const d = C[j].c - C[j - 1].c; if (d > 0) g += d; else l -= d; }
+  const rsi3 = l === 0 ? 100 : 100 - 100 / (1 + g / l); if (up && rsi3 < 20) out.push(['pull', 1]); if (dn && rsi3 > 80) out.push(['pull', -1]);
+  return out;
+}
+const EARLY_NAME = { coil: 'volatility squeeze', accum: 'quiet accumulation', rs: 'relative strength', pull: 'oversold pullback in uptrend' };
+// Live: today's early setups for one stock (daily bars up to and including today). Returns [{key, dir, name, atr}].
+function earlyNow(C, nifty) {
+  if (!C || C.length < 200 || !nifty || nifty.length < 30) return [];
+  const k = C.length - 1, nm = new Map(); nifty.forEach((b, i) => nm.set(dayKey(b.t), i));
+  const rng = C.map(b => (b.h - b.l) / b.c * 100); let atr = 0; for (let j = k - 13; j <= k; j++) atr += Math.max(C[j].h - C[j].l, Math.abs(C[j].h - C[j - 1].c), Math.abs(C[j].l - C[j - 1].c)); atr /= 14;
+  return earlySigs(C, k, rng, nifty, nm).filter(([key]) => key !== 'break').map(([key, dir]) => ({ key, dir, name: EARLY_NAME[key], atr }));
+}
+
 // Early-signal study: setups that fire BEFORE a move (compression, quiet accumulation, relative strength, oversold pullback in a trend)
 // compared with the lagging "break of the 55-day high/low" and with taking any day. Daily bars; stop 1.5 ATR, target 3 ATR, 10 sessions
 // (the stop is assumed first when both fall inside one day). Same cost and exit for every setup, so only the entry signal differs.
@@ -301,17 +328,7 @@ function earlyStudy(D, nifty, cost) {
       const s50 = sma(k, 50), s50b = sma(k - 5, 50), up = e > s50 && s50 > s50b, dn = e < s50 && s50 < s50b;
       const fire = (key, dir) => { if (k - (last[key + dir] === undefined ? -99 : last[key + dir]) < 5) return; last[key + dir] = k; const o = outcome(C, k, dir, stopPct, 2 * stopPct, cost); put(key, LBL[key], dir > 0 ? 'BUY' : 'SELL', C[k].t, o.ret); };
       if (k % 3 === 0) { fire('any', 1); fire('any', -1); }
-      if (e > hi) fire('break', 1); if (e < lo) fire('break', -1);
-      let nr7 = true; for (let j = k - 6; j < k; j++) if (rng[j] <= rng[k]) nr7 = false;
-      if (nr7) { let a10 = 0; for (let j = k - 9; j <= k; j++) a10 += rng[j]; a10 /= 10; let ge = 0, tot = 0; for (let q = k - 119; q <= k; q++) { let a = 0; for (let j = q - 9; j <= q; j++) a += rng[j]; if (a / 10 >= a10) ge++; tot++; }
-        if (ge / tot >= 0.8) { if (up && e > hi * 0.95 && e <= hi) fire('coil', 1); if (dn && e < lo * 1.05 && e >= lo) fire('coil', -1); } }
-      let uv = 0, dv = 0; for (let j = k - 9; j <= k; j++) { const v = C[j].v || 0; if (C[j].c >= C[j - 1].c) uv += v; else dv += v; }
-      if (uv + dv > 0) { if (uv / Math.max(dv, 1) >= 1.25 && e < hi && e >= hi * 0.97 && e > s50) fire('accum', 1); if (dv / Math.max(uv, 1) >= 1.25 && e > lo && e <= lo * 1.03 && e < s50) fire('accum', -1); }
-      const ni = nm.get(dayKey(C[k].t)), nj = nm.get(dayKey(C[k - 20].t));
-      if (ni !== undefined && nj !== undefined) { const nr = (nifty[ni].c / nifty[nj].c - 1) * 100, sr = (e / C[k - 20].c - 1) * 100;
-        if (sr - nr >= 5 && nr <= 1 && e >= hi * 0.96 && e <= hi) fire('rs', 1); if (nr - sr >= 5 && nr >= -1 && e <= lo * 1.04 && e >= lo) fire('rs', -1); }
-      let g = 0, l = 0; for (let j = k - 2; j <= k; j++) { const d = C[j].c - C[j - 1].c; if (d > 0) g += d; else l -= d; }
-      const rsi3 = l === 0 ? 100 : 100 - 100 / (1 + g / l); if (up && rsi3 < 20) fire('pull', 1); if (dn && rsi3 > 80) fire('pull', -1);
+      earlySigs(C, k, rng, nifty, nm).forEach(([key, dir]) => fire(key, dir));
     }
   });
   const vr = x => { const mu = avg_(x); return x.length > 1 ? x.reduce((s, y) => s + (y - mu) ** 2, 0) / (x.length - 1) : 0; };
@@ -323,4 +340,4 @@ function earlyStudy(D, nifty, cost) {
   return { rows, stocks: Object.keys(D).length, from: nifty[0].t, to: nifty[nifty.length - 1].t };
 }
 
-module.exports = { earlyStudy, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };
+module.exports = { earlyStudy, earlyNow, EARLY_NAME, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };

@@ -2590,7 +2590,7 @@ async function runCallsCycle(force) {
       }
       // never two open calls on one stock (blocks opposite-direction conflicts and doubling up); cool-off after a close
       if (db.some(c => !c.manual && c.symbol === f.symbol && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400)))) continue;
-      if (shadow && (db.some(c => srcOf(c) === 'shadow' && c.symbol === f.symbol && c.mode === f.mode && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400))) || db.filter(c => srcOf(c) === 'shadow' && c.mode === f.mode && dayNo(c.t) === today).length >= SHADOW_MAX_DAY)) continue;
+      if (shadow && (db.some(c => srcOf(c) === 'shadow' && !isEarly(c) && c.symbol === f.symbol && c.mode === f.mode && (!c.closed || nowSec - (c.closedAt || c.t) < (f.mode === 'intraday' ? 86400 : 5 * 86400))) || db.filter(c => srcOf(c) === 'shadow' && !isEarly(c) && c.mode === f.mode && dayNo(c.t) === today).length >= SHADOW_MAX_DAY)) continue;
       let ltp = null; try { const q = await getUpstoxLTPC(await dataKeyFor(f.symbol)); ltp = q.price; } catch (e) { continue; }
       if (ltp == null || Math.abs(ltp - f.entry) > 0.5 * f.atr) continue; // stale: price has already run away
       // swing signals come from yesterday's close; skip when today's price is already moving against the idea
@@ -2680,7 +2680,7 @@ app.get('/api/global-quotes', async (req, res) => {
   res.json(globalCache.data);
 });
 
-const BUILD = '2026-11-04-r69 (early-signal study: compression, accumulation, relative strength and oversold-pullback setups against the lagging 55-day break; options study compares premium stops 10/20/30%, index-level stop and index stop with a 50% premium floor; stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
+const BUILD = '2026-11-04-r69 (early-signal study (squeeze, accumulation, relative strength, oversold pullback vs the lagging 55-day break) and the same setups tracked daily as shadow items at 15:05; options study compares premium stops 10/20/30%, index-level stop and index stop with a 50% premium floor; stricter proof bar: 100 trades, newer-half test, live probation, proven/unproven tag in summaries; filters no longer block calls: blocked ones are tracked as shadow items; stop-ladder study; Agreement run log with reasons; clear entry/exit on closed items; Intraday pattern card toggles 5m/15m with auto fallback; index chart Volume shows futures volume; chart patterns on 5 and 15-minute index candles; research studies: momentum, gap reversal, expiry days; stop after Target 1 locks half the risk; gap-through stops fill at the open; no unproven intraday on flat days; Fin Nifty, Midcap Nifty and Bankex on the ticker; expiry day on the Indian index ticker; IST date and time on the global bar; studies: stock targets by market type and entry filters; index options target study; stop after T1 at entry plus costs; alert sound once)';
 // Walk-forward backtest of the swing engine on ~1 year of daily bars for the call universe.
 // Runs in the background (first run takes a minute or two); poll the same URL for the result.
 const yieldLoop = () => new Promise(r => setImmediate(r));
@@ -3334,13 +3334,40 @@ app.post('/api/agreement/run', async (req, res) => { if (!(req.body && req.body.
 // every real run is kept (last 40) so the page can show proof that the scan ran, how many stocks it checked and what happened to each signal
 async function agLogRun(r) { try { const day = new Date(r.at + 19800000).toISOString().slice(0, 10), list = await storeGet('store:agreement-runs', []); await storeSet('store:agreement-runs', [{ ...r, day }, ...(Array.isArray(list) ? list : [])].slice(0, 40)); } catch (e) {} }
 app.get('/api/agreement/runs', async (req, res) => { try { res.json({ runs: await storeGet('store:agreement-runs', []), state: agState }); } catch (e) { res.status(500).json({ error: e.message }); } });
+const isEarly = c => typeof c.shadowKey === 'string' && c.shadowKey.startsWith('early|');
+const EARLY_MAX_DAY = Number(process.env.EARLY_MAX_DAY) || 12; // early-signal shadow items added per day (EARLY_SHADOW=off turns the scan off)
+// Early-signal shadow items: setups that fire BEFORE a move (agstudy.earlySigs). Tracked like any call, but they send no alert, take no sizing and stay out of the caps
+// and the stats; their results build a record per setup (shadowKey early|setup|side) that the proof bar and the early-signal study can be judged against.
+async function runEarly(cache) {
+  if (process.env.EARLY_SHADOW === 'off') return { off: true };
+  const St = require('./agstudy'), res = { scanned: 0, found: 0, added: [], skipped: 0 };
+  const nifty = toBars(await getUpstoxCandles('NIFTY', '1D')).filter(x => x.c > 0), db = await loadCalls(), now = Math.floor(Date.now() / 1000), day = Math.floor((now + 19800) / 86400);
+  let room = EARLY_MAX_DAY - db.filter(c => isEarly(c) && Math.floor((c.t + 19800) / 86400) === day).length;
+  for (const sym of FNO_FALLBACK) {
+    const C = cache[sym]; if (!C) continue; res.scanned++;
+    for (const s of St.earlyNow(C, nifty)) {
+      res.found++; const side = s.dir > 0 ? 'BUY' : 'SELL', skey = 'early|' + s.key + '|' + side;
+      if (room <= 0 || db.some(c => isEarly(c) && c.symbol === sym && c.shadowKey === skey && (!c.closed || now - (c.closedAt || c.t) < 5 * 86400))) { res.skipped++; continue; }
+      try {
+        const q = await getUpstoxLTPC(await dataKeyFor(sym)), ltp = q.price; if (!(ltp > 0) || !(s.atr > 0)) { res.skipped++; continue; }
+        const tk = x => Math.round(x * 20) / 20, risk = 1.5 * s.atr, sl = ltp - s.dir * risk;
+        db.push({ id: 'shadow-early-' + sym + '-' + s.key + '-' + now, symbol: sym, side, mode: 'swing', source: 'shadow', manual: true, shadowKey: skey, label: 'Early: ' + s.name, entry: tk(ltp), sl: tk(sl), targets: [tk(ltp + s.dir * risk), tk(ltp + s.dir * 2 * risk)],
+          riskLabel: (risk / ltp * 100).toFixed(1) + '% risk', riskPct: Math.round(risk / ltp * 1000) / 10, score: null, setup: 'manual', engine: 'manual', costPct: Calls.costPct('swing'),
+          analysis: 'Early-signal shadow item (' + s.name + '), found before any 55-day break. Tracked only: no alert, no sizing. Stop 1.5 ATR, targets 1R and 2R.', t: now, status: 'ACTIVE', targetsHit: 0, activeSl: tk(sl), ltp, exit: null, pnlPct: 0, closed: false });
+        res.added.push(sym + ' ' + side + ' ' + s.key); room--;
+      } catch (e) { res.skipped++; }
+    }
+  }
+  if (res.added.length) { if (db.length > CALLS_MAX) db.splice(0, db.length - CALLS_MAX); await saveCalls(); }
+  return res;
+}
 async function runAgreement(opts = {}) {
   const E = Engines.load(); if (!E) throw new Error('browser engines failed to load: ' + Engines.error());
   if (agState.running) return { busy: true }; agState.running = true;
-  const t0 = Date.now(), { v, passed } = await agRule(), out = []; let scanned = 0, noData = 0;
+  const t0 = Date.now(), { v, passed } = await agRule(), out = []; let scanned = 0, noData = 0; const histCache = {};
   try {
     for (const sym of FNO_FALLBACK) {
-      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { scanned++; const r = agEval(E, sym, C, v); if (Math.abs(r.a) >= v.N) out.push(r); } else noData++; } catch (e) { noData++; }
+      try { const C = (await getHistUpstox(sym, 400)).filter(x => x.c > 0); if (C.length >= 200) { scanned++; histCache[sym] = C; const r = agEval(E, sym, C, v); if (Math.abs(r.a) >= v.N) out.push(r); } else noData++; } catch (e) { noData++; }
       await new Promise(r => setImmediate(r));
     }
     out.sort((p, q) => Math.abs(q.a) - Math.abs(p.a) || (q.a > 0 ? (q.score || 0) - (p.score || 0) : (p.score || 0) - (q.score || 0)));
@@ -3367,7 +3394,7 @@ async function runAgreement(opts = {}) {
       }
     }
     agState.last = { at: Date.now(), tookS: Math.round((Date.now() - t0) / 1000), rule: v.key, passed, dry: !!opts.dry, found: out.map(r => ({ sym: r.sym, a: r.a, sig: r.sigLabel, pattern: r.pt ? (r.pt.d > 0 ? '▲ ' : r.pt.d < 0 ? '▼ ' : '') + r.pt.name : null, breakout: r.bk && r.bk.type === 'break' ? (r.bk.d > 0 ? '▲ ' : '▼ ') + r.bk.name : null, weekly: r.w || 0, ...(why[r.sym] || (opts.dry ? { st: 'dry', why: 'dry run: nothing added' } : {})) })), added, skipped, scanned, noData, total: FNO_FALLBACK.length };
-    if (!opts.dry) await agLogRun(agState.last);
+    if (!opts.dry) { try { agState.last.early = await runEarly(histCache); } catch (x) { agState.last.early = { err: x.message }; } await agLogRun(agState.last); }
     return agState.last;
   } finally { agState.running = false; }
 }

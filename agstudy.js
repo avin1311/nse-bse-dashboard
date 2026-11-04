@@ -282,4 +282,45 @@ function expiryStudy(bars, splitDay) {
   return out;
 }
 
-module.exports = { momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };
+// Early-signal study: setups that fire BEFORE a move (compression, quiet accumulation, relative strength, oversold pullback in a trend)
+// compared with the lagging "break of the 55-day high/low" and with taking any day. Daily bars; stop 1.5 ATR, target 3 ATR, 10 sessions
+// (the stop is assumed first when both fall inside one day). Same cost and exit for every setup, so only the entry signal differs.
+function earlyStudy(D, nifty, cost) {
+  const nm = new Map(); nifty.forEach((b, i) => nm.set(dayKey(b.t), i));
+  const acc = {}, put = (key, label, side, t, ret) => { const a = acc[key + '|' + side] || (acc[key + '|' + side] = { key, label, side, r: [] }); a.r.push({ t, ret }); };
+  const LBL = { any: 'Any day (baseline)', break: 'LAGGING: breaks the 55-day high/low today', coil: 'EARLY: volatility squeeze (narrowest day of 7, ATR in lowest 20% of 120 days) in trend direction, near the 55-day extreme',
+    accum: 'EARLY: quiet accumulation (10-day up/down volume ratio 1.25+) still 1-3% short of the 55-day extreme', rs: 'EARLY: relative strength (20-day return 5%+ ahead of Nifty while Nifty is flat/down) within 4% of the extreme',
+    pull: 'EARLY: oversold pullback inside an uptrend (3-day RSI under 20 above a rising 50-day average)' };
+  Object.keys(D).forEach(sym => {
+    const C = D[sym], n = C.length, last = {}; if (n < 200) return;
+    const tr = C.map((b, i) => i ? Math.max(b.h - b.l, Math.abs(b.h - C[i - 1].c), Math.abs(b.l - C[i - 1].c)) : b.h - b.l);
+    const rng = C.map(b => (b.h - b.l) / b.c * 100), sma = (i, L) => { let s = 0; for (let j = i - L + 1; j <= i; j++) s += C[j].c; return s / L; };
+    for (let k = 130; k < n - HOLD - 1; k++) {
+      let atr = 0; for (let j = k - 13; j <= k; j++) atr += tr[j]; atr /= 14; const stopPct = 1.5 * atr / C[k].c * 100; if (!(stopPct > 0.3)) continue;
+      const e = C[k].c; let hi = -Infinity, lo = Infinity; for (let j = k - 55; j < k; j++) { hi = Math.max(hi, C[j].h); lo = Math.min(lo, C[j].l); }
+      const s50 = sma(k, 50), s50b = sma(k - 5, 50), up = e > s50 && s50 > s50b, dn = e < s50 && s50 < s50b;
+      const fire = (key, dir) => { if (k - (last[key + dir] === undefined ? -99 : last[key + dir]) < 5) return; last[key + dir] = k; const o = outcome(C, k, dir, stopPct, 2 * stopPct, cost); put(key, LBL[key], dir > 0 ? 'BUY' : 'SELL', C[k].t, o.ret); };
+      if (k % 3 === 0) { fire('any', 1); fire('any', -1); }
+      if (e > hi) fire('break', 1); if (e < lo) fire('break', -1);
+      let nr7 = true; for (let j = k - 6; j < k; j++) if (rng[j] <= rng[k]) nr7 = false;
+      if (nr7) { let a10 = 0; for (let j = k - 9; j <= k; j++) a10 += rng[j]; a10 /= 10; let ge = 0, tot = 0; for (let q = k - 119; q <= k; q++) { let a = 0; for (let j = q - 9; j <= q; j++) a += rng[j]; if (a / 10 >= a10) ge++; tot++; }
+        if (ge / tot >= 0.8) { if (up && e > hi * 0.95 && e <= hi) fire('coil', 1); if (dn && e < lo * 1.05 && e >= lo) fire('coil', -1); } }
+      let uv = 0, dv = 0; for (let j = k - 9; j <= k; j++) { const v = C[j].v || 0; if (C[j].c >= C[j - 1].c) uv += v; else dv += v; }
+      if (uv + dv > 0) { if (uv / Math.max(dv, 1) >= 1.25 && e < hi && e >= hi * 0.97 && e > s50) fire('accum', 1); if (dv / Math.max(uv, 1) >= 1.25 && e > lo && e <= lo * 1.03 && e < s50) fire('accum', -1); }
+      const ni = nm.get(dayKey(C[k].t)), nj = nm.get(dayKey(C[k - 20].t));
+      if (ni !== undefined && nj !== undefined) { const nr = (nifty[ni].c / nifty[nj].c - 1) * 100, sr = (e / C[k - 20].c - 1) * 100;
+        if (sr - nr >= 5 && nr <= 1 && e >= hi * 0.96 && e <= hi) fire('rs', 1); if (nr - sr >= 5 && nr >= -1 && e <= lo * 1.04 && e >= lo) fire('rs', -1); }
+      let g = 0, l = 0; for (let j = k - 2; j <= k; j++) { const d = C[j].c - C[j - 1].c; if (d > 0) g += d; else l -= d; }
+      const rsi3 = l === 0 ? 100 : 100 - 100 / (1 + g / l); if (up && rsi3 < 20) fire('pull', 1); if (dn && rsi3 > 80) fire('pull', -1);
+    }
+  });
+  const vr = x => { const mu = avg_(x); return x.length > 1 ? x.reduce((s, y) => s + (y - mu) ** 2, 0) / (x.length - 1) : 0; };
+  const rows = Object.values(acc).map(a => {
+    const r = a.r.sort((x, y) => x.t - y.t), m = Math.floor(r.length / 2), od = r.slice(0, m).map(x => x.ret), nv = r.slice(m).map(x => x.ret);
+    const w = r.filter(x => x.ret > 0), ls = r.filter(x => x.ret <= 0), t = nv.length > 2 && vr(nv) > 0 ? avg_(nv) / Math.sqrt(vr(nv) / nv.length) : null;
+    return { key: a.key, label: a.label, side: a.side, n: r.length, from: r[0].t, to: r[r.length - 1].t, win: Math.round(w.length / r.length * 100), avg: r2_(avg_(r.map(x => x.ret))), avgWin: r2_(avg_(w.map(x => x.ret)) || 0), avgLoss: r2_(avg_(ls.map(x => x.ret)) || 0), older: r2_(avg_(od)), newer: r2_(avg_(nv)), newerT: t === null ? null : r2_(t) };
+  }).sort((x, y) => (y.newer === null ? -99 : y.newer) - (x.newer === null ? -99 : x.newer));
+  return { rows, stocks: Object.keys(D).length, from: nifty[0].t, to: nifty[nifty.length - 1].t };
+}
+
+module.exports = { earlyStudy, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };

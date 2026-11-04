@@ -364,4 +364,44 @@ function indexEarly(bars, cost) {
   return { rows, bars: n, from: bars[0].t, to: bars[n - 1].t };
 }
 
-module.exports = { indexEarly, earlyStudy, earlyNow, EARLY_NAME, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };
+// Regime / confluence / exit study. Same setups as earlyStudy, each split by the Nifty regime on the signal day (up: above a rising 50-day average,
+// down: below a falling one, flat: otherwise), plus "confl" (2+ different early setups on the same side within 5 sessions) and three exits:
+// std (1.5 ATR stop, 3 ATR target, 10 sessions), h5 (same, 5 sessions) and recover (1.5 ATR stop, leave at the first close back through the 5-day average, 10 sessions max).
+// "matched" = long setups only when Nifty is up and short setups only when it is down. Cost is the swing cost for every row.
+function exitVariant(C, k, dir, stopPct, cost, v) {
+  const e = C[k].c, st = e * (1 - dir * stopPct / 100), tg = e * (1 + dir * 2 * stopPct / 100), end = Math.min(C.length - 1, k + (v === 'h5' ? 5 : HOLD));
+  for (let j = k + 1; j <= end; j++) {
+    const b = C[j]; if (dir > 0 ? b.l <= st : b.h >= st) return -stopPct - cost;
+    if (v !== 'recover' && (dir > 0 ? b.h >= tg : b.l <= tg)) return 2 * stopPct - cost;
+    if (v === 'recover' && j > k + 1) { let m = 0; for (let q = j - 4; q <= j; q++) m += C[q].c; m /= 5; if (dir > 0 ? b.c > m : b.c < m) return dir * (b.c - e) / e * 100 - cost; }
+  }
+  return dir * (C[end].c - e) / e * 100 - cost;
+}
+function regimeStudy(D, nifty, cost) {
+  const nm = new Map(); nifty.forEach((b, i) => nm.set(dayKey(b.t), i));
+  const nreg = nifty.map((b, i) => { if (i < 56) return 'flat'; let a = 0, bb = 0; for (let j = i - 49; j <= i; j++) a += nifty[j].c; for (let j = i - 54; j <= i - 5; j++) bb += nifty[j].c; a /= 50; bb /= 50; return b.c > a && a > bb ? 'up' : b.c < a && a < bb ? 'down' : 'flat'; });
+  const acc = {}, put = (key, side, reg, v, t, ret) => { const id = key + '|' + side + '|' + reg + '|' + v; (acc[id] || (acc[id] = { key, side, reg, v, r: [] })).r.push({ t, ret }); };
+  const VAR = ['std', 'h5', 'recover'];
+  Object.keys(D).forEach(sym => {
+    const C = D[sym], n = C.length, last = {}, recent = []; if (n < 200) return;
+    const tr = C.map((b, i) => i ? Math.max(b.h - b.l, Math.abs(b.h - C[i - 1].c), Math.abs(b.l - C[i - 1].c)) : b.h - b.l), rng = C.map(b => (b.h - b.l) / b.c * 100);
+    for (let k = 130; k < n - HOLD - 1; k++) {
+      let atr = 0; for (let j = k - 13; j <= k; j++) atr += tr[j]; atr /= 14; const stopPct = 1.5 * atr / C[k].c * 100; if (!(stopPct > 0.3)) continue;
+      const ni = nm.get(dayKey(C[k].t)); if (ni === undefined) continue; const reg = nreg[ni];
+      const sigs = earlySigs(C, k, rng, nifty, nm), fire = (key, dir) => {
+        if (k - (last[key + dir] === undefined ? -99 : last[key + dir]) < 5) return; last[key + dir] = k; const side = dir > 0 ? 'BUY' : 'SELL';
+        VAR.forEach(v => { const ret = exitVariant(C, k, dir, stopPct, cost, v); put(key, side, 'all', v, C[k].t, ret); put(key, side, reg, v, C[k].t, ret); if ((dir > 0 && reg === 'up') || (dir < 0 && reg === 'down')) put(key, side, 'matched', v, C[k].t, ret); }); };
+      if (k % 3 === 0) { fire('any', 1); fire('any', -1); }
+      sigs.forEach(([key, dir]) => { fire(key, dir); if (key !== 'break') recent.push({ k, key, dir }); });
+      while (recent.length && recent[0].k < k - 5) recent.shift();
+      [1, -1].forEach(dir => { const ks = new Set(recent.filter(x => x.dir === dir).map(x => x.key)); if (ks.size >= 2 && sigs.some(([key, d]) => d === dir && key !== 'break')) fire('confl', dir); });
+    }
+  });
+  const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null, vr = x => { const m = mean(x); return x.length > 1 ? x.reduce((s, y) => s + (y - m) ** 2, 0) / (x.length - 1) : 0; };
+  const rows = Object.values(acc).filter(a => a.r.length >= 30).map(a => { const r = a.r.sort((x, y) => x.t - y.t), m = Math.floor(r.length / 2), od = r.slice(0, m).map(x => x.ret), nv = r.slice(m).map(x => x.ret);
+    return { key: a.key, side: a.side, regime: a.reg, exit: a.v, n: r.length, from: r[0].t, to: r[r.length - 1].t, win: Math.round(r.filter(x => x.ret > 0).length / r.length * 100), avg: r2_(mean(r.map(x => x.ret))), older: r2_(mean(od)), newer: r2_(mean(nv)), newerT: nv.length > 2 && vr(nv) > 0 ? r2_(mean(nv) / Math.sqrt(vr(nv) / nv.length)) : null, both: mean(od) > 0 && mean(nv) > 0 }; })
+    .sort((x, y) => (y.newer === null ? -99 : y.newer) - (x.newer === null ? -99 : x.newer));
+  return { rows, stocks: Object.keys(D).length, from: nifty[0].t, to: nifty[nifty.length - 1].t };
+}
+
+module.exports = { regimeStudy, indexEarly, earlyStudy, earlyNow, EARLY_NAME, momentumStudy, gapStudy, expiryStudy, study, aggregate, VARIANTS, LIM, targetStudy, aggregateTargets, niftyMap, targetStudy2, aggregateTargets2, optStudy, aggregateOpt };
